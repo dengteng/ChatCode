@@ -1,0 +1,28 @@
+# deps & build
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+
+# os
+.DS_Store
+
+# local session data (若哪天挪进项目目录)
+.chat-code/
+
+# env / secrets
+.env
+.env.*
+*.local
+
+# tauri 打包时由 npm run build:sidecar 生成
+src-tauri/resources/
+
+# 设计 skill 工具——外部工具,不入库。整个 skills/ 都是指向 .agents/ 的软链,
+# 跟踪进仓库对 clone 下来的人是一堆死链,还暴露本机 AI 工具链布局。
+.agents/
+.codex/
+.claude/skills/
+
+# 本地代码索引工具的产物
+.codegraph/

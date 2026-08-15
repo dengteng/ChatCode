@@ -1,0 +1,348 @@
+{
+  "schema_version": 1,
+  "mode": "architecture",
+  "template_type": "architecture",
+  "style": 10,
+  "semantic_profile": "cloud-fabric",
+  "diagram_type": "deployment",
+  "platform_profile": "provider-neutral",
+  "deployment_mode": "LOCAL–FIRST",
+  "icon_manifest_version": "2026.07-neutral.1",
+  "quality_profile": "showcase",
+  "width": 1588,
+  "height": 940,
+  "title": "ChatCode系统架构",
+  "subtitle": "",
+  "containers": [
+    {
+      "id": "host",
+      "deployment_kind": "region",
+      "x": 30,
+      "y": 90,
+      "width": 1098,
+      "height": 728,
+      "label": "本机 macOS（loopback 内）"
+    },
+    {
+      "id": "app",
+      "deployment_kind": "network",
+      "parent": "host",
+      "x": 54,
+      "y": 140,
+      "width": 370,
+      "height": 250,
+      "label": "ChatCode.app 进程"
+    },
+    {
+      "id": "sidecar",
+      "deployment_kind": "network",
+      "parent": "host",
+      "x": 480,
+      "y": 140,
+      "width": 624,
+      "height": 658,
+      "label": "sidecar Node 进程"
+    },
+    {
+      "id": "disk",
+      "deployment_kind": "network",
+      "parent": "host",
+      "x": 54,
+      "y": 422,
+      "width": 370,
+      "height": 376,
+      "label": "~/.chat-code 本地磁盘"
+    },
+    {
+      "id": "outside",
+      "deployment_kind": "global",
+      "x": 1160,
+      "y": 388,
+      "width": 398,
+      "height": 398,
+      "label": "外部服务"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "webview",
+      "kind": "cloud_service",
+      "deployment_kind": "compute",
+      "deployment_id": "app",
+      "icon_id": "generic:compute",
+      "provider": "Tauri",
+      "x": 84,
+      "y": 182,
+      "width": 310,
+      "height": 72,
+      "label": "WebView 前端",
+      "sublabel": "React · store.tsx"
+    },
+    {
+      "id": "rust",
+      "kind": "cloud_service",
+      "deployment_kind": "compute",
+      "deployment_id": "app",
+      "icon_id": "generic:gateway",
+      "provider": "Rust",
+      "x": 84,
+      "y": 298,
+      "width": 310,
+      "height": 72,
+      "label": "Rust 原生层",
+      "sublabel": "spawn sidecar · 发令牌"
+    },
+    {
+      "id": "bridge",
+      "kind": "cloud_service",
+      "deployment_kind": "gateway",
+      "deployment_id": "sidecar",
+      "icon_id": "generic:gateway",
+      "provider": "ws",
+      "x": 510,
+      "y": 170,
+      "width": 564,
+      "height": 96,
+      "label": "WebSocket 桥 :8976",
+      "sublabel": "会话路由 · 历史回放 · blob_get"
+    },
+    {
+      "id": "sdk",
+      "kind": "cloud_service",
+      "deployment_kind": "compute",
+      "deployment_id": "sidecar",
+      "icon_id": "generic:compute",
+      "provider": "Agent SDK",
+      "x": 510,
+      "y": 426,
+      "width": 564,
+      "height": 96,
+      "label": "SDK query（每会话一个）",
+      "sublabel": "Claude · DeepSeek · Kimi · GLM · Qwen · MiniMax"
+    },
+    {
+      "id": "proxy",
+      "kind": "cloud_service",
+      "deployment_kind": "gateway",
+      "deployment_id": "sidecar",
+      "icon_id": "generic:gateway",
+      "provider": "http",
+      "x": 510,
+      "y": 682,
+      "width": 564,
+      "height": 96,
+      "label": "Anthropic→OpenAI 转译代理",
+      "sublabel": "Grok · OpenAI Codex · Gemini"
+    },
+    {
+      "id": "sessions",
+      "kind": "cloud_service",
+      "deployment_kind": "database",
+      "deployment_id": "disk",
+      "icon_id": "generic:database",
+      "provider": "jsonl",
+      "x": 84,
+      "y": 588,
+      "width": 310,
+      "height": 72,
+      "label": "sessions/*.jsonl",
+      "sublabel": "回放用日志（已去噪）"
+    },
+    {
+      "id": "blobs",
+      "kind": "cloud_service",
+      "deployment_kind": "database",
+      "deployment_id": "disk",
+      "icon_id": "generic:database",
+      "provider": "sha1",
+      "x": 84,
+      "y": 704,
+      "width": 310,
+      "height": 72,
+      "label": "blobs/ + thumbs/",
+      "sublabel": "内容寻址 · 天然去重"
+    },
+    {
+      "id": "state",
+      "kind": "cloud_service",
+      "deployment_kind": "database",
+      "deployment_id": "disk",
+      "icon_id": "generic:database",
+      "provider": "json",
+      "x": 84,
+      "y": 472,
+      "width": 310,
+      "height": 72,
+      "label": "index / settings.json",
+      "sublabel": "会话索引 · 分组 · 偏好"
+    },
+    {
+      "id": "anth-msg",
+      "kind": "cloud_service",
+      "deployment_kind": "edge",
+      "deployment_id": "outside",
+      "icon_id": "generic:traffic",
+      "provider": "Anthropic",
+      "x": 1190,
+      "y": 438,
+      "width": 338,
+      "height": 72,
+      "label": "Anthropic 协议端点",
+      "sublabel": "官方 + 第三方兼容端点"
+    },
+    {
+      "id": "upstream",
+      "kind": "cloud_service",
+      "deployment_kind": "edge",
+      "deployment_id": "outside",
+      "icon_id": "generic:traffic",
+      "provider": "OpenAI 兼容",
+      "x": 1190,
+      "y": 694,
+      "width": 338,
+      "height": 72,
+      "label": "OpenAI 协议端点",
+      "sublabel": "转译后打上游"
+    }
+  ],
+  "arrows": [
+    {
+      "id": "ipc",
+      "source": "webview",
+      "target": "rust",
+      "source_port": "bottom",
+      "target_port": "top",
+      "flow": "control",
+      "label": "Tauri IPC",
+      "label_style": "offset"
+    },
+    {
+      "id": "ws",
+      "source": "webview",
+      "target": "bridge",
+      "source_port": "right",
+      "target_port": "left",
+      "flow": "read",
+      "via": "ws://127.0.0.1:8976 + 启动令牌",
+      "label": "会话消息",
+      "label_style": "offset",
+      "label_dy": -14
+    },
+    {
+      "id": "spawn-query",
+      "source": "bridge",
+      "target": "sdk",
+      "source_port": "bottom",
+      "target_port": "top",
+      "flow": "control",
+      "label": "每会话起一个 query",
+      "label_style": "offset"
+    },
+    {
+      "id": "to-proxy",
+      "source": "sdk",
+      "target": "proxy",
+      "source_port": "bottom",
+      "target_port": "top",
+      "flow": "read",
+      "label": "非 Anthropic provider",
+      "label_style": "offset"
+    },
+    {
+      "id": "w1-log",
+      "source": "sdk",
+      "target": "sessions",
+      "source_port": "left",
+      "target_port": "right",
+      "flow": "write",
+      "via": "appendLog · 白名单过滤",
+      "label": "追加 JSONL",
+      "label_style": "offset",
+      "label_dy": 16,
+      "route_points": [
+        [
+          462,
+          474
+        ],
+        [
+          462,
+          624
+        ]
+      ]
+    },
+    {
+      "id": "w2-blob",
+      "source": "sessions",
+      "target": "blobs",
+      "source_port": "bottom",
+      "target_port": "top",
+      "flow": "write",
+      "label": "只存引用",
+      "label_style": "offset"
+    },
+    {
+      "id": "msg",
+      "source": "sdk",
+      "target": "anth-msg",
+      "source_port": "right",
+      "target_port": "left",
+      "flow": "read",
+      "via": "HTTPS 出网",
+      "label": "模型请求",
+      "label_style": "offset",
+      "label_dy": -14
+    },
+    {
+      "id": "third",
+      "source": "proxy",
+      "target": "upstream",
+      "source_port": "right",
+      "target_port": "left",
+      "flow": "read",
+      "via": "本地转译后出网",
+      "label": "OpenAI 协议",
+      "label_style": "offset",
+      "label_dy": -14
+    },
+    {
+      "id": "s0-state",
+      "source": "bridge",
+      "target": "state",
+      "source_port": "bottom-left",
+      "target_port": "right",
+      "flow": "write",
+      "via": "读写 JSON",
+      "route_points": [
+        [
+          442,
+          266
+        ],
+        [
+          442,
+          508
+        ]
+      ]
+    }
+  ],
+  "legend_orientation": "vertical",
+  "legend_x": 1190,
+  "legend_y": 200,
+  "legend_locked": true,
+  "legend": [
+    {
+      "flow": "read",
+      "label": "请求链路"
+    },
+    {
+      "flow": "write",
+      "label": "本地落盘"
+    },
+    {
+      "flow": "control",
+      "label": "进程/会话控制"
+    }
+  ],
+  "footer": "除两条出网链路外，全部数据留在本机",
+  "footer_x": 1190,
+  "footer_y": 340
+}

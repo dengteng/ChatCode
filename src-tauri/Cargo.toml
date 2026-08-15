@@ -1,0 +1,22 @@
+[package]
+name = "chat-code"
+# 版本号四处保持一致:这里 / tauri.conf.json / package.json / src/cloud.ts 的 APP_VERSION
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["devtools"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-http = "=2.2.0"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSUserDefaults", "NSString"] }
+
+[[bin]]
+name = "chat-code"
+path = "src/main.rs"

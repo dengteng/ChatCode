@@ -1,0 +1,19 @@
+{
+  "$schema": "https://schemas.tauri.app/config/2/capabilities",
+  "identifier": "default",
+  "description": "Default capability for the main window and the pop-out windows (image viewer / file editor). HTTP scope 放开到任意 https:云服务地址由用户在设置里自填(app 不内置默认域名,见 src/cloud.ts),无法预先枚举成白名单;明文 http 明确 deny。",
+  "windows": ["main", "editor-*", "image-*"],
+  "permissions": [
+    "core:default",
+    "core:webview:default",
+    "core:webview:allow-webview-position",
+    "core:webview:allow-webview-size",
+    "core:webview:allow-create-webview-window",
+    "core:window:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-set-theme",
+    "core:window:allow-set-focus",
+    "core:window:allow-close",
+    { "identifier": "http:default", "allow": [{ "url": "https://*/*" }], "deny": [{ "url": "http://*/*" }] }
+  ]
+}

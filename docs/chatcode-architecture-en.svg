@@ -1,0 +1,249 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1588 848" width="1588" height="848" data-generator="fireworks-tech-graph" data-schema-version="1" data-text-metrics="heuristic-v1" data-style-id="10" data-visual-theme="Cloud Fabric" data-diagram-type="deployment" data-motion-scene="" data-semantic-profile="cloud-fabric" data-semantic-valid="true" data-quality-profile="showcase" data-max-bends-per-edge="2" data-max-total-bends="8" data-max-route-stretch="1.35" data-max-bridged-crossings="0" data-min-node-gap="40.0" data-min-container-gutter="20.0" data-min-label-clearance="4.0" data-min-segment-length="16.0">
+  <defs>
+    <marker id="arrowA" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/>
+    </marker>
+    <marker id="arrowB" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#ea580c"/>
+    </marker>
+    <marker id="arrowC" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#0891b2"/>
+    </marker>
+    <marker id="arrowE" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#059669"/>
+    </marker>
+    <marker id="arrowF" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#7c3aed"/>
+    </marker>
+    <marker id="arrowG" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#db2777"/>
+    </marker>
+    <marker id="arrowH" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#64748b"/>
+    </marker>
+    <filter id="shadowSoft" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="3" stdDeviation="6" flood-color="#0f172a" flood-opacity="0.12"/>
+    </filter>
+    <filter id="shadowGlass" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="10" stdDeviation="16" flood-color="#020617" flood-opacity="0.28"/>
+    </filter>
+    <linearGradient id="cloudGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f8fcff"/>
+      <stop offset="100%" stop-color="#dfedf7"/>
+    </linearGradient>
+    <pattern id="cloudGrid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M 32 0 L 0 0 0 32" fill="none" stroke="#7fa3c2" stroke-opacity="0.10" stroke-width="1"/>
+    </pattern>
+    <style>
+    text { font-family: Inter, 'Helvetica Neue', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; }
+    .title { font-size: 27px; font-weight: 700; fill: #102a43; }
+    .subtitle { font-size: 13px; font-weight: 500; fill: #52718d; }
+    .section { font-size: 13px; font-weight: 700; fill: #315d7e; letter-spacing: 1.4px; }
+    .section-sub { font-size: 12px; font-weight: 500; fill: #7892a8; }
+    .node-title { font-weight: 700; fill: #102a43; }
+    .node-sub { font-size: 12px; font-weight: 500; fill: #486581; }
+    .node-type { font-size: 10px; font-weight: 700; fill: #6b879d; letter-spacing: 0.08em; }
+    .arrow-label { font-size: 12px; font-weight: 600; fill: #334e68; }
+    .legend { font-size: 12px; font-weight: 500; fill: #486581; }
+    .footnote { font-size: 12px; font-weight: 500; fill: #829ab1; }
+    .metric-label { font-size: 8.5px; font-weight: 700; fill: #829ab1; text-transform: uppercase; }
+    .metric-value { font-size: 9.5px; font-weight: 700; fill: #102a43; }
+    </style>
+  </defs>
+  <rect data-graph-role="background" width="1588.0" height="848.0" fill="url(#cloudGradient)"/>
+  <rect data-graph-role="decoration" width="1588.0" height="848.0" fill="url(#cloudGrid)"/>
+  <text x="48.0" y="48" text-anchor="start" class="title">ChatCode System Architecture</text>
+  <g id="host" data-graph-role="container" data-container-id="host" data-semantic-role="region" data-graph-bounds="30,90,1128,818">
+  <rect data-graph-role="container" x="30.0" y="90.0" width="1098.0" height="728.0" rx="16.0" fill="rgba(255,255,255,0.54)" stroke="#7fa3c2" stroke-width="1.4" stroke-dasharray="7 5"/>
+  <rect data-graph-role="decoration" x="1060.0" y="100.0" width="54.0" height="18" rx="9" fill="#dbeafe" stroke="#93c5fd" stroke-width="0.8"/>
+  <text data-graph-role="decoration" x="1087.0" y="112.5" text-anchor="middle" font-size="9" font-weight="700" fill="#315d7e">REGION</text>
+  <text x="48.0" y="114.0" class="section">LOCAL MACOS (LOOPBACK ONLY)</text>
+    <rect id="host-header" data-graph-role="reserved" data-reserved-kind="container-header" x="38" y="96" width="205.5" height="30" fill="none" stroke="none"/>
+  </g>
+  <g id="app" data-graph-role="container" data-container-id="app" data-semantic-role="network" data-graph-bounds="54,140,424,390">
+  <rect data-graph-role="container" x="54.0" y="140.0" width="370.0" height="250.0" rx="16.0" fill="rgba(255,255,255,0.54)" stroke="#7fa3c2" stroke-width="1.4" stroke-dasharray="7 5"/>
+  <rect data-graph-role="decoration" x="355.46" y="150.0" width="54.54" height="18" rx="9" fill="#dbeafe" stroke="#93c5fd" stroke-width="0.8"/>
+  <text data-graph-role="decoration" x="382.73" y="162.5" text-anchor="middle" font-size="9" font-weight="700" fill="#315d7e">NETWORK</text>
+  <text x="72.0" y="164.0" class="section">CHATCODE.APP</text>
+    <rect id="app-header" data-graph-role="reserved" data-reserved-kind="container-header" x="62" y="146" width="147.78" height="30" fill="none" stroke="none"/>
+  </g>
+  <g id="sidecar" data-graph-role="container" data-container-id="sidecar" data-semantic-role="network" data-graph-bounds="480,140,1104,798">
+  <rect data-graph-role="container" x="480.0" y="140.0" width="624.0" height="658.0" rx="16.0" fill="rgba(255,255,255,0.54)" stroke="#7fa3c2" stroke-width="1.4" stroke-dasharray="7 5"/>
+  <rect data-graph-role="decoration" x="1035.46" y="150.0" width="54.54" height="18" rx="9" fill="#dbeafe" stroke="#93c5fd" stroke-width="0.8"/>
+  <text data-graph-role="decoration" x="1062.73" y="162.5" text-anchor="middle" font-size="9" font-weight="700" fill="#315d7e">NETWORK</text>
+  <text x="498.0" y="164.0" class="section">SIDECAR NODE PROCESS</text>
+    <rect id="sidecar-header" data-graph-role="reserved" data-reserved-kind="container-header" x="488" y="146" width="144.92" height="30" fill="none" stroke="none"/>
+  </g>
+  <g id="disk" data-graph-role="container" data-container-id="disk" data-semantic-role="network" data-graph-bounds="54,422,424,798">
+  <rect data-graph-role="container" x="54.0" y="422.0" width="370.0" height="376.0" rx="16.0" fill="rgba(255,255,255,0.54)" stroke="#7fa3c2" stroke-width="1.4" stroke-dasharray="7 5"/>
+  <rect data-graph-role="decoration" x="355.46" y="432.0" width="54.54" height="18" rx="9" fill="#dbeafe" stroke="#93c5fd" stroke-width="0.8"/>
+  <text data-graph-role="decoration" x="382.73" y="444.5" text-anchor="middle" font-size="9" font-weight="700" fill="#315d7e">NETWORK</text>
+  <text x="72.0" y="446.0" class="section">~/.CHAT-CODE ON DISK</text>
+    <rect id="disk-header" data-graph-role="reserved" data-reserved-kind="container-header" x="62" y="428" width="173.78" height="30" fill="none" stroke="none"/>
+  </g>
+  <g id="outside" data-graph-role="container" data-container-id="outside" data-semantic-role="global" data-graph-bounds="1160,388,1558,786">
+  <rect data-graph-role="container" x="1160.0" y="388.0" width="398.0" height="398.0" rx="16.0" fill="rgba(255,255,255,0.54)" stroke="#7fa3c2" stroke-width="1.4" stroke-dasharray="7 5"/>
+  <rect data-graph-role="decoration" x="1490.0" y="398.0" width="54.0" height="18" rx="9" fill="#dbeafe" stroke="#93c5fd" stroke-width="0.8"/>
+  <text data-graph-role="decoration" x="1517.0" y="410.5" text-anchor="middle" font-size="9" font-weight="700" fill="#315d7e">GLOBAL</text>
+  <text x="1178.0" y="412.0" class="section">EXTERNAL SERVICES</text>
+    <rect id="outside-header" data-graph-role="reserved" data-reserved-kind="container-header" x="1168" y="394" width="82" height="30" fill="none" stroke="none"/>
+  </g>
+  <path id="w1-log" data-graph-role="edge" data-edge-id="w1-log" data-source="sdk" data-target="sessions" data-edge-kind="flow" data-topic-id="" data-flow="write" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="appendLog · 白名单过滤" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="2" data-route-stretch="1.0" data-bridges="" d="M 510,474 L 462,474 L 462,624 L 394,624" fill="none" stroke="#ea580c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowB)"/>
+  <path id="s0-state" data-graph-role="edge" data-edge-id="s0-state" data-source="bridge" data-target="state" data-edge-kind="flow" data-topic-id="" data-flow="write" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="读写 JSON" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="2" data-route-stretch="1.0" data-bridges="" d="M 510,266 L 442,266 L 442,508 L 394,508" fill="none" stroke="#ea580c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowB)"/>
+  <path id="ipc" data-graph-role="edge" data-edge-id="ipc" data-source="webview" data-target="rust" data-edge-kind="flow" data-topic-id="" data-flow="control" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="0" data-route-stretch="1.0" data-bridges="" d="M 239,254 L 239,298" fill="none" stroke="#2563eb" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowA)"/>
+  <path id="ws" data-graph-role="edge" data-edge-id="ws" data-source="webview" data-target="bridge" data-edge-kind="flow" data-topic-id="" data-flow="read" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="ws://127.0.0.1:8976 + 启动令牌" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="0" data-route-stretch="1.0" data-bridges="" d="M 394,218 L 510,218" fill="none" stroke="#0891b2" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowC)"/>
+  <path id="spawn-query" data-graph-role="edge" data-edge-id="spawn-query" data-source="bridge" data-target="sdk" data-edge-kind="flow" data-topic-id="" data-flow="control" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="0" data-route-stretch="1.0" data-bridges="" d="M 792,266 L 792,426" fill="none" stroke="#2563eb" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowA)"/>
+  <path id="to-proxy" data-graph-role="edge" data-edge-id="to-proxy" data-source="sdk" data-target="proxy" data-edge-kind="flow" data-topic-id="" data-flow="read" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="0" data-route-stretch="1.0" data-bridges="" d="M 792,522 L 792,682" fill="none" stroke="#0891b2" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowC)"/>
+  <path id="w2-blob" data-graph-role="edge" data-edge-id="w2-blob" data-source="sessions" data-target="blobs" data-edge-kind="flow" data-topic-id="" data-flow="write" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="0" data-route-stretch="1.0" data-bridges="" d="M 239,660 L 239,704" fill="none" stroke="#ea580c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowB)"/>
+  <path id="msg" data-graph-role="edge" data-edge-id="msg" data-source="sdk" data-target="anth-msg" data-edge-kind="flow" data-topic-id="" data-flow="read" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="HTTPS 出网" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="0" data-route-stretch="1.0" data-bridges="" d="M 1074,474 L 1190,474" fill="none" stroke="#0891b2" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowC)"/>
+  <path id="third" data-graph-role="edge" data-edge-id="third" data-source="proxy" data-target="upstream" data-edge-kind="flow" data-topic-id="" data-flow="read" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="本地转译后出网" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="0" data-route-stretch="1.0" data-bridges="" d="M 1074,730 L 1190,730" fill="none" stroke="#0891b2" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowC)"/>
+  <g id="node-webview" data-graph-role="node" data-node-id="webview" data-semantic-role="compute" data-motion-role="" data-motion-stage="" data-motion-order="" data-parent="" data-deployment-id="app" data-topic-id="" data-span-id="" data-station-order="" data-status="" data-start-ms="" data-duration-ms="" data-parent-span="" data-graph-bounds="84,182,394,254">
+  <rect x="84.0" y="182.0" width="310.0" height="72.0" rx="12" fill="#ffffff" stroke="#9bb7cf" stroke-width="1.4" filter="url(#shadowSoft)"/>
+  <rect x="96.0" y="197.0" width="42.0" height="42.0" rx="11" fill="#059669" opacity="0.12" stroke="#059669" stroke-width="1.2"/>
+  <rect x="106.0" y="209.0" width="22" height="18" rx="4" fill="none" stroke="#059669" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 111.0 215.0 H 123.0 M 111.0 221.0 H 120.0" fill="none" stroke="#059669" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <text data-text-role="title" data-full-text="WebView Frontend" x="150.0" y="213.0" text-anchor="start" class="node-title" font-size="13.5">WebView Frontend</text>
+  <text data-text-role="subtitle" data-full-text="React · store.tsx" x="150.0" y="232.0" text-anchor="start" class="node-sub" font-size="11.5">React · store.tsx</text>
+  <text x="384.0" y="196.0" text-anchor="end" font-size="8.5" font-weight="800" fill="#6b879d">TAURI</text>
+  </g>
+  <g id="node-rust" data-graph-role="node" data-node-id="rust" data-semantic-role="compute" data-motion-role="" data-motion-stage="" data-motion-order="" data-parent="" data-deployment-id="app" data-topic-id="" data-span-id="" data-station-order="" data-status="" data-start-ms="" data-duration-ms="" data-parent-span="" data-graph-bounds="84,298,394,370">
+  <rect x="84.0" y="298.0" width="310.0" height="72.0" rx="12" fill="#ffffff" stroke="#9bb7cf" stroke-width="1.4" filter="url(#shadowSoft)"/>
+  <rect x="96.0" y="313.0" width="42.0" height="42.0" rx="11" fill="#7c3aed" opacity="0.12" stroke="#7c3aed" stroke-width="1.2"/>
+  <path d="M 117.0 322.0 L 129.0 334.0 L 117.0 346.0 L 105.0 334.0 Z" fill="none" stroke="#7c3aed" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 111.0 334.0 H 123.0 M 120.0 331.0 L 123.0 334.0 L 120.0 337.0" fill="none" stroke="#7c3aed" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <text data-text-role="title" data-full-text="Rust Native Layer" x="150.0" y="329.0" text-anchor="start" class="node-title" font-size="13.5">Rust Native Layer</text>
+  <text data-text-role="subtitle" data-full-text="spawn sidecar · mint token" x="150.0" y="348.0" text-anchor="start" class="node-sub" font-size="11.5">spawn sidecar · mint token</text>
+  <text x="384.0" y="312.0" text-anchor="end" font-size="8.5" font-weight="800" fill="#6b879d">RUST</text>
+  </g>
+  <g id="node-bridge" data-graph-role="node" data-node-id="bridge" data-semantic-role="gateway" data-motion-role="" data-motion-stage="" data-motion-order="" data-parent="" data-deployment-id="sidecar" data-topic-id="" data-span-id="" data-station-order="" data-status="" data-start-ms="" data-duration-ms="" data-parent-span="" data-graph-bounds="510,170,1074,266">
+  <rect x="510.0" y="170.0" width="564.0" height="96.0" rx="12" fill="#ffffff" stroke="#9bb7cf" stroke-width="1.4" filter="url(#shadowSoft)"/>
+  <rect x="522.0" y="197.0" width="42.0" height="42.0" rx="11" fill="#7c3aed" opacity="0.12" stroke="#7c3aed" stroke-width="1.2"/>
+  <path d="M 543.0 206.0 L 555.0 218.0 L 543.0 230.0 L 531.0 218.0 Z" fill="none" stroke="#7c3aed" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 537.0 218.0 H 549.0 M 546.0 215.0 L 549.0 218.0 L 546.0 221.0" fill="none" stroke="#7c3aed" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <text data-text-role="title" data-full-text="WebSocket Bridge :8976" x="576.0" y="201.0" text-anchor="start" class="node-title" font-size="13.5">WebSocket Bridge :8976</text>
+  <text data-text-role="subtitle" data-full-text="routing · replay · blob_get" x="576.0" y="220.0" text-anchor="start" class="node-sub" font-size="11.5">routing · replay · blob_get</text>
+  <text x="1064.0" y="184.0" text-anchor="end" font-size="8.5" font-weight="800" fill="#6b879d">WS</text>
+  </g>
+  <g id="node-sdk" data-graph-role="node" data-node-id="sdk" data-semantic-role="compute" data-motion-role="" data-motion-stage="" data-motion-order="" data-parent="" data-deployment-id="sidecar" data-topic-id="" data-span-id="" data-station-order="" data-status="" data-start-ms="" data-duration-ms="" data-parent-span="" data-graph-bounds="510,426,1074,522">
+  <rect x="510.0" y="426.0" width="564.0" height="96.0" rx="12" fill="#ffffff" stroke="#9bb7cf" stroke-width="1.4" filter="url(#shadowSoft)"/>
+  <rect x="522.0" y="453.0" width="42.0" height="42.0" rx="11" fill="#059669" opacity="0.12" stroke="#059669" stroke-width="1.2"/>
+  <rect x="532.0" y="465.0" width="22" height="18" rx="4" fill="none" stroke="#059669" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 537.0 471.0 H 549.0 M 537.0 477.0 H 546.0" fill="none" stroke="#059669" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <text data-text-role="title" data-full-text="SDK query (one per session)" x="576.0" y="457.0" text-anchor="start" class="node-title" font-size="13.5">SDK query (one per session)</text>
+  <text data-text-role="subtitle" data-full-text="Claude · DeepSeek · Kimi · GLM · Qwen · MiniMax" x="576.0" y="476.0" text-anchor="start" class="node-sub" font-size="11.5">Claude · DeepSeek · Kimi · GLM · Qwen · MiniMax</text>
+  <text x="1064.0" y="440.0" text-anchor="end" font-size="8.5" font-weight="800" fill="#6b879d">AGENT SDK</text>
+  </g>
+  <g id="node-proxy" data-graph-role="node" data-node-id="proxy" data-semantic-role="gateway" data-motion-role="" data-motion-stage="" data-motion-order="" data-parent="" data-deployment-id="sidecar" data-topic-id="" data-span-id="" data-station-order="" data-status="" data-start-ms="" data-duration-ms="" data-parent-span="" data-graph-bounds="510,682,1074,778">
+  <rect x="510.0" y="682.0" width="564.0" height="96.0" rx="12" fill="#ffffff" stroke="#9bb7cf" stroke-width="1.4" filter="url(#shadowSoft)"/>
+  <rect x="522.0" y="709.0" width="42.0" height="42.0" rx="11" fill="#7c3aed" opacity="0.12" stroke="#7c3aed" stroke-width="1.2"/>
+  <path d="M 543.0 718.0 L 555.0 730.0 L 543.0 742.0 L 531.0 730.0 Z" fill="none" stroke="#7c3aed" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 537.0 730.0 H 549.0 M 546.0 727.0 L 549.0 730.0 L 546.0 733.0" fill="none" stroke="#7c3aed" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <text data-text-role="title" data-full-text="Anthropic→OpenAI Proxy" x="576.0" y="713.0" text-anchor="start" class="node-title" font-size="13.5">Anthropic→OpenAI Proxy</text>
+  <text data-text-role="subtitle" data-full-text="Grok · OpenAI Codex · Gemini" x="576.0" y="732.0" text-anchor="start" class="node-sub" font-size="11.5">Grok · OpenAI Codex · Gemini</text>
+  <text x="1064.0" y="696.0" text-anchor="end" font-size="8.5" font-weight="800" fill="#6b879d">HTTP</text>
+  </g>
+  <g id="node-sessions" data-graph-role="node" data-node-id="sessions" data-semantic-role="database" data-motion-role="" data-motion-stage="" data-motion-order="" data-parent="" data-deployment-id="disk" data-topic-id="" data-span-id="" data-station-order="" data-status="" data-start-ms="" data-duration-ms="" data-parent-span="" data-graph-bounds="84,588,394,660">
+  <rect x="84.0" y="588.0" width="310.0" height="72.0" rx="12" fill="#ffffff" stroke="#9bb7cf" stroke-width="1.4" filter="url(#shadowSoft)"/>
+  <rect x="96.0" y="603.0" width="42.0" height="42.0" rx="11" fill="#ea580c" opacity="0.12" stroke="#ea580c" stroke-width="1.2"/>
+  <ellipse cx="117.0" cy="616.0" rx="11" ry="4" fill="none" stroke="#ea580c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 106.0 616.0 V 632.0 C 106.0 637.0 128.0 637.0 128.0 632.0 V 616.0" fill="none" stroke="#ea580c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 106.0 624.0 C 106.0 629.0 128.0 629.0 128.0 624.0" fill="none" stroke="#ea580c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <text data-text-role="title" data-full-text="sessions/*.jsonl" x="150.0" y="619.0" text-anchor="start" class="node-title" font-size="13.5">sessions/*.jsonl</text>
+  <text data-text-role="subtitle" data-full-text="Replay log (denoised)" x="150.0" y="638.0" text-anchor="start" class="node-sub" font-size="11.5">Replay log (denoised)</text>
+  <text x="384.0" y="602.0" text-anchor="end" font-size="8.5" font-weight="800" fill="#6b879d">JSONL</text>
+  </g>
+  <g id="node-blobs" data-graph-role="node" data-node-id="blobs" data-semantic-role="database" data-motion-role="" data-motion-stage="" data-motion-order="" data-parent="" data-deployment-id="disk" data-topic-id="" data-span-id="" data-station-order="" data-status="" data-start-ms="" data-duration-ms="" data-parent-span="" data-graph-bounds="84,704,394,776">
+  <rect x="84.0" y="704.0" width="310.0" height="72.0" rx="12" fill="#ffffff" stroke="#9bb7cf" stroke-width="1.4" filter="url(#shadowSoft)"/>
+  <rect x="96.0" y="719.0" width="42.0" height="42.0" rx="11" fill="#ea580c" opacity="0.12" stroke="#ea580c" stroke-width="1.2"/>
+  <ellipse cx="117.0" cy="732.0" rx="11" ry="4" fill="none" stroke="#ea580c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 106.0 732.0 V 748.0 C 106.0 753.0 128.0 753.0 128.0 748.0 V 732.0" fill="none" stroke="#ea580c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 106.0 740.0 C 106.0 745.0 128.0 745.0 128.0 740.0" fill="none" stroke="#ea580c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <text data-text-role="title" data-full-text="blobs/ + thumbs/" x="150.0" y="735.0" text-anchor="start" class="node-title" font-size="13.5">blobs/ + thumbs/</text>
+  <text data-text-role="subtitle" data-full-text="Content-addressed · dedup" x="150.0" y="754.0" text-anchor="start" class="node-sub" font-size="11.5">Content-addressed · dedup</text>
+  <text x="384.0" y="718.0" text-anchor="end" font-size="8.5" font-weight="800" fill="#6b879d">SHA1</text>
+  </g>
+  <g id="node-state" data-graph-role="node" data-node-id="state" data-semantic-role="database" data-motion-role="" data-motion-stage="" data-motion-order="" data-parent="" data-deployment-id="disk" data-topic-id="" data-span-id="" data-station-order="" data-status="" data-start-ms="" data-duration-ms="" data-parent-span="" data-graph-bounds="84,472,394,544">
+  <rect x="84.0" y="472.0" width="310.0" height="72.0" rx="12" fill="#ffffff" stroke="#9bb7cf" stroke-width="1.4" filter="url(#shadowSoft)"/>
+  <rect x="96.0" y="487.0" width="42.0" height="42.0" rx="11" fill="#ea580c" opacity="0.12" stroke="#ea580c" stroke-width="1.2"/>
+  <ellipse cx="117.0" cy="500.0" rx="11" ry="4" fill="none" stroke="#ea580c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 106.0 500.0 V 516.0 C 106.0 521.0 128.0 521.0 128.0 516.0 V 500.0" fill="none" stroke="#ea580c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 106.0 508.0 C 106.0 513.0 128.0 513.0 128.0 508.0" fill="none" stroke="#ea580c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <text data-text-role="title" data-full-text="index / settings.json" x="150.0" y="503.0" text-anchor="start" class="node-title" font-size="13.5">index / settings.json</text>
+  <text data-text-role="subtitle" data-full-text="Session index · groups · prefs" x="150.0" y="522.0" text-anchor="start" class="node-sub" font-size="11.5">Session index · groups · prefs</text>
+  <text x="384.0" y="486.0" text-anchor="end" font-size="8.5" font-weight="800" fill="#6b879d">JSON</text>
+  </g>
+  <g id="node-anth-msg" data-graph-role="node" data-node-id="anth-msg" data-semantic-role="edge" data-motion-role="" data-motion-stage="" data-motion-order="" data-parent="" data-deployment-id="outside" data-topic-id="" data-span-id="" data-station-order="" data-status="" data-start-ms="" data-duration-ms="" data-parent-span="" data-graph-bounds="1190,438,1528,510">
+  <rect x="1190.0" y="438.0" width="338.0" height="72.0" rx="12" fill="#ffffff" stroke="#9bb7cf" stroke-width="1.4" filter="url(#shadowSoft)"/>
+  <rect x="1202.0" y="453.0" width="42.0" height="42.0" rx="11" fill="#2563eb" opacity="0.12" stroke="#2563eb" stroke-width="1.2"/>
+  <circle cx="1223.0" cy="474.0" r="11" fill="none" stroke="#2563eb" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 1212.0 474.0 H 1234.0 M 1223.0 463.0 C 1217.0 469.0 1217.0 479.0 1223.0 485.0 M 1223.0 463.0 C 1229.0 469.0 1229.0 479.0 1223.0 485.0" fill="none" stroke="#2563eb" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <text data-text-role="title" data-full-text="Anthropic API Endpoints" x="1256.0" y="469.0" text-anchor="start" class="node-title" font-size="13.5">Anthropic API Endpoints</text>
+  <text data-text-role="subtitle" data-full-text="Official + compatible" x="1256.0" y="488.0" text-anchor="start" class="node-sub" font-size="11.5">Official + compatible</text>
+  <text x="1518.0" y="452.0" text-anchor="end" font-size="8.5" font-weight="800" fill="#6b879d">ANTHROPIC</text>
+  </g>
+  <g id="node-upstream" data-graph-role="node" data-node-id="upstream" data-semantic-role="edge" data-motion-role="" data-motion-stage="" data-motion-order="" data-parent="" data-deployment-id="outside" data-topic-id="" data-span-id="" data-station-order="" data-status="" data-start-ms="" data-duration-ms="" data-parent-span="" data-graph-bounds="1190,694,1528,766">
+  <rect x="1190.0" y="694.0" width="338.0" height="72.0" rx="12" fill="#ffffff" stroke="#9bb7cf" stroke-width="1.4" filter="url(#shadowSoft)"/>
+  <rect x="1202.0" y="709.0" width="42.0" height="42.0" rx="11" fill="#2563eb" opacity="0.12" stroke="#2563eb" stroke-width="1.2"/>
+  <circle cx="1223.0" cy="730.0" r="11" fill="none" stroke="#2563eb" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 1212.0 730.0 H 1234.0 M 1223.0 719.0 C 1217.0 725.0 1217.0 735.0 1223.0 741.0 M 1223.0 719.0 C 1229.0 725.0 1229.0 735.0 1223.0 741.0" fill="none" stroke="#2563eb" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <text data-text-role="title" data-full-text="OpenAI API Endpoints" x="1256.0" y="725.0" text-anchor="start" class="node-title" font-size="13.5">OpenAI API Endpoints</text>
+  <text data-text-role="subtitle" data-full-text="Translated upstream" x="1256.0" y="744.0" text-anchor="start" class="node-sub" font-size="11.5">Translated upstream</text>
+  <text x="1518.0" y="708.0" text-anchor="end" font-size="8.5" font-weight="800" fill="#6b879d">OPENAI COMPAT</text>
+  </g>
+  <g id="ipc-label" data-graph-role="label" data-owner="ipc" data-graph-bounds="168.24,262,236,282">
+  <text x="202.12" y="276.0" text-anchor="middle" class="arrow-label">Tauri IPC</text>
+  </g>
+  <g id="ws-label" data-graph-role="label" data-owner="ws" data-graph-bounds="421,177,483,197">
+  <text x="452.0" y="191.0" text-anchor="middle" class="arrow-label">messages</text>
+  </g>
+  <g id="spawn-query-label" data-graph-role="label" data-owner="spawn-query" data-graph-bounds="663.88,332,789,352">
+  <text x="726.44" y="346.0" text-anchor="middle" class="arrow-label">one query / session</text>
+  </g>
+  <g id="to-proxy-label" data-graph-role="label" data-owner="to-proxy" data-graph-bounds="642.28,588,789,608">
+  <text x="715.64" y="602.0" text-anchor="middle" class="arrow-label">non-Anthropic provider</text>
+  </g>
+  <g id="w1-log-label" data-graph-role="label" data-owner="w1-log" data-graph-bounds="381.88,555,459,575">
+  <text x="420.44" y="569.0" text-anchor="middle" class="arrow-label">append JSONL</text>
+  </g>
+  <g id="w2-blob-label" data-graph-role="label" data-owner="w2-blob" data-graph-bounds="174,668,236,688">
+  <text x="205.0" y="682.0" text-anchor="middle" class="arrow-label">refs only</text>
+  </g>
+  <g id="msg-label" data-graph-role="label" data-owner="msg" data-graph-bounds="1101,433,1163,453">
+  <text x="1132.0" y="447.0" text-anchor="middle" class="arrow-label">requests</text>
+  </g>
+  <g id="third-label" data-graph-role="label" data-owner="third" data-graph-bounds="1091.52,689,1172.48,709">
+  <text x="1132.0" y="703.0" text-anchor="middle" class="arrow-label">OpenAI API</text>
+  </g>
+  <g id="s0-state-label" data-graph-role="label" data-owner="s0-state" data-graph-bounds="368.84,377,439,397">
+  <rect x="368.84" y="377.0" width="70.16" height="20" rx="6" fill="#f7fbfe" opacity="0.96"/>
+  <text x="403.92" y="391.0" text-anchor="middle" class="arrow-label">read/write JSON</text>
+  </g>
+  <g id="legend" data-graph-role="legend">
+    <rect id="legend-zone" data-graph-role="reserved" data-reserved-kind="legend" x="1180" y="186" width="150.96" height="90" rx="10" fill="none" stroke="none"/>
+    <line data-graph-role="decoration" x1="1190.0" y1="200.0" x2="1220.0" y2="200.0" stroke="#0891b2" stroke-width="2.2" marker-end="url(#arrowC)"/>
+    <text data-graph-role="decoration" x="1230.0" y="204.0" class="legend">Request path</text>
+    <line data-graph-role="decoration" x1="1190.0" y1="222.0" x2="1220.0" y2="222.0" stroke="#ea580c" stroke-width="2.2" marker-end="url(#arrowB)"/>
+    <text data-graph-role="decoration" x="1230.0" y="226.0" class="legend">Local storage</text>
+    <line data-graph-role="decoration" x1="1190.0" y1="244.0" x2="1220.0" y2="244.0" stroke="#2563eb" stroke-width="2.2" marker-end="url(#arrowA)"/>
+    <text data-graph-role="decoration" x="1230.0" y="248.0" class="legend">Process / session control</text>
+  </g>
+  <g id="footer" data-graph-role="reserved" data-graph-bounds="1190,328,1330,344">
+  <text x="1190.0" y="340.0" class="footnote">Except the two outbound links, all data stays on your machine</text>
+  </g>
+  <style>
+    @keyframes cc-march { from { stroke-dashoffset: 30; } to { stroke-dashoffset: 0; } }
+    .cc-flow { animation: cc-march 1.17s linear infinite; opacity: 0.95; }
+    @media (prefers-reduced-motion: reduce) { .cc-flow { animation: none; opacity: 0; } }
+  </style>
+<g data-graph-role="decoration">
+  <path data-graph-role="decoration" data-owner="w1-log" d="M 510,474 L 462,474 L 462,624 L 394,624" fill="none" stroke="#ea580c" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="9 21" class="cc-flow" style="animation-delay:0.00s"/>
+  <path data-graph-role="decoration" data-owner="s0-state" d="M 510,266 L 442,266 L 442,508 L 394,508" fill="none" stroke="#ea580c" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="9 21" class="cc-flow" style="animation-delay:-0.18s"/>
+  <path data-graph-role="decoration" data-owner="ipc" d="M 239,254 L 239,298" fill="none" stroke="#2563eb" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="9 21" class="cc-flow" style="animation-delay:-0.36s"/>
+  <path data-graph-role="decoration" data-owner="ws" d="M 394,218 L 510,218" fill="none" stroke="#0891b2" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="9 21" class="cc-flow" style="animation-delay:-0.54s"/>
+  <path data-graph-role="decoration" data-owner="spawn-query" d="M 792,266 L 792,426" fill="none" stroke="#2563eb" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="9 21" class="cc-flow" style="animation-delay:-0.72s"/>
+  <path data-graph-role="decoration" data-owner="to-proxy" d="M 792,522 L 792,682" fill="none" stroke="#0891b2" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="9 21" class="cc-flow" style="animation-delay:-0.90s"/>
+  <path data-graph-role="decoration" data-owner="w2-blob" d="M 239,660 L 239,704" fill="none" stroke="#ea580c" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="9 21" class="cc-flow" style="animation-delay:-1.08s"/>
+  <path data-graph-role="decoration" data-owner="msg" d="M 1074,474 L 1190,474" fill="none" stroke="#0891b2" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="9 21" class="cc-flow" style="animation-delay:-1.26s"/>
+  <path data-graph-role="decoration" data-owner="third" d="M 1074,730 L 1190,730" fill="none" stroke="#0891b2" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="9 21" class="cc-flow" style="animation-delay:-1.44s"/>
+  </g>
+</svg>
