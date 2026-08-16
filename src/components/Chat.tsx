@@ -9,6 +9,7 @@ import type { PermissionSuggestion, ResumeChoice, ResumePrompt, Session, Timelin
 import { modelDisplayName } from "../types";
 import { useStore, fetchBlob, type RememberChoice } from "../store";
 import { applyEdgeGlow } from "../lib/edgeGlow";
+import { pushCmd } from "../lib/gitcmd";
 import { cleanMemory, stripLineNums } from "../lib/memtext";
 import { defaultRuleContent, destinationLabel, suggestionLabel } from "../permissions";
 import { Composer } from "./Composer";
@@ -568,7 +569,10 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
           })() : (() => {
             const ahead = branch?.ahead || 0, behind = branch?.behind || 0;
             const seg = (label: string, name: string, lead?: number) => <>{label} {name}{lead ? <span className="branch-lead">{t("·领先 {{n}}", { n: lead })}</span> : ""}</>;
-            const btn2 = behind ? { name: "pull", cmd: "git pull" } : ahead ? { name: "push", cmd: "git push" } : null;
+            // push 走显式 refspec:裸 `git push` 在本地名 ≠ 上游名时(oss...origin/main)会直接 fatal,
+            // 顶栏这颗按钮不能只在分支名恰好同名时才好使。pull 不受 push.default 影响,保持原样。
+            const btn2 = behind ? { name: "pull", cmd: "git pull" }
+              : ahead && git.current && branch?.upstream ? { name: "push", cmd: pushCmd(git.current, branch.upstream) } : null;
             return <div className={`branch-line clickable ${ahead || behind ? "changed" : ""}`} role="button" tabIndex={0}
               title={t("点击打开分支管理")} onClick={() => onToggleInfo("branches")}>
               <span className="branch-grp">{seg(t("本地"), git.current || "detached HEAD", ahead)}

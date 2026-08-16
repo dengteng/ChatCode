@@ -1761,8 +1761,8 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
 /* 一个本地分支挂多个远端:右格竖排。行是 align-items:center,所以连线自动对准这一组的中线 */
 .brz-cell.multi { flex-direction: column; gap: 4px; }
 .brz-link { position: relative; flex: none; display: flex; align-items: center; justify-content: center; }
-/* 连线上的 push 按钮:绝对居中压住连线(自带底色遮线),连线带宽度由 JS 按需加宽到能塞下它 */
-.brz-push { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 1;
+/* 主干上的 push 按钮:压住连线(自带底色遮线),left 由 JS 按主干中点给,连线带宽度按需塞得下它 */
+.brz-push { position: absolute; top: 50%; transform: translate(-50%, -50%); z-index: 1;
   display: inline-flex; align-items: center; justify-content: center; width: 46px; height: 17px; padding: 0;
   font-size: 10px; font-weight: 700; line-height: 1; border-radius: 999px; cursor: pointer;
   color: #fff; background: var(--accent); border: 1px solid var(--accent); }
@@ -1771,6 +1771,15 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
    按钮在按下瞬间向右下跳走, mouseup 落在按钮外 → click 不派发, push 永远不执行。 */
 .brz-push:active:not(:disabled) { transform: translate(-50%, -50%) scale(0.97); }
 .brz-push:disabled { cursor: default; }
+/* 分叉线上的单推按钮:只推这一条。做成小圆点而不是第二颗药丸 —— 主干那颗是"全推",
+   层级得看得出来;两颗一样大就成了两个平级选项,反倒要停下来读文字才知道差别。
+   left/top 由 JS 按分叉线的中点给(每条线各一个)。 */
+.brz-push-one { position: absolute; transform: translate(-50%, -50%); z-index: 1;
+  display: inline-flex; align-items: center; justify-content: center; width: 19px; height: 19px; padding: 0;
+  border-radius: 50%; cursor: pointer; color: var(--accent); background: var(--panel);
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border)); }
+.brz-push-one:hover { color: #fff; background: var(--accent); border-color: var(--accent); }
+.brz-push-one:active { transform: translate(-50%, -50%) scale(0.94); }
 /* 忙碌态按钮:文字留在 DOM 里(只是隐形)撑住原宽度,菊花绝对居中盖上去 —— 宽度/位置/底色全程不变。
    position:relative 必须有,否则 .btn-busy 会去找更外层的定位祖先,菊花飞到按钮外(顶栏 push 就这么秃过)。
    :not(.brz-push) 是唯一例外 —— 那个按钮自身就是 absolute 居中,改成 relative 会掉回文档流;
