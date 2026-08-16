@@ -209,7 +209,8 @@ function reducer(s: State, a: Action): State {
         if (i < 0) return { ...x, timeline: [...x.timeline, { kind: "compact", running: false, ts: Date.now(), ...a.patch }] };
         const tl = [...x.timeline];
         tl[i] = { ...tl[i], running: false, ...a.patch } as TimelineItem;
-        return { ...x, timeline: tl };
+        // 真压成了(有 preTokens)→ 解除重发闩锁,下次再被并轮还能重发一次
+        return { ...x, timeline: tl, ...(a.patch.preTokens != null ? { compactRetried: false } : {}) };
       });
     case "compact_settle":
       return upd(a.id, (x) => {
@@ -220,8 +221,16 @@ function reducer(s: State, a: Action): State {
         // 一轮跑完了、压缩却没收到 compact_boundary(没有 preTokens)→ 它压根没执行。
         // 之前这里一律收成"上下文已压缩",配上乐观显示的进度条,等于凭空编了一次成功的压缩:
         // 用户以为压完了,上下文条却纹丝不动。宁可说没做,别谎报。
-        tl[i] = { ...t, running: false, ...(t.preTokens == null ? { error: i18n.t("命令被并入了正在跑的那一轮，未作为斜杠命令执行") } : {}) };
-        return { ...x, timeline: tl };
+        const missed = t.preTokens == null;
+        // CLI 是按**读取时刻**判定斜杠命令的,不是送达时刻:会话空闲时送进去的 /compact,若正赶上
+        // 后台任务把 CLI 唤醒续跑,就会被那一轮读走,记成 queued_command(commandMode:"prompt")当纯文本用掉。
+        // 这个窗口在 CLI 那侧,前端的闸关不严。result 到达 = 干净的轮次边界,把它塞回待发队列重发一次
+        // (队列的出队条件本就是"彻底空闲")。只重发一次,压缩真做成了才解锁,否则死循环。
+        const retry = missed && !x.compactRetried && (x.pending?.length ?? 0) < 3;
+        tl[i] = { ...t, running: false, ...(missed ? { error: i18n.t(retry ? "命令被并入了正在跑的那一轮，正在自动重发" : "命令被并入了正在跑的那一轮，未作为斜杠命令执行") } : {}) };
+        if (!retry) return { ...x, timeline: tl };
+        return { ...x, timeline: tl, compactRetried: true,
+          pending: [...(x.pending ?? []), { pid: "compact-retry", blocks: [{ type: "text", text: "/compact" }], text: "/compact" }] };
       });
     case "remove_session": {
       const { [a.id]: _drop, ...rest } = s.sessions;

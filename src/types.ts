@@ -135,6 +135,7 @@ export interface Session {
   pending?: PendingMsg[];    // 待发队列:agent 忙时排队,完成后自动发下一条(最多 3 条)
   bgTasks?: string[];        // SDK background_tasks_changed 电平(REPLACE):当前在跑的后台任务 id 集,空=无
   bgWait?: boolean;          // 上一轮有后台任务,轮次还没完全了结(还在等后台任务及它的续跑)→ 禁止待发队列出队
+  compactRetried?: boolean;  // /compact 被并进别人的轮次、已自动重发过一次 —— 防重发死循环,压缩真做成了就清
 }
 
 // 1M 上下文的模型,其 resolvedModel 带 [1m] 后缀。modelUsage 报的 contextWindow 有时仍是 200k,

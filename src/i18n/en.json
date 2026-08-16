@@ -675,6 +675,7 @@
   "{{n}} 行": "{{n}} lines",
   "退出码 {{code}}": "Exit code {{code}}",
   "命令被并入了正在跑的那一轮，未作为斜杠命令执行": "Merged into the running turn; not run as a slash command",
+  "命令被并入了正在跑的那一轮，正在自动重发": "Merged into the running turn; resending automatically",
   "生成失败": "Generation failed",
   "已被新的请求取代": "Replaced by a newer request",
   "该目录已有 {{count}} 个会话": "This folder already has {{count}} sessions",
