@@ -1768,20 +1768,35 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
 /* width:auto 必须写:.brz-tag 基础样式是 width:100%(为原来那张整行宽的映射图定的),
    放进这排 flex 里会让每个 chip 都撑满整行、一行只站得下一个 */
 .brz-band .brz-tag { flex: none; width: auto; max-width: 180px; }
-/* 扇出区:svg 打底,push 按钮绝对定位压在线上 */
-.brz-fan { position: relative; }
+/* 扇出区:svg 打底,push 按钮绝对定位压在线上。
+   负 margin + 下面那 20px padding 是一对:把标题的落脚带塞进扇出图的最后 20px 里(那一段只有中间几条线,
+   左边是空的),tab 排的 y 一点没动,标题却腾到了 tab 上方 —— 不然标题和最左那个 tab 会横向撞上。 */
+.brz-fan { position: relative; margin-bottom: -20px; }
+/* 远程分支段:撑满抽屉宽,标题绝对定位钉在左边(和「暂存区」「本地分支」同一条左线),
+   里面的 tab 排照旧定宽居中。标题不占布局宽度是关键 —— 占了就得跟着居中的排走,排一溢出它就被裁。 */
+.brz-remote { position: relative; align-self: stretch; display: flex; flex-direction: column; align-items: center; padding-top: 20px; }
+.brz-remote-h { position: absolute; left: 0; top: 0; }
+.brz-remote-empty { margin: 2px 0 0; }
 /* 仓库 tab:扇出的落点。选中的那个填 accent —— 它同时是下面拓扑图的过滤器,得一眼看出在看谁。
-   一排三段:左「远程分支」标签槽 + 中间 tab 组 + 右「新建」虚线框。两个侧槽同宽(--side-w),
-   宽度和 JS 里的 SIDE_W 是同一个数,改一处得改两处 —— 扇出的 x 是纯算的,算错就整排错位。 */
-.brz-tabs { display: flex; justify-content: center; align-items: flex-start; }
+   一排三段:左空配重槽 + 中间 tab 组 + 右「新建」虚线框。两个侧槽同宽(--side-w),
+   宽度和 JS 里的 SIDE_W 是同一个数,改一处得改两处 —— 扇出的 x 是纯算的,算错就整排错位。
+   align-items:stretch:让右边的「新建」框自己长到 tab 一样高,不用去抄 tab 的内边距 */
+.brz-tabs { display: flex; justify-content: center; align-items: stretch; }
 .brz-tabrow { display: flex; justify-content: center; }
 .brz-side { width: var(--side-w); flex: none; }
-.brz-tabs .brz-side.sec-label { margin-top: 4px; }
-/* 「新建」虚线框:第一行 +,第二行「新建」。本地分支排和远端 tab 排共用一套,两处读作同一种动作 */
+/* 地址行:紧贴 tab 下方(5px),左边和「远程分支」标题对齐。右端挂刷新 —— 原来它在「提交拓扑」标题那行,
+   标题去掉后没地方站,挪来这里正好:这行讲的就是"在看哪个远端",刷的也是那个远端的历史。 */
+.brz-url-row { align-self: stretch; display: flex; align-items: center; gap: 6px; margin-top: 5px; }
+.brz-url-row .branches-subline { margin: 0; }
+.brz-url-row .ghost { flex: none; display: inline-flex; padding: 2px; border: 0; background: none; color: var(--muted); cursor: pointer; }
+.brz-url-row .ghost:hover { color: var(--text); }
+/* 「新建」虚线框:远端排是竖的(第一行 +,第二行「新建」,跟着 tab 长到等高);
+   本地排 .inline 是横的 —— 那排 chip 只有 26px 高,竖排框会高出一截。 */
 .brz-new { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
   flex: none; padding: 4px 8px; border: 1px dashed color-mix(in srgb, var(--accent) 38%, var(--border));
   border-radius: 8px; background: none; color: var(--muted); font-family: inherit; font-size: 10.5px; line-height: 1.3;
   cursor: pointer; transition: border-color .14s ease, color .14s ease; }
+.brz-new.inline { flex-direction: row; gap: 3px; min-height: 26px; box-sizing: border-box; padding: 4px 9px; font-size: 11px; }
 .brz-new:hover { border-color: var(--accent); color: var(--accent); }
 .brz-tab { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 5px 8px 6px; min-width: 0;
   border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border)); border-radius: 8px;
@@ -1932,6 +1947,12 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
 
 /* 分支页:本地 / 远程 两个分区(不再是两张卡片),中间夹一条同步连接器 */
 .sync-zone { padding: 8px 2px; }
+/* 拓扑图那段没标题了,自己的上内边距 + 上一段的下内边距 + 列表 gap 叠出一大块空白,
+   图看着像和上面的地址行断开。收掉自己那份,再吃掉 gap 的大半 */
+.brz-graph-zone { padding-top: 0; margin-top: -12px; }
+/* 暂存区 → 连线:同样是三层空白叠加(段落下内边距 + 列表 gap + 连线自己的上内边距),
+   线看着不是从文件列表里长出来的。吃掉 gap */
+.branches-tab > .brz-collapse { margin-top: -12px; }
 .sync-zone-h { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-bottom: 6px; }
 .sync-zone-tag { flex-shrink: 0; font-size: 10.5px; font-weight: 700; padding: 1px 8px; border-radius: 999px; }
 .sync-zone-tag.local { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }

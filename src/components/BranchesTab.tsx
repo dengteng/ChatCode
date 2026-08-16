@@ -256,18 +256,19 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
               onChip={onChip} onFocus={setFocus} onRepo={setRepo} onRun={run}
               pushing={pushing} pushFlow={pushFlow} pullFlow={pullFlow}
               onNew={(target) => { setConfirm(null); setMenu(null); setPrompt({ kind: "newbranch", target, ref: focusName || "HEAD", val: "" }); }}
-              onPush={(cmd) => { if (pushing) return; setPushing(true); runTerminal(session.id, cmd); }} />
+              onPush={(cmd) => { if (pushing) return; setPushing(true); runTerminal(session.id, cmd); }}
+              // 地址行由外面给、在脊里渲染:它讲的是"上面选中的那个远端在哪",贴着 tab 才读得出这层关系。
+              // 传节点而不是 4 个数据 prop —— 拼这行要 repoUrl/repoWeb/multiRemote/urlRemote,全塞进 BranchSpine 是给它塞它不管的事。
+              urlLine={repoUrl ? <div className="brz-url-row">
+                <button className="branches-subline" title={repoWeb ? t("在浏览器打开远程仓库") : repoUrl} disabled={!repoWeb} onClick={() => repoWeb && openUrl(repoWeb)}>
+                  {multiRemote && <b className="branches-subline-remote">{urlRemote}</b>}{repoUrl}</button>
+                <button className="ghost" title={t("刷新")} onClick={() => requestGitLog(session.id)}><RotateCw size={13} /></button>
+              </div> : null} />
           </section>
 
-          {/* ③ 提交拓扑:本地 + 远程提交历史。琥珀点/地址行都跟着上面选中的仓库 tab 走 */}
-          <section className="sync-zone">
-            <div className="sync-zone-h">
-              <span className="sec-label">{t("提交拓扑")}</span>
-              <span style={{ flex: 1 }} />
-              <button className="ghost" title={t("刷新")} onClick={() => requestGitLog(session.id)}><RotateCw size={13} /></button>
-            </div>
-            {repoUrl && <button className="branches-subline" title={repoWeb ? t("在浏览器打开远程仓库") : repoUrl} disabled={!repoWeb} onClick={() => repoWeb && openUrl(repoWeb)}>
-              {multiRemote && <b className="branches-subline-remote">{urlRemote}</b>}{repoUrl}</button>}
+          {/* ③ 提交拓扑:本地 + 远程提交历史。琥珀点跟着上面选中的仓库 tab 走。
+              标题去掉了 —— 上面地址行已经交代了"在看哪个远端",再来个「提交拓扑」只是重复地把图往下推。 */}
+          <section className="sync-zone brz-graph-zone">
             {log?.commits.length
               ? <div className="branches-graph"><Graph log={log} repo={graphRepo} current={current} dirty={dirty} picking={compareFrom} onChip={onChip} /></div>
               : <div className="muted branches-empty">{t("暂无提交记录")}</div>}
@@ -340,15 +341,17 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
 // tab 固定宽:宽度写死才能纯算出每条线的 x,不用 ResizeObserver 去量容器。
 // ponytail: 远端多到排不下时横向滚动,不做换行/自适应 —— 一个仓库配三个以上远端本就罕见。
 const TAB_W = 118, TAB_GAP = 10;
-// 侧槽:左边挂「远程分支」标签,右边挂「新建」虚线框。两边等宽是硬要求 —— 只在右边加一格,
+// 侧槽:右边挂「新建」虚线框,左边留一格等宽的空。两边等宽是硬要求 —— 只在右边加一格,
 // 整排就会左移半格,主干跟着偏出容器中线,和上面竖线①错开。
-const SIDE_W = 62;
-const FORK_Y = 34, DROP_H = 30, FAN_H = FORK_Y + DROP_H; // 主干高 / 分叉后下落段高
+// 「远程分支」标签不再占这一格(它是绝对定位挂在容器左边的),但左边这格空着正好是它的落脚处。
+const SIDE_W = 46;
+const FORK_Y = 34, DROP_H = 40, FAN_H = FORK_Y + DROP_H; // 主干高 / 分叉后下落段高
 const TAIL = 26; // 传输光点的尾迹长度(px,svg 用户坐标)
-function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, dirty, picking, onChip, onFocus, onRepo, onRun, pushing, pushFlow, pullFlow, onPush, onNew }:
+function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, dirty, picking, onChip, onFocus, onRepo, onRun, pushing, pushFlow, pullFlow, onPush, onNew, urlLine }:
   { local: GitBranch[]; remote: string[]; remoteSha?: Record<string, string>; remotes: string[]; current: string; focus: string; repo: string | null; dirty: boolean;
     picking: string | null; onChip: (ref: string, remote: boolean, e: React.MouseEvent) => void; onFocus: (name: string) => void; onRepo: (name: string) => void;
-    onRun: (cmd: string) => void; pushing: boolean; pushFlow: boolean; pullFlow: boolean; onPush: (cmd: string) => void; onNew: (target: "local" | "remote") => void }) {
+    onRun: (cmd: string) => void; pushing: boolean; pushFlow: boolean; pullFlow: boolean; onPush: (cmd: string) => void;
+    onNew: (target: "local" | "remote") => void; urlLine: React.ReactNode }) {
   const { t } = useTranslation();
   // 这次 push 点的是哪几个远端。只喂光束用,不进全局 —— 推完 pushFlow 一落就没人读了。
   const [beamTo, setBeamTo] = useState<string[] | null>(null);
@@ -416,12 +419,13 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
             {x.name === current && dirty && <span className="cg-ref-dirty" title={t("有未提交改动")}>*</span>}
           </button>
         ))}
-        {/* 建分支的入口从标题旁的小 + 挪到这里:和 chip 排在一起,读作"这一排的下一个",而不是标题的附属 */}
-        <button className="brz-new" title={t("新建本地分支")} onClick={() => onNew("local")}>
+        {/* 建分支的入口从标题旁的小 + 挪到这里:和 chip 排在一起,读作"这一排的下一个",而不是标题的附属。
+            本地这排是横的(+ 新建 并排):chip 只有 26px 高,竖排两行的框会比旁边高出一截,读作另一种东西 */}
+        <button className="brz-new inline" title={t("新建本地分支")} onClick={() => onNew("local")}>
           <Plus size={12} /><span>{t("新建")}</span>
         </button>
       </div>
-      {!lanes.length ? <div className="muted brz-empty">{t("暂无远程仓库")}</div> : (
+      {!!lanes.length && (
         <div className="brz-fan" style={{ width: rowW }}>
           <svg className="brz-map-svg" width={rowW} height={FAN_H}>
             <line x1={cx} y1={0} x2={cx} y2={FORK_Y} className={`brz-map-line ${isCur ? "cur" : ""}`} />
@@ -472,12 +476,15 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
         </div>
       )}
       {/* 仓库 tab:扇出的落点 + 提交拓扑的切换器。副标题是这个仓库里对应聚焦分支的那条远程分支;
-          还没有就是虚线的「新建」—— 占住位说明"这里本该有条分支",点一下(经 push 按钮)就建出来。 */}
-      {!!lanes.length && (
+          还没有就是虚线的「新建」—— 占住位说明"这里本该有条分支",点一下(经 push 按钮)就建出来。
+          外面这层撑满宽度,标题绝对定位钉在左边:tab 排是定宽居中的,远端一多就比抽屉宽、两头溢出,
+          标题跟着排走就会被裁掉。钉在容器左边才和「暂存区」「本地分支」对齐,也永远看得见。 */}
+      <div className="brz-remote">
+        <span className="sec-label brz-remote-h">{t("远程分支")}</span>
+        {!lanes.length ? <div className="muted brz-empty brz-remote-empty">{t("暂无远程仓库")}</div> : (
         <div className="brz-tabs" style={{ width: rowW, gap: TAB_GAP, "--side-w": `${SIDE_W}px` } as React.CSSProperties}>
-          {/* 左侧槽:和上面「本地分支」呼应的段落标题。它不只是装饰 —— 右边那个「新建」框必须有个等宽的对手,
-              整排才对称,主干才落在 tab 组正中。 */}
-          <span className="sec-label brz-side">{t("远程分支")}</span>
+          {/* 左侧空槽:纯配重。右边那个「新建」框必须有个等宽的对手,整排才对称,主干才落在 tab 组正中 */}
+          <span className="brz-side" />
           <div className="brz-tabrow" style={{ gap: TAB_GAP }}>
           {lanes.map((l) => (
             <button key={l.remote} className={`brz-tab ${l.remote === repo ? "sel" : ""} ${l.ref ? "" : "empty"} ${l.isUpstream ? "up" : ""}`}
@@ -501,7 +508,9 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
             <Plus size={12} /><span>{t("新建")}</span>
           </button>
         </div>
-      )}
+        )}
+        {urlLine}
+      </div>
       {/* 远程行缺本地端的老入口:同名本地分支已存在(只是没设上游)→ 设上游;否则检出并跟踪。
           现在挂在聚焦分支上:它有远程同名分支却没设上游时,提示一下就能补。 */}
       {b && !b.upstream && laneRefs.length > 0 && (
