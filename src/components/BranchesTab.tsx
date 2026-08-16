@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, RotateCw, ChevronRight, ChevronDown, Cloud, X, FileDiff, Plus, ArrowUp } from "lucide-react";
+import { ArrowLeft, RotateCw, ChevronRight, ChevronDown, Cloud, X, FileDiff, Plus, ArrowDown } from "lucide-react";
 import { createPortal } from "react-dom";
 import { openUrl } from "../native";
 import { html as diffToHtml } from "diff2html";
@@ -340,6 +340,9 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
 // tab 固定宽:宽度写死才能纯算出每条线的 x,不用 ResizeObserver 去量容器。
 // ponytail: 远端多到排不下时横向滚动,不做换行/自适应 —— 一个仓库配三个以上远端本就罕见。
 const TAB_W = 118, TAB_GAP = 10;
+// 侧槽:左边挂「远程分支」标签,右边挂「新建」虚线框。两边等宽是硬要求 —— 只在右边加一格,
+// 整排就会左移半格,主干跟着偏出容器中线,和上面竖线①错开。
+const SIDE_W = 62;
 const FORK_Y = 34, DROP_H = 30, FAN_H = FORK_Y + DROP_H; // 主干高 / 分叉后下落段高
 const TAIL = 26; // 传输光点的尾迹长度(px,svg 用户坐标)
 function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, dirty, picking, onChip, onFocus, onRepo, onRun, pushing, pushFlow, pullFlow, onPush, onNew }:
@@ -347,6 +350,8 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
     picking: string | null; onChip: (ref: string, remote: boolean, e: React.MouseEvent) => void; onFocus: (name: string) => void; onRepo: (name: string) => void;
     onRun: (cmd: string) => void; pushing: boolean; pushFlow: boolean; pullFlow: boolean; onPush: (cmd: string) => void; onNew: (target: "local" | "remote") => void }) {
   const { t } = useTranslation();
+  // 这次 push 点的是哪几个远端。只喂光束用,不进全局 —— 推完 pushFlow 一落就没人读了。
+  const [beamTo, setBeamTo] = useState<string[] | null>(null);
   const b = local.find((x) => x.name === focus);
   const isCur = focus === current;
   // 顶排顺序:main → 当前分支 → 其余按名排。聚焦的那个不挪位置 —— 点一下 chip 就重排,眼睛会跟丢。
@@ -366,23 +371,35 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
   const showPush = pushLanes.length > 0 && !pushFlow && !pushing;
 
   const total = lanes.length * TAB_W + Math.max(0, lanes.length - 1) * TAB_GAP;
-  const cx = total / 2;                                   // 主干 x = 整组 tab 的中线
-  const tabX = (i: number) => i * (TAB_W + TAB_GAP) + TAB_W / 2;  // 第 i 个 tab 的中心 x
+  const rowW = total + (SIDE_W + TAB_GAP) * 2;            // 整排宽 = 左侧槽 + tab 组 + 右侧槽
+  const cx = rowW / 2;                                    // 主干 x = 整组 tab 的中线(侧槽等宽,所以也是整排中线)
+  const tabX = (i: number) => SIDE_W + TAB_GAP + i * (TAB_W + TAB_GAP) + TAB_W / 2;  // 第 i 个 tab 的中心 x
   const beam = isCur ? (pushFlow ? "out" : pullFlow ? "in" : undefined) : undefined;
+  // 光束跑哪几条:点主干药丸=这次推的全部远端,点某条 ↑=只那条。在终端手敲 git push 时 beamTo 为空,
+  // 退回"所有还能推的" —— 光束是进度指示,宁可多画一条也不能一条不画。
+  const beamLanes = beam === "in" ? lanes.filter((l) => l.isUpstream)   // pull 只来自上游那条
+    : lanes.filter((l) => (beamTo ? beamTo.includes(l.remote) : canPush(l)));
+  const beamShow = beamLanes.length ? beamLanes : lanes;
 
   const tagTitle = (x: GitBranch) =>
     `${x.name}${x.name === current ? t("（当前）") : ""}${x.gone ? t(" · 上游 {{up}} 已在远程删除", { up: x.upstream }) : x.upstream ? `${t(" · 上游 {{up}}", { up: x.upstream })}${x.upstreamAuthor ? t("（{{author}}）", { author: x.upstreamAuthor }) : ""}${x.ahead ? ` ↑${x.ahead}` : ""}${x.behind ? ` ↓${x.behind}` : ""}` : t(" · 未跟踪")}${t(" · 点击聚焦,右键查看操作")}`;
 
   // 扇出:主干竖着下来到 FORK_Y,横向摊到各 tab 中心,再落一小段到 tab 顶。拐角走 6px 圆角
   // —— 直角在 1.5px 线宽上会顶出个小方块,圆角才读得出是"从主干分出去的"。
-  // beam 只跑主干:那是所有目标共用的一段,推一个还是推全部都成立。
   // 光束和线画在同一个 svg 里 —— 另起一个 absolute svg 盖上去,半像素定位差就永远对不齐。
   const R = 6, tipY = FAN_H;
+  // 一条 lane 的完整走线。y0=FORK_Y 画的是分叉段(主干另画),y0=0 画的是"主干+分叉"整条 —— 光束要跑的就是后者:
+  // 推到哪个远端,光就顺着哪条线一路走到那个 tab,不能在分叉口停下。
+  const forkPath = (x: number, y0: number) => Math.abs(x - cx) < 1
+    ? `M ${cx} ${y0} V ${tipY - 7}`
+    : `M ${cx} ${y0} V ${FORK_Y} H ${x - Math.sign(x - cx) * R} Q ${x} ${FORK_Y} ${x} ${FORK_Y + R} V ${tipY - 7}`;
+  // 整条走线的长度(圆角按 1/4 圆算)。光束靠 stroke-dashoffset 跑,得知道跑多远才停。
+  const forkLen = (x: number) => Math.abs(x - cx) < 1 ? tipY - 7
+    : FORK_Y + (Math.abs(x - cx) - R) + (Math.PI * R) / 2 + (tipY - 7 - FORK_Y - R);
   return (
     <div className="brz-spine">
       <div className="brz-spine-h">
         <span className="sec-label">{t("本地分支")}</span>
-        <button className="ghost brz-add" title={t("新建本地分支")} onClick={() => onNew("local")}><Plus size={12} /></button>
       </div>
       {!local.length && <span className="muted brz-empty">{t("暂无本地分支")}</span>}
       <div className="brz-band">
@@ -399,10 +416,14 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
             {x.name === current && dirty && <span className="cg-ref-dirty" title={t("有未提交改动")}>*</span>}
           </button>
         ))}
+        {/* 建分支的入口从标题旁的小 + 挪到这里:和 chip 排在一起,读作"这一排的下一个",而不是标题的附属 */}
+        <button className="brz-new" title={t("新建本地分支")} onClick={() => onNew("local")}>
+          <Plus size={12} /><span>{t("新建")}</span>
+        </button>
       </div>
       {!lanes.length ? <div className="muted brz-empty">{t("暂无远程仓库")}</div> : (
-        <div className="brz-fan" style={{ width: total }}>
-          <svg className="brz-map-svg" width={total} height={FAN_H}>
+        <div className="brz-fan" style={{ width: rowW }}>
+          <svg className="brz-map-svg" width={rowW} height={FAN_H}>
             <line x1={cx} y1={0} x2={cx} y2={FORK_Y} className={`brz-map-line ${isCur ? "cur" : ""}`} />
             <circle cx={cx} cy={1} r={2.5} className="brz-map-dot" />
             {lanes.map((l, i) => {
@@ -410,34 +431,23 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
               const cls = `brz-map-line ${isCur ? "cur" : ""} ${dash ? "dash" : ""}`;
               return (
                 <g key={l.remote}>
-                  <path fill="none" className={cls} d={Math.abs(x - cx) < 1
-                    ? `M ${cx} ${FORK_Y} V ${tipY - 7}`
-                    : `M ${cx} ${FORK_Y} H ${x - Math.sign(x - cx) * R} Q ${x} ${FORK_Y} ${x} ${FORK_Y + R} V ${tipY - 7}`} />
+                  <path fill="none" className={cls} d={forkPath(x, FORK_Y)} />
                   <path d={`M ${x - 4} ${tipY - 8} L ${x} ${tipY} L ${x + 4} ${tipY - 8} Z`} className={`brz-map-head ${dash ? "dash" : ""}`} />
                 </g>
               );
             })}
-            {beam && <>
-              <defs>
-                {/* userSpaceOnUse:直线的 bbox 一边宽为 0,objectBoundingBox 渐变在这种退化 bbox 上不可靠 */}
-                <linearGradient id="brz-beam-grad" gradientUnits="userSpaceOnUse" x1={-TAIL} y1={0} x2={0} y2={0}>
-                  <stop offset="0%" className="brz-beam-s0" />
-                  <stop offset="100%" className="brz-beam-s1" />
-                </linearGradient>
-                <clipPath id="brz-beam-clip"><rect x={cx - 4} y={0} width={8} height={FORK_Y} /></clipPath>
-              </defs>
-              {/* 光束本身仍是"沿 +x 跑"的那一套(brz-beam-run 是 translateX):把坐标系转 90° 就成了往下跑,
-                  pull 转 -90° 就是往上 —— 不用为竖脊再写一套 keyframes。clip 挂在外层 g 上(不带 transform),
-                  免得旋转把裁剪框一起转走。 */}
-              <g clipPath="url(#brz-beam-clip)">
-                <g transform={beam === "in" ? `translate(${cx} ${FORK_Y}) rotate(-90)` : `translate(${cx} 0) rotate(90)`}>
-                  <g className="brz-beam" style={{ "--beam-run": `${FORK_Y}px` } as React.CSSProperties}>
-                    <line x1={-TAIL} y1={0} x2={0} y2={0} className="brz-beam-tail" />
-                    <circle cx={0} cy={0} r={2.4} className="brz-beam-dot" />
-                  </g>
-                </g>
-              </g>
-            </>}
+            {/* 光束:每条被推的 lane 一条,走的是"主干 + 自己那条分叉"的整条线。多条时主干那段完全重合,
+                看起来就是一束光下来、到分叉口分成几束 —— 正是 push 实际在做的事。
+                实现走 stroke-dashoffset:一段 TAIL 长的实线在 (TAIL + 全长) 的虚线周期里向前挪,
+                拐弯和圆角自动跟着路径走。pull 反向,靠 animation-direction: reverse。
+                ponytail: 尾迹从"渐隐渐变"降级成实心圆头短线 —— 渐变得沿路径方向走,而路径要拐 90°,
+                一条 linearGradient 撑不住;要真做得按段切渐变或上 offset-path,不值这 0.3 秒。 */}
+            {beam && beamShow.map((l) => {
+              const x = tabX(lanes.indexOf(l));
+              return <path key={l.remote} className={`brz-beam ${beam}`} fill="none" d={forkPath(x, 0)}
+                // --beam-end 是 -全长,直接由 JS 给出:CSS 里 calc(var() * -1) 作用在无单位数上,各引擎认得不齐
+                style={{ "--beam-len": `${forkLen(x)}`, "--beam-end": `${-forkLen(x)}`, "--beam-tail": `${TAIL}` } as React.CSSProperties} />;
+            })}
           </svg>
           {/* 主干上的 push 药丸:一次推到全部还有东西可推的远端。推送进行中撤掉 —— 按钮压在线上会截断光束 */}
           {showPush && b && (
@@ -445,7 +455,7 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
               title={pushLanes.length > 1
                 ? t("一次推到全部 {{n}} 个远端:{{list}}", { n: pushLanes.length, list: pushLanes.map((l) => l.remote).join("、") })
                 : t("推送到 {{r}}:{{cmd}}", { r: pushLanes[0].ref || pushLanes[0].remote, cmd: pushCmdFor(pushLanes[0]) })}
-              onClick={(e) => { e.stopPropagation(); onPush(pushLanes.map(pushCmdFor).join(" && ")); }}>
+              onClick={(e) => { e.stopPropagation(); setBeamTo(pushLanes.map((l) => l.remote)); onPush(pushLanes.map(pushCmdFor).join(" && ")); }}>
               <span>push</span>
             </button>
           )}
@@ -454,8 +464,9 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
           {showPush && b && pushLanes.length > 1 && lanes.map((l, i) => canPush(l) && (
             <button key={l.remote} className="brz-push-one" style={{ left: tabX(i), top: FORK_Y + DROP_H / 2 }}
               title={t("只推到 {{r}}:{{cmd}}", { r: l.ref || l.remote, cmd: pushCmdFor(l) })}
-              onClick={(e) => { e.stopPropagation(); onPush(pushCmdFor(l)); }}>
-              <ArrowUp size={11} />
+              onClick={(e) => { e.stopPropagation(); setBeamTo([l.remote]); onPush(pushCmdFor(l)); }}>
+              {/* 箭头朝下:这张图是本地在上、远端在下,push 是往下走的 */}
+              <ArrowDown size={11} />
             </button>
           ))}
         </div>
@@ -463,7 +474,11 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
       {/* 仓库 tab:扇出的落点 + 提交拓扑的切换器。副标题是这个仓库里对应聚焦分支的那条远程分支;
           还没有就是虚线的「新建」—— 占住位说明"这里本该有条分支",点一下(经 push 按钮)就建出来。 */}
       {!!lanes.length && (
-        <div className="brz-tabs" style={{ width: total, gap: TAB_GAP }}>
+        <div className="brz-tabs" style={{ width: rowW, gap: TAB_GAP, "--side-w": `${SIDE_W}px` } as React.CSSProperties}>
+          {/* 左侧槽:和上面「本地分支」呼应的段落标题。它不只是装饰 —— 右边那个「新建」框必须有个等宽的对手,
+              整排才对称,主干才落在 tab 组正中。 */}
+          <span className="sec-label brz-side">{t("远程分支")}</span>
+          <div className="brz-tabrow" style={{ gap: TAB_GAP }}>
           {lanes.map((l) => (
             <button key={l.remote} className={`brz-tab ${l.remote === repo ? "sel" : ""} ${l.ref ? "" : "empty"} ${l.isUpstream ? "up" : ""}`}
               style={{ width: TAB_W }} title={l.ref
@@ -479,14 +494,13 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
               </span>
             </button>
           ))}
+          </div>
+          {/* 右侧槽:建远程分支的入口。原来是 tab 下面一行灰字,和 tab 不在一个层级上,读起来像脚注;
+              摆成同一排的虚线框才读得出"这里可以再多一个远端分支"。 */}
+          <button className="brz-new brz-side" title={t("新建远程分支")} onClick={() => onNew("remote")}>
+            <Plus size={12} /><span>{t("新建")}</span>
+          </button>
         </div>
-      )}
-      {/* 远程分支多到没有本地对应物时(别人推的分支),它们不在扇出里 —— 去下面拓扑图点那些 chip 检出。
-          这里只留一个建远程分支的入口,和原来的「远程分支 +」等价。 */}
-      {!!remotes.length && (
-        <button className="ghost brz-remote-add" onClick={() => onNew("remote")}>
-          <Plus size={11} /> {t("新建远程分支")}
-        </button>
       )}
       {/* 远程行缺本地端的老入口:同名本地分支已存在(只是没设上游)→ 设上游;否则检出并跟踪。
           现在挂在聚焦分支上:它有远程同名分支却没设上游时,提示一下就能补。 */}

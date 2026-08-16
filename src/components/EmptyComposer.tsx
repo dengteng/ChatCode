@@ -74,6 +74,9 @@ export function EmptyComposer() {
   useEffect(() => {
     const ed = edRef.current;
     if (ed && draft.html) { ed.innerHTML = draft.html; refresh(); }
+    // 这个目录已经有会话了就把 chip 摘掉:点加号的意思是"再开一个新的",不是"接着刚才那个项目"。
+    // 还没建过会话的目录留着 —— 那是用户选了还没发,清掉等于白选一次。
+    if (draft.cwd && state.index.some((e) => !e.casual && e.cwd === draft.cwd)) setCwd("");
     return () => { draft.html = edRef.current?.innerHTML ?? ""; draft.idc = idc.current; };
   }, []);
   useEffect(() => { draft.cwd = cwd; }, [cwd]);
@@ -266,7 +269,7 @@ export function EmptyComposer() {
     walk(ed); flush();
     if (blocks.length === 0) return;
     startSessionWithMessage(cwd, blocks); // cwd 为空 = 闲聊会话
-    // 发出去了才清草稿正文;所选目录留着(同一项目常连开几个会话,要闲聊点 chip 上的 × 清)
+    // 发出去了才清草稿正文;目录这里不清 —— 下次挂载时那个目录已经有会话了,上面那条会把它摘掉
     ed.innerHTML = ""; imgData.current.clear(); draft.html = "";
     setHasContent(false); setText(""); setImgCount(0); setPreview(null);
   };

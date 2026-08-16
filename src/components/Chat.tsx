@@ -2012,12 +2012,15 @@ function AskQuestionCard({ item, onSubmit, onCancel }: {
         {/* 自定义回复:输入即作为该题答案,覆盖选项 */}
         <div className={`ask-opt ask-custom ${custom[qIdx].trim() ? "on" : ""}`}>
           <span className="ask-opt-n"><Pencil size={12} /></span>
-          <input className="ask-custom-input" placeholder={t("自定义回复…(直接输入你的答案)")}
+          {/* textarea 不是 input:答案常是一整句规则,单行输入框只能看见光标附近那一截,
+              写到一半就没法回头核对自己写了什么。固定两行高(rows=2,不给拖拽把手),超出的部分在框内滚。 */}
+          <textarea className="ask-custom-input" rows={2} placeholder={t("自定义回复…(直接输入你的答案)")}
             value={custom[qIdx]}
             onChange={(e) => setCustomFor(qIdx, e.target.value)}
             // 回车一律不提交:用户常按回车录入输入法候选词,误触提交时内容还没输完。提交只走"提交"按钮。
+            // 这里回车是换行(textarea 本行为),正合用 —— 规则本来就常常分条写。
             // stopPropagation 拦住冒泡到卡片 onKey(那里也不再处理回车,双保险)。只保留 Esc 退出编辑。
-            onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Escape") { e.preventDefault(); (e.target as HTMLInputElement).blur(); cardRef.current?.focus(); } }} />
+            onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Escape") { e.preventDefault(); (e.target as HTMLTextAreaElement).blur(); cardRef.current?.focus(); } }} />
           {custom[qIdx].trim() && <span className="ask-check"><Check size={13} /></span>}
         </div>
       </div>

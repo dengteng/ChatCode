@@ -550,7 +550,11 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 .perm-actions .deny.hi { outline-color: #e5484d; }
 .perm-decided { font-size: 12px; color: var(--muted); }
 .ask-custom { align-items: center; }
-.ask-custom-input { flex: 1; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; color: var(--text); font-size: 13px; outline: none; }
+/* 两行高的输入框:font/line-height 写死才能让 rows=2 真的等于两行;resize:none 是因为高度已经定了,
+   拖拽把手只会把卡片扯变形。写超两行不截断,在框内滚 —— 答案是要被核对的,不能只让人看见光标那一截。 */
+.ask-custom-input { flex: 1; display: block; box-sizing: border-box; background: var(--panel); border: 1px solid var(--border);
+  border-radius: 6px; padding: 5px 8px; color: var(--text); font-family: inherit; font-size: 13px; line-height: 1.45;
+  outline: none; resize: none; overflow-y: auto; }
 
 .chip { font-size: 12px; color: var(--muted); background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px; }
 .chip.ok { color: var(--green); }
@@ -1759,14 +1763,26 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
 .brz-spine { display: flex; flex-direction: column; align-items: center; gap: 0; margin-top: 4px; }
 .brz-spine-h { display: flex; align-items: center; gap: 4px; align-self: stretch; margin-bottom: 6px; }
 /* 顶排本地分支 chip:一行排不下就换行,聚焦的那个不挪位置 */
-.brz-band { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; margin-bottom: 2px; }
+/* align-items:center 是给「新建」虚线框留的:它两行高,默认 stretch 会把旁边的 chip 一起拉长 */
+.brz-band { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 5px; margin-bottom: 2px; }
 /* width:auto 必须写:.brz-tag 基础样式是 width:100%(为原来那张整行宽的映射图定的),
    放进这排 flex 里会让每个 chip 都撑满整行、一行只站得下一个 */
 .brz-band .brz-tag { flex: none; width: auto; max-width: 180px; }
 /* 扇出区:svg 打底,push 按钮绝对定位压在线上 */
 .brz-fan { position: relative; }
-/* 仓库 tab:扇出的落点。选中的那个填 accent —— 它同时是下面拓扑图的过滤器,得一眼看出在看谁 */
-.brz-tabs { display: flex; justify-content: center; }
+/* 仓库 tab:扇出的落点。选中的那个填 accent —— 它同时是下面拓扑图的过滤器,得一眼看出在看谁。
+   一排三段:左「远程分支」标签槽 + 中间 tab 组 + 右「新建」虚线框。两个侧槽同宽(--side-w),
+   宽度和 JS 里的 SIDE_W 是同一个数,改一处得改两处 —— 扇出的 x 是纯算的,算错就整排错位。 */
+.brz-tabs { display: flex; justify-content: center; align-items: flex-start; }
+.brz-tabrow { display: flex; justify-content: center; }
+.brz-side { width: var(--side-w); flex: none; }
+.brz-tabs .brz-side.sec-label { margin-top: 4px; }
+/* 「新建」虚线框:第一行 +,第二行「新建」。本地分支排和远端 tab 排共用一套,两处读作同一种动作 */
+.brz-new { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+  flex: none; padding: 4px 8px; border: 1px dashed color-mix(in srgb, var(--accent) 38%, var(--border));
+  border-radius: 8px; background: none; color: var(--muted); font-family: inherit; font-size: 10.5px; line-height: 1.3;
+  cursor: pointer; transition: border-color .14s ease, color .14s ease; }
+.brz-new:hover { border-color: var(--accent); color: var(--accent); }
 .brz-tab { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 5px 8px 6px; min-width: 0;
   border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border)); border-radius: 8px;
   background: var(--bg); color: var(--text); font-family: inherit; cursor: pointer;
@@ -1782,10 +1798,10 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
 .brz-tab.sel .brz-tab-ref { color: color-mix(in srgb, #fff 78%, transparent); }
 .brz-tab.sel .brz-tab-ref:hover { background: color-mix(in srgb, #000 18%, transparent); color: #fff; }
 .brz-tab.empty .brz-tab-ref { font-style: italic; }
-/* 脊下面两条次要入口(建远程分支 / 补上游):字号压到提示级,别和 tab 抢 */
-.brz-remote-add, .brz-spine-tip { display: inline-flex; align-items: center; gap: 3px; margin-top: 8px; padding: 0;
+/* 脊下面那条次要入口(补上游):字号压到提示级,别和 tab 抢 */
+.brz-spine-tip { display: inline-flex; align-items: center; gap: 3px; margin-top: 8px; padding: 0;
   border: 0; background: none; font-size: 11px; color: var(--muted); cursor: pointer; }
-.brz-remote-add:hover, .brz-spine-tip:hover { color: var(--accent); }
+.brz-spine-tip:hover { color: var(--accent); }
 .brz-spine-tip { text-decoration: underline dotted; text-underline-offset: 2px; }
 /* 主干上的 push 按钮:压住连线(自带底色遮线),left/top 由 JS 按主干中点给 */
 .brz-push { position: absolute; z-index: 1; transform: translate(-50%, -50%);
@@ -1823,8 +1839,6 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
 .btn-dots i:nth-child(3) { animation-delay: .35s; }
 @keyframes btn-dot { 0%, 60%, 100% { opacity: .25; } 30% { opacity: 1; } }
 /* 标题右侧的新建按钮 */
-.brz-add { display: inline-flex; padding: 0; border: 0; background: none; color: var(--muted); cursor: pointer; }
-.brz-add:hover:not(:disabled) { color: var(--accent); }
 .brz-empty { font-size: 11px; padding: 2px 0; }
 /* 分支标签:8px 圆角,和抽屉里其它卡片/按钮同族。层级只用「填充的浓淡」表达,不靠换色相:
    普通=淡填充、当前分支=实心 accent、聚焦=外圈一道环。多一种颜色就多一套要背的色码。 */
@@ -1864,15 +1878,17 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
 /* 对端还不存在的那一行:线走虚线、端点和箭头一起淡下去,和「新建」标签的虚线框对上 */
 .brz-map-line.dash { stroke-dasharray: 3 3; }
 .brz-map-line.dash, .brz-map-dot.dash, .brz-map-head.dash { opacity: .75; }
-/* 传输中的光点:一颗亮点拖一条渐隐尾迹,匀速沿线滑到箭头根部,循环。
-   和线画在同一个 svg 里(见 wire()),所以永远同轴 —— 不再有"光束和线错开"的半像素问题。
-   只动 transform,走合成层;linear 是因为这是恒定的"在传输"指示,不是入场动效。 */
-.brz-beam { animation: brz-beam-run var(--beam-dur) linear infinite; }
-@keyframes brz-beam-run { from { transform: translateX(0); } to { transform: translateX(var(--beam-run)); } }
-.brz-beam-tail { stroke: url(#brz-beam-grad); stroke-width: 2; stroke-linecap: round; }
-.brz-beam-s0 { stop-color: var(--accent); stop-opacity: 0; }
-.brz-beam-s1 { stop-color: var(--accent); stop-opacity: .85; }
-.brz-beam-dot { fill: color-mix(in srgb, var(--accent) 55%, #fff); }
+/* 传输中的光束:一段短实线沿着"主干 + 这次要推的那条分叉"匀速跑到箭头根部,循环。
+   走 stroke-dashoffset 而不是 transform —— 路径要拐 90° 还带圆角,位移动画只会走直线穿出去;
+   dash 是贴着路径长度算的,拐弯自动跟。虚线周期 = 尾长 + 全长,所以同时只有一段在线上。
+   和线画在同一个 svg 里,所以永远同轴 —— 不再有"光束和线错开"的半像素问题。
+   linear 是因为这是恒定的"在传输"指示,不是入场动效。 */
+.brz-beam { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; opacity: .85;
+  stroke-dasharray: var(--beam-tail) var(--beam-len);
+  animation: brz-beam-run var(--beam-dur) linear infinite; }
+@keyframes brz-beam-run { from { stroke-dashoffset: var(--beam-tail); } to { stroke-dashoffset: var(--beam-end); } }
+/* pull:同一条线反着跑(远端 → 本地),不用第二套 keyframes */
+.brz-beam.in { animation-direction: reverse; }
 /* 提交拓扑的入场/落地动效(§4):push 不产生新提交,真实发生的是远程 chip 从旧行挪到新行、
    中间几行的琥珀点熄灭。所以动效就按这两件事做,不假装"长出一条提交"。
    chip 换行 = React 那边卸载再挂载,mount 动画自然只在真挪窝时播;数据没变时 key 稳定,不会乱闪。 */
@@ -1949,7 +1965,7 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
   content: ""; position: absolute; left: -3px; top: 0; width: 0; height: 0;
   border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 6px solid currentColor;
 }
-/* 传输光点:和分支映射那条横线上的 .brz-beam 同一颗 —— 2.4px 亮点拖 26px 渐隐尾迹,
+/* 传输光点:和扇出区的 .brz-beam 同一束 —— 2.4px 亮点拖 26px 渐隐尾迹,
    匀速从暂存区淌到箭头根部,循环。原来这里是一团 6px 宽、32px 高的软光斑,又粗又糊,
    还只在周期中段露脸(mark 居中 + translateY(-100%→100%),半个周期是空的),看着像另一个组件。
    盒子撑满整条线(height:100%),光点/尾迹用固定 px 画在盒顶,只推 transform,全程走合成层。
@@ -1960,7 +1976,7 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
   background:
     /* 亮点:圆心 28.6px、半径 2.4px,正好接在尾迹末端(26.2px)之后;外沿留 .5px 过渡免得锯齿 */
     radial-gradient(circle at 50% 28.6px, color-mix(in srgb, var(--accent) 55%, #fff) 2.2px, transparent 2.9px),
-    /* 尾迹:26px,从透明渐到 accent .85 —— 对应 svg 里 brz-beam-grad 的 s0→s1 */
+    /* 尾迹:26px,从透明渐到 accent .85 —— 长度对齐 svg 那束的 TAIL */
     linear-gradient(to bottom, transparent, color-mix(in srgb, var(--accent) 85%, transparent)) no-repeat;
   background-size: 100% 100%, 2px 26.2px;
   background-position: 0 0, center 0;
