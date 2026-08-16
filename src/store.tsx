@@ -7,6 +7,7 @@ import { ConfirmDialog } from "./components/ConfirmDialog";
 import { toast, dismissToast } from "./components/Toast";
 import i18n, { getLang } from "./i18n";
 import { PERMISSION_PRESETS, type PermissionMode } from "./permissions";
+import { COMMIT_HOLD_MS } from "./lib/gitcmd";
 
 // 把顶级会话 sessionId 移动到 groupId(null=移出分组),插到 beforeId 之前(null=该组末尾)。
 // 前端乐观更新与后端持久化用同一套语义,保证拖拽后立即到位、广播回来不跳动。
@@ -733,7 +734,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const opRaw = gitOpLabel(m.command);
             const op = opRaw ? i18n.t(opRaw) : "";
             const tail = (m.output || "").trim().split("\n").pop() || m.command;
-            if (op) toast(m.exitCode === 0 ? i18n.t("已{{op}}", { op }) : i18n.t("{{op}}失败：{{tail}}", { op, tail }), m.exitCode === 0 ? "success" : "error");
+            // commit 成功的这句压后到流光跑完再说(分支页那条线最短亮 COMMIT_HOLD_MS)——
+            // 提交常常几百毫秒就完事,提示先弹、线还在跑,读起来像"说完成了但还没完"。失败不压:错误要立刻见人。
+            const say = () => toast(m.exitCode === 0 ? i18n.t("已{{op}}", { op }) : i18n.t("{{op}}失败：{{tail}}", { op, tail }), m.exitCode === 0 ? "success" : "error");
+            if (op) { if (m.exitCode === 0 && /\bgit\s+commit\b/.test(m.command)) setTimeout(say, COMMIT_HOLD_MS); else say(); }
             // 首页分支页(id 形如 home:<路径>)没有消息流可打印输出,失败会静默 —— 用 toast 兜一下
             else if (m.sessionId.startsWith("home:") && m.exitCode !== 0)
               toast(i18n.t("命令失败({{code}})：{{tail}}", { code: m.exitCode, tail }), "error");

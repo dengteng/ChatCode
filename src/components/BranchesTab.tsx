@@ -6,7 +6,7 @@ import { html as diffToHtml } from "diff2html";
 import "diff2html/bundles/css/diff2html.min.css";
 import type { Session, GitLogData, GitCommit, GitBranch } from "../types";
 import { useStore } from "../store";
-import { q, pushCmd, pushTargets, lanesFor, unpushedFor, type RepoLane } from "../lib/gitcmd";
+import { q, pushCmd, pushTargets, lanesFor, unpushedFor, COMMIT_HOLD_MS, type RepoLane } from "../lib/gitcmd";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { useTranslation } from "react-i18next";
 import i18n from "../i18n";
@@ -86,7 +86,9 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
   }, [session.id]);
   // 流光只在 commit / push / pull 真正进行时点亮,且至少亮 useMinHold 那么久
   const commitBusy = !!committing || committingOp;
-  const commitFlow = useMinHold(commitBusy);
+  // commit 那条单独给 3s:它只有一条线,光束跑一趟就没了,1.4s 眼睛还没跟上就结束。
+  // 成功提示也压后同样长(store 的 terminal_result),不然提示先到、线还在跑。
+  const commitFlow = useMinHold(commitBusy, COMMIT_HOLD_MS);
   const pushFlow = useMinHold(syncing === "push");
   const pullFlow = useMinHold(syncing === "pull");
   // 结果提示不在这儿做:store 的 terminal_result 统一按命令报「已提交/已推送/…失败」,
@@ -345,11 +347,10 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
 //     `git push` 推的是你实际所在的分支,给别的分支画 push 按钮等于骗人。
 //   - 底下一排仓库 tab 既是扇出的落点,也是提交拓扑的切换器(选中谁,下面就按谁算未推送、显示谁的地址)。
 // tab 固定宽:宽度写死才能纯算出每条线的 x,不用 ResizeObserver 去量容器。
-// ponytail: 远端多到排不下时横向滚动,不做换行/自适应 —— 一个仓库配三个以上远端本就罕见。
+// ponytail: 远端多到排不下时横向溢出,不做换行/自适应 —— 一个仓库配三个以上远端本就罕见。
 const TAB_W = 118, TAB_GAP = 10;
-// 侧槽:右边挂「新建」虚线框,左边留一格等宽的空。两边等宽是硬要求 —— 只在右边加一格,
-// 整排就会左移半格,主干跟着偏出容器中线,和上面竖线①错开。
-// 「远程分支」标签不再占这一格(它是绝对定位挂在容器左边的),但左边这格空着正好是它的落脚处。
+// 右侧槽:挂「新建」虚线框。左边那格配重槽拆了 —— 整排改成左对齐(和上面 chip 排、和三个标题同一条左线),
+// 不再有"落在容器中线"这回事,主干直接对准聚焦 chip 的中线。
 const SIDE_W = 46;
 const FORK_Y = 34, DROP_H = 40, FAN_H = FORK_Y + DROP_H; // 主干高 / 分叉后下落段高
 const TAIL = 26; // 传输光点的尾迹长度(px,svg 用户坐标)
@@ -362,27 +363,32 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
   // 这次 push 点的是哪几个远端。只喂光束用,不进全局 —— 推完 pushFlow 一落就没人读了。
   const [beamTo, setBeamTo] = useState<string[] | null>(null);
   const bandRef = useRef<HTMLDivElement>(null);
-  const [dx, setDx] = useState({ focus: 0, cur: 0 }); // chip 中心相对竖脊中线的偏移(px)
+  const [dx, setDx] = useState({ focus: 0, cur: 0, w: 0 }); // chip 中心距竖脊左边的距离(px) + 竖脊宽
   useLayoutEffect(() => {
     const band = bandRef.current, root = band?.parentElement;
     if (!band || !root) return;
-    const mid = root.getBoundingClientRect(), c0 = mid.left + mid.width / 2;
+    const box = root.getBoundingClientRect();
     const at = (name: string) => {
       const el = band.querySelector(`[data-ref="${CSS.escape(name)}"]`) as HTMLElement | null;
       if (!el) return 0;
       const r = el.getBoundingClientRect();
-      return Math.round(r.left + r.width / 2 - c0);
+      return Math.round(r.left + r.width / 2 - box.left);   // 整排左对齐了,一律按"距左边多远"量
     };
-    const next = { focus: at(focus), cur: at(current) };
-    setDx((p) => (p.focus === next.focus && p.cur === next.cur ? p : next));
-    onStem(next.cur);
+    const next = { focus: at(focus), cur: at(current), w: Math.round(box.width) };
+    setDx((p) => (p.focus === next.focus && p.cur === next.cur && p.w === next.w ? p : next));
+    // 竖线①那块仍是居中布局(它在竖脊外面,拿不到这个左边),换算成"相对中线"的偏移给它
+    onStem(next.cur - next.w / 2);
   });
   const b = local.find((x) => x.name === focus);
   const isCur = focus === current;
-  // 顶排顺序:main → 当前分支 → 其余按名排。聚焦的那个不挪位置 —— 点一下 chip 就重排,眼睛会跟丢。
-  const rank = (x: GitBranch) => (x.name === "main" ? 0 : x.name === current ? 1 : 2);
+  // 顶排顺序:当前分支 → main → 其余按名排。当前分支钉死在最左第一位 —— 整排不换行、从左往右排,
+  // 排在第一格的那个才是永远看得见的;而这张图讲的就是当前分支往哪推。聚焦切换不重排,眼睛才跟得住。
+  const rank = (x: GitBranch) => (x.name === current ? 0 : x.name === "main" ? 1 : 2);
   const localSorted = [...local].sort((x, y) => rank(x) - rank(y) || x.name.localeCompare(y.name));
-  const lanes = lanesFor(focus, remotes, remote, b?.upstream);
+  // 上游那条 lane 同理排最左:它是当前分支真正映射到的远程分支,和上面第一格的 chip 对齐着读。
+  // sort 稳定,其余远端保持 remotes 的原顺序。
+  const lanes = lanesFor(focus, remotes, remote, b?.upstream)
+    .sort((x, y) => Number(y.isUpstream) - Number(x.isUpstream));
   const laneRefs = lanes.map((l) => l.ref).filter(Boolean) as string[];
   const up = lanes.find((l) => l.isUpstream)?.ref;
   // push 按钮只给当前分支,且只给"确实还有东西可推"的远端(判定见 pushTargets)。
@@ -396,12 +402,12 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
   const showPush = pushLanes.length > 0 && !pushFlow && !pushing;
 
   const total = lanes.length * TAB_W + Math.max(0, lanes.length - 1) * TAB_GAP;
-  const rowW = total + (SIDE_W + TAB_GAP) * 2;            // 整排宽 = 左侧槽 + tab 组 + 右侧槽
-  // 主干 x 不再是容器中线,而是聚焦那个 chip 的中线 —— 线要从这条分支底边正中长出来才读得通。
-  // chip 宽度随分支名变,只能量:dx = chip 中心 - 竖脊中心。上面竖线①同样按 dx.cur 平移(它指的是当前分支)。
+  const rowW = total + SIDE_W + TAB_GAP;                  // 整排宽 = tab 组 + 右侧「新建」槽
+  // 主干 x = 聚焦那个 chip 的中线(距竖脊左边多远)—— 线要从这条分支底边正中长出来才读得通。
+  // chip 宽度随分支名变,只能量。上面竖线①同样按 dx.cur 平移(它指的是当前分支)。
   // ponytail: 每次渲染量一遍(值没变就不 setState),不上 ResizeObserver —— 抽屉宽变了会重渲染,够用。
-  const cx = rowW / 2 + dx.focus;
-  const tabX = (i: number) => SIDE_W + TAB_GAP + i * (TAB_W + TAB_GAP) + TAB_W / 2;  // 第 i 个 tab 的中心 x
+  const cx = dx.focus;
+  const tabX = (i: number) => i * (TAB_W + TAB_GAP) + TAB_W / 2;  // 第 i 个 tab 的中心 x(整排左对齐,左边不再留配重槽)
   const beam = isCur ? (pushFlow ? "out" : pullFlow ? "in" : undefined) : undefined;
   // 光束跑哪几条:点主干药丸=这次推的全部远端,点某条 ↑=只那条。在终端手敲 git push 时 beamTo 为空,
   // 退回"所有还能推的" —— 光束是进度指示,宁可多画一条也不能一条不画。
@@ -452,9 +458,11 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
           <Plus size={12} /><span>{t("新建")}</span>
         </button>
       </div>
+      {/* 画布至少要包住主干:聚焦的 chip 可能排在很靠右的位置(名字长的一串),svg 只有 tab 排那么宽的话
+          主干和它的圆角会被裁掉半截。多出来的宽度是透明的,不影响布局。 */}
       {!!lanes.length && (
-        <div className="brz-fan" style={{ width: rowW }}>
-          <svg className="brz-map-svg" width={rowW} height={FAN_H}>
+        <div className="brz-fan" style={{ width: Math.max(rowW, cx + 8) }}>
+          <svg className="brz-map-svg" width={Math.max(rowW, cx + 8)} height={FAN_H}>
             <line x1={cx} y1={0} x2={cx} y2={FORK_Y} className={`brz-map-line ${isCur ? "cur" : ""}`} />
             <circle cx={cx} cy={1} r={2.5} className="brz-map-dot" />
             {lanes.map((l, i) => {
@@ -512,8 +520,6 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
         <span className="sec-label brz-remote-h">{t("远程分支")}</span>
         {!lanes.length ? <div className="muted brz-empty brz-remote-empty">{t("暂无远程仓库")}</div> : (
         <div className="brz-tabs" style={{ width: rowW, gap: TAB_GAP, "--side-w": `${SIDE_W}px` } as React.CSSProperties}>
-          {/* 左侧空槽:纯配重。右边那个「新建」框必须有个等宽的对手,整排才对称,主干才落在 tab 组正中 */}
-          <span className="brz-side" />
           <div className="brz-tabrow" style={{ gap: TAB_GAP }}>
           {lanes.map((l) => (
             <button key={l.remote} className={`brz-tab ${l.remote === repo ? "sel" : ""} ${l.ref ? "" : "empty"} ${l.isUpstream ? "up" : ""}`}

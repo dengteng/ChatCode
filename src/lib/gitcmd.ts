@@ -2,6 +2,10 @@
 
 export function q(value: string) { return `'${value.replace(/'/g, "'\\''")}'`; }
 
+// commit 的流光最短亮多久 / 成功提示压后多久。两处必须同一个数:提示先于流光结束弹出,
+// 就成了"还在跑但已经说完成了"。放这儿是因为一处在 BranchesTab、一处在 store 的 terminal_result。
+export const COMMIT_HOLD_MS = 3000;
+
 // 把本地分支推到某个远程分支(remoteRef 形如 "origin/main")。
 //
 // 为什么不发裸 `git push`:它只在「本地分支名 == 上游分支名」时才跑得动。git 默认 push.default=simple,

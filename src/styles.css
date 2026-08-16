@@ -1759,14 +1759,19 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
   transition: grid-template-rows .26s cubic-bezier(0.23,1,0.32,1), opacity .16s ease; }
 .brz-collapse.open { grid-template-rows: 1fr; opacity: 1; }
 .brz-collapse-in { overflow: hidden; min-height: 0; }
-/* 竖脊:分支带 → 扇出 → 仓库 tab,整列居中,主干落在容器中线上(和上面竖线①同轴) */
-.brz-spine { position: relative; display: flex; flex-direction: column; align-items: center; gap: 0; margin-top: 4px; padding-top: 20px; }
+/* 竖脊:分支带 → 扇出 → 仓库 tab。整列左对齐 —— 三个标题(暂存区/本地分支/远程分支)钉在同一条左线上,
+   chip 排和 tab 排从这条线往右依次排,主干对准聚焦 chip 的中线(不再是容器中线)。 */
+.brz-spine { position: relative; display: flex; flex-direction: column; align-items: stretch; gap: 0; margin-top: 4px; padding-top: 20px; }
 /* 标题绝对定位钉左边,和「远程分支」一个路子:它不占高度,chip 排的顶就是这 20px 标题带的下沿 ——
    上面那条线的落点才算得准(算法见 .branches-tab > .brz-collapse)。 */
 .brz-spine-h { position: absolute; left: 0; top: 0; display: flex; align-items: center; gap: 4px; }
-/* 顶排本地分支 chip:一行排不下就换行,聚焦的那个不挪位置 */
-/* align-items:center 是给「新建」虚线框留的:它两行高,默认 stretch 会把旁边的 chip 一起拉长 */
-.brz-band { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 5px; margin-bottom: 2px; }
+/* 顶排本地分支 chip:左对齐、一行排到底不换行,当前分支钉在第一格(排序在 JS 里)。
+   排不下就横向滚动 —— 换行会让这排的高度随分支数跳,下面整张图跟着上下移。
+   ponytail: 滚动后主干仍按渲染时量的位置画,和滚走的 chip 会错开 —— 第一格永远是当前分支,不滚就对得上。
+   align-items:center 是给「新建」虚线框留的:它两行高,默认 stretch 会把旁边的 chip 一起拉长 */
+.brz-band { display: flex; flex-wrap: nowrap; align-items: center; justify-content: flex-start; gap: 5px; margin-bottom: 2px;
+  overflow-x: auto; scrollbar-width: none; }
+.brz-band::-webkit-scrollbar { display: none; }
 /* width:auto 必须写:.brz-tag 基础样式是 width:100%(为原来那张整行宽的映射图定的),
    放进这排 flex 里会让每个 chip 都撑满整行、一行只站得下一个 */
 .brz-band .brz-tag { flex: none; width: auto; max-width: 180px; }
@@ -1776,15 +1781,15 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
 .brz-fan { position: relative; margin-bottom: -20px; }
 /* 远程分支段:撑满抽屉宽,标题绝对定位钉在左边(和「暂存区」「本地分支」同一条左线),
    里面的 tab 排照旧定宽居中。标题不占布局宽度是关键 —— 占了就得跟着居中的排走,排一溢出它就被裁。 */
-.brz-remote { position: relative; align-self: stretch; display: flex; flex-direction: column; align-items: center; padding-top: 20px; }
+.brz-remote { position: relative; align-self: stretch; display: flex; flex-direction: column; align-items: flex-start; padding-top: 20px; }
 .brz-remote-h { position: absolute; left: 0; top: 0; }
 .brz-remote-empty { margin: 2px 0 0; }
 /* 仓库 tab:扇出的落点。选中的那个填 accent —— 它同时是下面拓扑图的过滤器,得一眼看出在看谁。
-   一排三段:左空配重槽 + 中间 tab 组 + 右「新建」虚线框。两个侧槽同宽(--side-w),
+   一排两段:tab 组从容器左边起排 + 右「新建」虚线框(宽 --side-w),
    宽度和 JS 里的 SIDE_W 是同一个数,改一处得改两处 —— 扇出的 x 是纯算的,算错就整排错位。
    align-items:stretch:让右边的「新建」框自己长到 tab 一样高,不用去抄 tab 的内边距 */
-.brz-tabs { display: flex; justify-content: center; align-items: stretch; }
-.brz-tabrow { display: flex; justify-content: center; }
+.brz-tabs { display: flex; justify-content: flex-start; align-items: stretch; }
+.brz-tabrow { display: flex; justify-content: flex-start; flex-wrap: nowrap; }
 .brz-side { width: var(--side-w); flex: none; }
 /* 地址行:紧贴 tab 下方(5px),左边和「远程分支」标题对齐。右端挂刷新 —— 原来它在「提交拓扑」标题那行,
    标题去掉后没地方站,挪来这里正好:这行讲的就是"在看哪个远端",刷的也是那个远端的历史。 */
@@ -1816,7 +1821,7 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
 .brz-tab.sel .brz-tab-ref:hover { background: color-mix(in srgb, #000 18%, transparent); color: #fff; }
 .brz-tab.empty .brz-tab-ref { font-style: italic; }
 /* 脊下面那条次要入口(补上游):字号压到提示级,别和 tab 抢 */
-.brz-spine-tip { display: inline-flex; align-items: center; gap: 3px; margin-top: 8px; padding: 0;
+.brz-spine-tip { align-self: flex-start; display: inline-flex; align-items: center; gap: 3px; margin-top: 8px; padding: 0;
   border: 0; background: none; font-size: 11px; color: var(--muted); cursor: pointer; }
 .brz-spine-tip:hover { color: var(--accent); }
 .brz-spine-tip { text-decoration: underline dotted; text-underline-offset: 2px; }
@@ -1856,7 +1861,7 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
 .btn-dots i:nth-child(3) { animation-delay: .35s; }
 @keyframes btn-dot { 0%, 60%, 100% { opacity: .25; } 30% { opacity: 1; } }
 /* 标题右侧的新建按钮 */
-.brz-empty { font-size: 11px; padding: 2px 0; }
+.brz-empty { align-self: flex-start; font-size: 11px; padding: 2px 0; }
 /* 分支标签:8px 圆角,和抽屉里其它卡片/按钮同族。层级只用「填充的浓淡」表达,不靠换色相:
    普通=淡填充、当前分支=实心 accent、聚焦=外圈一道环。多一种颜色就多一套要背的色码。 */
 .brz-tag {
@@ -1951,15 +1956,17 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
 .sync-zone { padding: 8px 2px; }
 /* 拓扑图那段没标题了,自己的上内边距 + 上一段的下内边距 + 列表 gap 叠出一大块空白,
    图看着像和上面的地址行断开。收掉自己那份,再吃掉 gap 的大半 */
-.brz-graph-zone { padding-top: 0; margin-top: -22px; }
+.brz-graph-zone { padding-top: 0; margin-top: -32px; }
 /* 暂存区 → 连线:同样是三层空白叠加(段落下内边距 + 列表 gap + 连线自己的上内边距),
    线看着不是从文件列表里长出来的。吃掉 gap。
    margin-bottom 是延长段的配重:线要一路画到分支 chip 的上边缘,中间隔着 gap 10 + 段内边距 8 +
    竖脊 margin 4 + 标题带 20 = 42px,加上自己的 padding-bottom 2 —— 尾段 .sync-stem 高 44,
    这里就减回 44,后面的竖脊一点不动。收起时不减 —— 那段线本来就不在,减了会把竖脊往上拽。 */
-.branches-tab > .brz-collapse { margin-top: -12px; transition: grid-template-rows .26s cubic-bezier(0.23,1,0.32,1), opacity .16s ease, margin-bottom .26s cubic-bezier(0.23,1,0.32,1); }
+.branches-tab > .brz-collapse { margin-top: -18px; transition: grid-template-rows .26s cubic-bezier(0.23,1,0.32,1), opacity .16s ease, margin-bottom .26s cubic-bezier(0.23,1,0.32,1); }
 .branches-tab > .brz-collapse.open { margin-bottom: -44px; }
 .sync-wire.sync-stem { flex: 0 0 44px; }
+/* 线头那段压短:上面 margin-top 已经把空白吃干净,线就直接从文件列表底下长出来,不必再走满 16px */
+.sync-link > .sync-wire:first-child { flex-basis: 10px; }
 .sync-zone-h { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-bottom: 6px; }
 .sync-zone-tag { flex-shrink: 0; font-size: 10.5px; font-weight: 700; padding: 1px 8px; border-radius: 999px; }
 .sync-zone-tag.local { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
@@ -1993,26 +2000,23 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
   content: ""; position: absolute; left: -3px; top: 0; width: 0; height: 0;
   border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 6px solid currentColor;
 }
-/* 传输光点:和扇出区的 .brz-beam 同一束 —— 2.4px 亮点拖 26px 渐隐尾迹,
-   匀速从暂存区淌到箭头根部,循环。原来这里是一团 6px 宽、32px 高的软光斑,又粗又糊,
-   还只在周期中段露脸(mark 居中 + translateY(-100%→100%),半个周期是空的),看着像另一个组件。
-   盒子撑满整条线(height:100%),光点/尾迹用固定 px 画在盒顶,只推 transform,全程走合成层。
-   尾迹 2px 宽对齐竖线,亮点 4.8px 直径 —— 尺寸、配色、--beam-dur 全部照抄横线那颗。 */
+/* 传输光点:和扇出区的 .brz-beam 完全同一束 —— 26px 实心亮段(不是渐隐尾迹拖个亮点),
+   2px 宽对齐竖线,匀速从线头淌到箭头根部,循环。
+   为什么不再用"渐变尾迹 + 亮点":那是给这条线单独造的第二套语言,下面扇出那几条是实心段,
+   两段连线本是同一条链路,光却长得不一样。长度(26 = TAIL)、颜色、--beam-dur 全部对齐。
+   盒子撑满整条线(height:100%),亮段用固定 px 画在盒顶,只推 transform,全程走合成层。 */
 .sync-link.flow-down::after {
-  content: ""; position: absolute; top: 0; height: 100%; width: 5px;
-  left: calc(50% - 2.5px); pointer-events: none;
-  background:
-    /* 亮点:圆心 28.6px、半径 2.4px,正好接在尾迹末端(26.2px)之后;外沿留 .5px 过渡免得锯齿 */
-    radial-gradient(circle at 50% 28.6px, color-mix(in srgb, var(--accent) 55%, #fff) 2.2px, transparent 2.9px),
-    /* 尾迹:26px,从透明渐到 accent .85 —— 长度对齐 svg 那束的 TAIL */
-    linear-gradient(to bottom, transparent, color-mix(in srgb, var(--accent) 85%, transparent)) no-repeat;
-  background-size: 100% 100%, 2px 26.2px;
-  background-position: 0 0, center 0;
+  content: ""; position: absolute; top: 0; height: 100%; width: 2px;
+  left: calc(50% - 1px); pointer-events: none;
+  /* 两个同色 stop = 一段实心;用 background 而不是给盒子设高度,是因为终点要用 translateY(100%),
+     而百分比按元素自身高度算 —— 盒子必须和整条线等高 */
+  background: linear-gradient(color-mix(in srgb, var(--accent) 85%, transparent), color-mix(in srgb, var(--accent) 85%, transparent)) no-repeat center 0;
+  background-size: 2px 26px;
   animation: sync-beam-down var(--beam-dur) linear infinite;
 }
-/* 起点:整颗光点(31px)藏在线头之上;终点:亮点落在箭头根部(箭头 6px + 底 padding 2px = 8px,
-   亮点中心距盒顶 28.6px → 100% - 39px)。.sync-link 本身 overflow:hidden,两头自动裁掉。 */
-@keyframes sync-beam-down { from { transform: translateY(-31px); } to { transform: translateY(calc(100% - 39px)); } }
+/* 起点:整段(26px)藏在线头之上;终点:段尾落在箭头根部(箭头 6px + 底 padding 2px = 8px → 100% - 26 - 8)。
+   .sync-link 本身 overflow:hidden,两头自动裁掉。 */
+@keyframes sync-beam-down { from { transform: translateY(-26px); } to { transform: translateY(calc(100% - 34px)); } }
 
 /* 拉/推药丸:pull 绿(远端来)、push 蓝(推出去);入场从 0.96 微放大淡入,悬停微抬,按压缩(全局 :active) */
 .sync-act { position: relative; display: inline-flex; align-items: center; gap: 5px; padding: 5px 12px 5px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; cursor: pointer;
