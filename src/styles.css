@@ -1755,14 +1755,40 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
   transition: grid-template-rows .26s cubic-bezier(0.23,1,0.32,1), opacity .16s ease; }
 .brz-collapse.open { grid-template-rows: 1fr; opacity: 1; }
 .brz-collapse-in { overflow: hidden; min-height: 0; }
-.brz-map { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
-.brz-row { display: flex; align-items: center; }
-.brz-cell { flex: 1 1 0; min-width: 0; display: flex; }
-/* 一个本地分支挂多个远端:右格竖排。行是 align-items:center,所以连线自动对准这一组的中线 */
-.brz-cell.multi { flex-direction: column; gap: 4px; }
-.brz-link { position: relative; flex: none; display: flex; align-items: center; justify-content: center; }
-/* 主干上的 push 按钮:压住连线(自带底色遮线),left 由 JS 按主干中点给,连线带宽度按需塞得下它 */
-.brz-push { position: absolute; top: 50%; transform: translate(-50%, -50%); z-index: 1;
+/* 竖脊:分支带 → 扇出 → 仓库 tab,整列居中,主干落在容器中线上(和上面竖线①同轴) */
+.brz-spine { display: flex; flex-direction: column; align-items: center; gap: 0; margin-top: 4px; }
+.brz-spine-h { display: flex; align-items: center; gap: 4px; align-self: stretch; margin-bottom: 6px; }
+/* 顶排本地分支 chip:一行排不下就换行,聚焦的那个不挪位置 */
+.brz-band { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; margin-bottom: 2px; }
+/* width:auto 必须写:.brz-tag 基础样式是 width:100%(为原来那张整行宽的映射图定的),
+   放进这排 flex 里会让每个 chip 都撑满整行、一行只站得下一个 */
+.brz-band .brz-tag { flex: none; width: auto; max-width: 180px; }
+/* 扇出区:svg 打底,push 按钮绝对定位压在线上 */
+.brz-fan { position: relative; }
+/* 仓库 tab:扇出的落点。选中的那个填 accent —— 它同时是下面拓扑图的过滤器,得一眼看出在看谁 */
+.brz-tabs { display: flex; justify-content: center; }
+.brz-tab { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 5px 8px 6px; min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border)); border-radius: 8px;
+  background: var(--bg); color: var(--text); font-family: inherit; cursor: pointer;
+  transition: border-color .14s ease, background .14s ease; }
+.brz-tab:hover { border-color: var(--accent); }
+.brz-tab.sel { border-color: transparent; background: var(--accent); color: #fff; }
+/* 这个远端里还没有聚焦分支对应的分支:虚线框,和「新建」标签一套语言 */
+.brz-tab.empty { border-style: dashed; }
+.brz-tab-remote { font-size: 11px; font-weight: 700; line-height: 1.3; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.brz-tab-ref { display: inline-flex; align-items: center; gap: 3px; max-width: 100%; padding: 0 4px; border-radius: 4px;
+  font-size: 10.5px; line-height: 15px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.brz-tab-ref:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+.brz-tab.sel .brz-tab-ref { color: color-mix(in srgb, #fff 78%, transparent); }
+.brz-tab.sel .brz-tab-ref:hover { background: color-mix(in srgb, #000 18%, transparent); color: #fff; }
+.brz-tab.empty .brz-tab-ref { font-style: italic; }
+/* 脊下面两条次要入口(建远程分支 / 补上游):字号压到提示级,别和 tab 抢 */
+.brz-remote-add, .brz-spine-tip { display: inline-flex; align-items: center; gap: 3px; margin-top: 8px; padding: 0;
+  border: 0; background: none; font-size: 11px; color: var(--muted); cursor: pointer; }
+.brz-remote-add:hover, .brz-spine-tip:hover { color: var(--accent); }
+.brz-spine-tip { text-decoration: underline dotted; text-underline-offset: 2px; }
+/* 主干上的 push 按钮:压住连线(自带底色遮线),left/top 由 JS 按主干中点给 */
+.brz-push { position: absolute; z-index: 1; transform: translate(-50%, -50%);
   display: inline-flex; align-items: center; justify-content: center; width: 46px; height: 17px; padding: 0;
   font-size: 10px; font-weight: 700; line-height: 1; border-radius: 999px; cursor: pointer;
   color: #fff; background: var(--accent); border: 1px solid var(--accent); }
@@ -1796,17 +1822,12 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
 .btn-dots i:nth-child(2) { animation-delay: .175s; }
 .btn-dots i:nth-child(3) { animation-delay: .35s; }
 @keyframes btn-dot { 0%, 60%, 100% { opacity: .25; } 30% { opacity: 1; } }
-.brz-col-label { font-size: 10px; color: var(--muted); }
-/* 表头两个标题要各占半列(和下面的 tag 列同宽),否则 .sec-label 的 flex:none 会让它俩缩到内容宽、挤在左边 */
-.brz-row.brz-head .brz-col-label { display: flex; align-items: center; gap: 4px; flex: 1 1 0; }
-/* 标题右侧的新建按钮:本地列建本地分支、远程列建远程分支(各自独立) */
+/* 标题右侧的新建按钮 */
 .brz-add { display: inline-flex; padding: 0; border: 0; background: none; color: var(--muted); cursor: pointer; }
 .brz-add:hover:not(:disabled) { color: var(--accent); }
-/* 标签全列等宽:两列各占一半,随抽屉宽度自适应;超长文字按当前宽度省略号截断 */
 .brz-empty { font-size: 11px; padding: 2px 0; }
-/* 分支标签:整行宽的按钮,不是胶囊 —— 999px 圆角摊到整行宽就成了一根药丸,读着不像"一行条目"。
-   8px 圆角和抽屉里其它卡片/按钮同族。层级只用「填充的浓淡」表达,不靠换色相:
-   远程=空的、本地=淡填充、当前=实心 accent。多一种颜色就多一套要背的色码。 */
+/* 分支标签:8px 圆角,和抽屉里其它卡片/按钮同族。层级只用「填充的浓淡」表达,不靠换色相:
+   普通=淡填充、当前分支=实心 accent、聚焦=外圈一道环。多一种颜色就多一套要背的色码。 */
 .brz-tag {
   display: flex; align-items: center; gap: 5px; width: 100%; min-height: 26px; box-sizing: border-box;
   font-size: 12px; line-height: 1.25; padding: 4px 10px; border-radius: 8px;
@@ -1817,15 +1838,12 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
 .brz-tag:hover { border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); background: color-mix(in srgb, var(--accent) 12%, var(--bg)); }
 /* 名字占满剩余宽度,超长省略号(不设字数上限,随标签实际宽度截断) */
 .brz-tag-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* 远端前缀(多远端时才有):压暗一档当限定词读,flex:none 保证挤压时先截分支名而不是它 —— 截掉前缀就又分不清仓库了 */
-.brz-tag-remote { flex: none; opacity: .55; font-size: .92em; }
 .brz-tag.local { border-color: color-mix(in srgb, var(--accent) 34%, var(--border)); background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .brz-tag.local.cur { border-color: transparent; background: var(--accent); color: #fff; font-weight: 600; }
 .brz-tag.local.cur:hover { background: color-mix(in srgb, var(--accent) 88%, #000); }
-.brz-tag.remote { color: var(--muted); background: transparent; }
-/* 同名但不是 upstream 的远程分支:虚线框 —— 和实线的上游区分开,`git push` 不会推到它 */
-.brz-tag.remote.loose { border-style: dashed; }
-.brz-tag.remote:hover { color: var(--text); }
+/* 聚焦 = 主脊现在画的是哪条分支。用外圈的环表示,不动填充 —— 填充已经被"当前分支"占用了,
+   两件事(我在哪 / 我在看哪)必须能同时看出来,常态下它俩是同一条,不同时才更需要分得清。 */
+.brz-tag.local.focus { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent); }
 /* 上游已在远程删掉([gone]):只在边框和一个琥珀点上说这件事,**不染文字**。
    原来整条分支名都是琥珀色,和当前分支的实心 accent 撞成两套色码,而且黄字在浅底上本身就难读。
    状态是状态,名字是名字 —— 分开表达,一眼还能读出分支叫什么。 */
@@ -1855,10 +1873,14 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
 .brz-beam-s0 { stop-color: var(--accent); stop-opacity: 0; }
 .brz-beam-s1 { stop-color: var(--accent); stop-opacity: .85; }
 .brz-beam-dot { fill: color-mix(in srgb, var(--accent) 55%, #fff); }
-/* 缺失的一端:虚线框 +「新建」——占住位置说明"这里本该有个分支",点一下就建出来 */
-.brz-tag.brz-tag-new { justify-content: center; border-style: dashed; background: transparent; color: var(--muted); }
-.brz-tag.brz-tag-new .brz-tag-name { flex: none; }
-.brz-tag.brz-tag-new:hover { border-color: var(--accent); color: var(--accent); }
+/* 提交拓扑的入场/落地动效(§4):push 不产生新提交,真实发生的是远程 chip 从旧行挪到新行、
+   中间几行的琥珀点熄灭。所以动效就按这两件事做,不假装"长出一条提交"。
+   chip 换行 = React 那边卸载再挂载,mount 动画自然只在真挪窝时播;数据没变时 key 稳定,不会乱闪。 */
+.cg-ref.remote { animation: cg-ref-in .22s var(--ease-out, ease); }
+.cg-unpushed { animation: cg-ref-in .22s var(--ease-out, ease); }
+@keyframes cg-ref-in { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+/* 琥珀点熄灭:fill 是可过渡的表现属性,circle 的 key 稳定所以元素不重建,颜色是渐变过去的 */
+.cg-svg circle { transition: fill .3s ease; }
 /* 弹窗里输入框上方的小标题(新建分支的「来源」) */
 .git-map-sublabel { margin: -2px 0 -4px; font-size: 12px; font-weight: 600; color: var(--text); }
 
@@ -1907,9 +1929,9 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
 .sync-zone-h .ghost:hover { color: var(--text); }
 
 /* 连接器:一条竖线穿过中枢(hub)。有拉/推动作时,竖线按方向流动(linear 恒动=方向指示) */
-/* 竖线只占左半边(= 映射图「本地分支」列的宽度),中心正对本地 tag 中心:
-   content 中心 = margin-left + (50% - 连线带宽/2)/2,和 tag 列中心 2px + (100% - 4px - 连线带宽)/4 对齐。 */
-.sync-link { position: relative; box-sizing: border-box; width: 50%; margin-left: 1px; padding-right: calc(var(--brz-link-w, 30px) / 2);
+/* 竖线走整宽居中 —— 正对下面竖脊的主干(扇出的 x 也是容器中线),整条链路从上到下同一根轴。
+   (改版前它只占左半边、对准映射图的「本地分支」列;那张横排的图已经没了) */
+.sync-link { position: relative; box-sizing: border-box; width: 100%;
   display: flex; flex-direction: column; align-items: center; gap: 0; padding-top: 2px; padding-bottom: 2px; overflow: hidden; }
 .sync-wire { position: relative; width: 2px; flex: 0 0 16px; background: color-mix(in srgb, var(--accent) 26%, var(--border));
   transition: background .2s ease; }
@@ -1934,7 +1956,7 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
    尾迹 2px 宽对齐竖线,亮点 4.8px 直径 —— 尺寸、配色、--beam-dur 全部照抄横线那颗。 */
 .sync-link.flow-down::after {
   content: ""; position: absolute; top: 0; height: 100%; width: 5px;
-  left: calc(50% - var(--brz-link-w, 30px) / 4 - 2.5px); pointer-events: none;
+  left: calc(50% - 2.5px); pointer-events: none;
   background:
     /* 亮点:圆心 28.6px、半径 2.4px,正好接在尾迹末端(26.2px)之后;外沿留 .5px 过渡免得锯齿 */
     radial-gradient(circle at 50% 28.6px, color-mix(in srgb, var(--accent) 55%, #fff) 2.2px, transparent 2.9px),
@@ -1979,6 +2001,9 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
   .brz-beam { animation: none; display: none; }
   .brz-collapse { transition: opacity .16s ease; }
   .btn-dots i { animation: none; opacity: 1; }
+  /* push 落地那套(chip 上浮淡入 / 琥珀点渐变)全部归零:内容照常更新,只是不再动 */
+  .cg-ref.remote, .cg-unpushed { animation: none; }
+  .cg-svg circle { transition: none; }
 }
 .branches-cur-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; margin-bottom: 8px; }
 .branches-cur-name { display: inline-flex; align-items: center; gap: 5px; }

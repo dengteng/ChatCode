@@ -638,6 +638,9 @@ async function gitInfo(cwd, sessionId) {
     // 每个远程跟踪分支的 sha。界面判断"这条还有东西可推吗"要用:git 只给 upstream 算 ahead/behind,
     // 同名撞上的非上游远端(oss → private/oss)一个数都没有,只能拿 sha 和本地 head 比。
     remoteSha: Object.fromEntries(shaByRemote),
+    // 每个远端的 url。拓扑区的仓库切换器切到哪个远端,地址行就得跟着换 —— 只给一条 remoteUrl 的话,
+    // 切到 private 还挂着 origin 的地址,等于告诉用户这些提交推去了另一个仓库。
+    remoteUrls: Object.fromEntries(urlByRemote),
     remoteUrl: (urlRemote && urlByRemote.get(urlRemote)) || urlByRemote.get("origin") || [...urlByRemote.values()][0], github, runtime };
 }
 // 分支 Tab 的提交拓扑图数据:全部分支的提交(含 parents,供前端画分叉线)+ 各分支头(全长 sha,和 %H 对齐)。

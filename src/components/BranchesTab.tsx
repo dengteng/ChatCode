@@ -6,7 +6,7 @@ import { html as diffToHtml } from "diff2html";
 import "diff2html/bundles/css/diff2html.min.css";
 import type { Session, GitLogData, GitCommit, GitBranch } from "../types";
 import { useStore } from "../store";
-import { q, pushCmd, pushTargets } from "../lib/gitcmd";
+import { q, pushCmd, pushTargets, lanesFor, unpushedFor, type RepoLane } from "../lib/gitcmd";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { useTranslation } from "react-i18next";
 import i18n from "../i18n";
@@ -61,6 +61,10 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
   const [wtFile, setWtFile] = useState<string | null>(null); // 工作区单文件 diff 弹窗:正在查看的文件
   const lastChanged = useRef<ReturnType<typeof parseStatus>>([]); // 暂存区折叠退场时还得渲染的最后一份文件列表
   const [pushing, setPushing] = useState(false); // 映射图上的 push 进行中:禁二次点击 + 菊花
+  // 竖脊只画一条本地分支。focus/repo 都是**纯视角**,不改仓库状态,所以留在组件里不进全局 store;
+  // null = 跟着 git 走(聚焦当前分支 / 选当前分支上游那个远端),用户点过才钉住。
+  const [focus, setFocus] = useState<string | null>(null);
+  const [repo, setRepo] = useState<string | null>(null);
   const [syncing, setSyncing] = useState<"push" | "pull" | null>(null); // 本地↔远程连线上要放流光的方向
   const [committingOp, setCommittingOp] = useState(false); // 顶栏发起的 commit(不走 committing 这个 prop)
   // git 信息刷新 = 上一条写操作跑完(terminal_result 会立刻重拉 git_info),菊花停在这里
@@ -86,7 +90,10 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
   // 三处入口一视同仁,失败也不会被谎报成成功。
 
   useEffect(() => { requestGitLog(session.id); }, [session.id]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { setConfirm(null); setMenu(null); setPrompt(null); setCompareFrom(null); setCompareView(null); setWtFile(null); }, [session.id]);
+  // 真切了分支(git switch 跑完)就松开钉住的聚焦,主脊跟到新分支上。
+  // 不松开的话:切过去了,脊还画着旧分支,push 按钮因为"聚焦≠当前"整组消失,像是坏了。
+  useEffect(() => { setFocus(null); }, [git?.current]);
+  useEffect(() => { setConfirm(null); setMenu(null); setPrompt(null); setCompareFrom(null); setCompareView(null); setWtFile(null); setFocus(null); setRepo(null); }, [session.id]);
 
   // 工作区「查看改动」:拉 HEAD vs 工作区的单文件 patch,弹窗里用 diff2html 渲染(不再糊进终端)
   const viewWorktree = (path: string) => { setWtFile(path); requestGitFileDiff(session.id, "HEAD", "WORKTREE", path); };
@@ -109,10 +116,15 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
   const exiting = dirty ? changed : lastChanged.current;
   const remoteName = git.remotes.includes("origin") ? "origin" : (git.remotes[0] || "origin");
   const multiRemote = git.remotes.length > 1;
-  const repoWeb = webUrl(git.remoteUrl);          // 远程仓库网页地址(ssh/git → https)
-  // 拓扑顶上那行 url 是哪个远端的(后端按当前分支上游选,这里同一套回退跟着算,只为显示个名字)。
-  // 多远端时不标名字,光看 url 得逐字比域名和仓库名才知道换了仓库。
-  const urlRemote = git.local.find((b) => b.name === current)?.upstream?.split("/")[0] || remoteName;
+  // 聚焦分支:用户点过就用他钉的那条,那条被删掉了(或没点过)就跟当前分支
+  const focusName = (focus && git.local.some((b) => b.name === focus) ? focus : "") || current || git.local[0]?.name || "";
+  // 选中的仓库:同理,默认跟聚焦分支的上游走 —— 站在上游是 private/cloud 的分支上却默认显示 origin,
+  // 等于告诉用户这些提交推去了另一个仓库。
+  const urlRemote = (repo && git.remotes.includes(repo) ? repo : "")
+    || git.local.find((b) => b.name === focusName)?.upstream?.split("/")[0] || remoteName;
+  const repoUrl = git.remoteUrls?.[urlRemote] || git.remoteUrl;
+  const repoWeb = webUrl(repoUrl);                // 远程仓库网页地址(ssh/git → https)
+  const graphRepo = git.remotes.length ? urlRemote : null;
   // 点分支标签:对比拾取中 → 选它当对端;否则开菜单
   const onChip = (ref: string, remote: boolean, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -187,7 +199,7 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
   };
 
   return (
-    <div className="info-scroll branches-tab" style={{ "--brz-link-w": `${MAP_LINK_W}px` } as React.CSSProperties}>
+    <div className="info-scroll branches-tab">
       {compareView ? (
         <section className="branches-card branches-graph-card">
           <DiffView current={compareView.from} other={compareView.to} diff={diff} fileDiff={fileDiff}
@@ -236,32 +248,33 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
             </div>
           </div>
 
-          {/* ② 本地 ↔ 远程分支映射:一横行一对(左=本地、右=远程),连线水平表示上游映射。
-              映射上的画实线相连;未映射的一侧是半截虚线(到中间截断),端头"+"号,点击直接新建对端分支。
-              行序以本地为主:main→当前→有映射→无映射(组内按名排);没配对的远程分支按名排追加在最后 */}
+          {/* ② 竖脊:聚焦的本地分支 → 扇出到每个远端 → 落到下面的仓库 tab(同时是拓扑的切换器) */}
           <section className="sync-zone">
             {compareFrom && <div className="branches-pick-hint">{t("选择要与")} <b>{compareFrom}</b> {t("对比的另一个分支节点…")} <button className="ghost" onClick={() => setCompareFrom(null)}><X size={12} /> {t("取消")}</button></div>}
-            <BranchMap local={git.local} remote={git.remote} remoteSha={git.remoteSha} remoteName={remoteName} hasRemote={git.remotes.length > 0} multiRemote={git.remotes.length > 1}
-              current={current} dirty={dirty} picking={compareFrom} onChip={onChip} onRun={run}
+            <BranchSpine local={git.local} remote={git.remote} remoteSha={git.remoteSha} remotes={git.remotes}
+              current={current} focus={focusName} repo={graphRepo} dirty={dirty} picking={compareFrom}
+              onChip={onChip} onFocus={setFocus} onRepo={setRepo} onRun={run}
               pushing={pushing} pushFlow={pushFlow} pullFlow={pullFlow}
-              onNew={(target) => { setConfirm(null); setMenu(null); setPrompt({ kind: "newbranch", target, ref: current || git.local[0]?.name || "HEAD", val: "" }); }}
+              onNew={(target) => { setConfirm(null); setMenu(null); setPrompt({ kind: "newbranch", target, ref: focusName || "HEAD", val: "" }); }}
               onPush={(cmd) => { if (pushing) return; setPushing(true); runTerminal(session.id, cmd); }} />
           </section>
 
-          {/* ③ 提交拓扑:本地 + 远程提交历史(琥珀点=未推送) */}
+          {/* ③ 提交拓扑:本地 + 远程提交历史。琥珀点/地址行都跟着上面选中的仓库 tab 走 */}
           <section className="sync-zone">
             <div className="sync-zone-h">
               <span className="sec-label">{t("提交拓扑")}</span>
               <span style={{ flex: 1 }} />
               <button className="ghost" title={t("刷新")} onClick={() => requestGitLog(session.id)}><RotateCw size={13} /></button>
             </div>
-            {git.remoteUrl && <button className="branches-subline" title={repoWeb ? t("在浏览器打开远程仓库") : git.remoteUrl} disabled={!repoWeb} onClick={() => repoWeb && openUrl(repoWeb)}>
-              {multiRemote && <b className="branches-subline-remote">{urlRemote}</b>}{git.remoteUrl}</button>}
+            {repoUrl && <button className="branches-subline" title={repoWeb ? t("在浏览器打开远程仓库") : repoUrl} disabled={!repoWeb} onClick={() => repoWeb && openUrl(repoWeb)}>
+              {multiRemote && <b className="branches-subline-remote">{urlRemote}</b>}{repoUrl}</button>}
             {log?.commits.length
-              ? <div className="branches-graph"><Graph log={log} current={current} dirty={dirty} picking={compareFrom} onChip={onChip} /></div>
+              ? <div className="branches-graph"><Graph log={log} repo={graphRepo} current={current} dirty={dirty} picking={compareFrom} onChip={onChip} /></div>
               : <div className="muted branches-empty">{t("暂无提交记录")}</div>}
           </section>
-          <div className="branches-hint muted">{t("点分支标签查看可做的操作 · 琥珀点=未推送")}</div>
+          <div className="branches-hint muted">{multiRemote
+            ? t("点分支标签聚焦、右键看操作 · 琥珀点=还没推到 {{repo}}", { repo: urlRemote })
+            : t("点分支标签聚焦、右键看操作 · 琥珀点=未推送")}</div>
         </>
       )}
       {menu && createPortal(
@@ -316,197 +329,172 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
   );
 }
 
-// 本地 ↔ 远程分支映射图:一横行一对(左=本地、右=远程),同行等高,连线永远水平。
-//   - 行序以本地为主:main → 当前分支 → 有映射的本地 → 无映射的本地(组内按名排);没配对的远程分支按名排追加在最后。
-//   - 有映射:行中间画水平实线;当前分支的连线 accent 加粗。
-//   - 未映射:缺的那一端照样占一格,画成虚线框的「新建」标签,连线也走虚线、箭头指向它;
-//     点标签直接建出对端(缺远程→推送并跟踪 / 缺本地→检出并跟踪)。
-//   - 两列标题右侧各有一个"+":开弹窗新建本地 / 远程分支,可选来源 ref。
-// tag 全列等宽、随抽屉宽度自适应,超长按当前宽度省略号截断。
-// 连线带尺寸:主干够宽才塞得下 46px 的 push 药丸,分叉段够宽才塞得下单推的 ↑ 和箭头
-// (两侧 tag 是 flex:1,连线带越宽 tag 越短)
-const MAP_LINK_W = 84, FORK_X = 52, linkW = MAP_LINK_W;
-// 右格 chip 的高和间距(和 .brz-tag 的 min-height / .brz-cell.multi 的 gap 一致)。
-// ponytail: 写死不测量 —— chip 是 nowrap+省略号,永远单行 26px,一个 ResizeObserver 换不来任何东西。
-const CHIP_H = 26, CHIP_GAP = 4, PITCH = CHIP_H + CHIP_GAP;
-const MAP_LINK_H = CHIP_H;
+// 竖脊:工作区 →(竖线①)→ 本地分支 →(扇出)→ 各远端 →(下方)提交拓扑,从上到下一条链路。
+//   - 顶上一排本地分支 chip:高亮的那个是**聚焦**分支(默认跟当前分支)。点一下只换视角,不跑 git switch
+//     —— 这页以只读为主,点标签就改工作区状态太重;切分支仍在 chip 的右键菜单里。
+//   - 中段扇出:一个远端一条线,落到下面对应的仓库 tab。upstream 那条画实线(git 认的映射),
+//     同名兜底来的画虚线 —— 画实线等于替 git 承诺一件它不会做的事,用户会以为一次 push 两边都到了。
+//   - 主干上一颗 push 药丸(推全部)、每条分叉上一颗 ↑(只推这条)。聚焦的不是当前分支时整组不画:
+//     `git push` 推的是你实际所在的分支,给别的分支画 push 按钮等于骗人。
+//   - 底下一排仓库 tab 既是扇出的落点,也是提交拓扑的切换器(选中谁,下面就按谁算未推送、显示谁的地址)。
+// tab 固定宽:宽度写死才能纯算出每条线的 x,不用 ResizeObserver 去量容器。
+// ponytail: 远端多到排不下时横向滚动,不做换行/自适应 —— 一个仓库配三个以上远端本就罕见。
+const TAB_W = 118, TAB_GAP = 10;
+const FORK_Y = 34, DROP_H = 30, FAN_H = FORK_Y + DROP_H; // 主干高 / 分叉后下落段高
 const TAIL = 26; // 传输光点的尾迹长度(px,svg 用户坐标)
-function BranchMap({ local, remote, remoteSha, remoteName, hasRemote, multiRemote, current, dirty, picking, onChip, onRun, pushing, pushFlow, pullFlow, onPush, onNew }:
-  { local: GitBranch[]; remote: string[]; remoteSha?: Record<string, string>; remoteName: string; hasRemote: boolean; multiRemote: boolean; current: string; dirty: boolean;
-    picking: string | null; onChip: (ref: string, remote: boolean, e: React.MouseEvent) => void; onRun: (cmd: string) => void;
-    pushing: boolean; pushFlow: boolean; pullFlow: boolean; onPush: (cmd: string) => void; onNew: (target: "local" | "remote") => void }) {
+function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, dirty, picking, onChip, onFocus, onRepo, onRun, pushing, pushFlow, pullFlow, onPush, onNew }:
+  { local: GitBranch[]; remote: string[]; remoteSha?: Record<string, string>; remotes: string[]; current: string; focus: string; repo: string | null; dirty: boolean;
+    picking: string | null; onChip: (ref: string, remote: boolean, e: React.MouseEvent) => void; onFocus: (name: string) => void; onRepo: (name: string) => void;
+    onRun: (cmd: string) => void; pushing: boolean; pushFlow: boolean; pullFlow: boolean; onPush: (cmd: string) => void; onNew: (target: "local" | "remote") => void }) {
   const { t } = useTranslation();
-  const CY = MAP_LINK_H / 2;
-  const remoteSet = new Set(remote);
-  const shortOf = (r: string) => r.split("/").slice(1).join("/");
-  // 上游绑定是独占的:被谁认领过的远程分支不再被同名规则抢去别的行。
-  // (反过来两条本地分支共用一个 upstream 是合法的,那它就该在两行都出现 —— 这是事实,不是重复。)
-  const upstreams = new Set(local.map((b) => b.upstream).filter((u) => u && remoteSet.has(u)));
-  // 一个本地分支对应的远程 = 它的 upstream + 所有同名、且没被别人认领的远程分支。
-  // git 只存得下一个 upstream,但「oss 同时推 origin/main 和 private/oss」是常态;
-  // 只画 upstream 那一条,等于在界面上宣称另一个远端不存在 —— 用户照着这张图判断推没推,就会漏推。
-  const rsOf = (b: GitBranch) => [
-    ...(b.upstream && remoteSet.has(b.upstream) ? [b.upstream] : []),   // upstream 排头:push 默认去它那
-    ...remote.filter((r) => !upstreams.has(r) && shortOf(r) === b.name),
-  ];
-  const localRank = (b: GitBranch) =>
-    b.name === "main" ? 0 : b.name === current ? 1 : (rsOf(b).length ? 2 : 3);
-  const localSorted = [...local].sort((a, b) => localRank(a) - localRank(b) || a.name.localeCompare(b.name));
-  // 一本地一行,带上它映射的全部远程(上游已删 [gone] 的不算);没配对的远程分支按名排追加在最后
-  const rows: { l?: GitBranch; rs: string[] }[] = localSorted.map((b) => ({ l: b, rs: rsOf(b) }));
-  const paired = new Set(rows.flatMap((x) => x.rs));
-  for (const r of [...remote].sort((a, b) => a.localeCompare(b))) if (!paired.has(r)) rows.push({ rs: [r] });
+  const b = local.find((x) => x.name === focus);
+  const isCur = focus === current;
+  // 顶排顺序:main → 当前分支 → 其余按名排。聚焦的那个不挪位置 —— 点一下 chip 就重排,眼睛会跟丢。
+  const rank = (x: GitBranch) => (x.name === "main" ? 0 : x.name === current ? 1 : 2);
+  const localSorted = [...local].sort((x, y) => rank(x) - rank(y) || x.name.localeCompare(y.name));
+  const lanes = lanesFor(focus, remotes, remote, b?.upstream);
+  const laneRefs = lanes.map((l) => l.ref).filter(Boolean) as string[];
+  const up = lanes.find((l) => l.isUpstream)?.ref;
+  // push 按钮只给当前分支,且只给"确实还有东西可推"的远端(判定见 pushTargets)。
+  // ref 还不存在的远端(从没推过)也算可推:那次 push 会把分支建出来。
+  const pushable = isCur && b ? new Set(pushTargets(b, laneRefs, up, remoteSha)) : new Set<string>();
+  const pushCmdFor = (l: RepoLane) => l.ref
+    ? pushCmd(focus, l.ref)
+    : `git push ${up ? "" : "-u "}${q(l.remote)} ${q(focus)}`;  // 远端还没这条分支:顺手建出来
+  const canPush = (l: RepoLane) => isCur && !!b && (l.ref ? pushable.has(l.ref) : true);
+  const pushLanes = lanes.filter(canPush);
+  const showPush = pushLanes.length > 0 && !pushFlow && !pushing;
 
-  const tagTitle = (b: GitBranch) =>
-    `${b.name}${b.name === current ? t("（当前）") : ""}${b.gone ? t(" · 上游 {{up}} 已在远程删除", { up: b.upstream }) : b.upstream ? `${t(" · 上游 {{up}}", { up: b.upstream })}${b.upstreamAuthor ? t("（{{author}}）", { author: b.upstreamAuthor }) : ""}${b.ahead ? ` ↑${b.ahead}` : ""}${b.behind ? ` ↓${b.behind}` : ""}` : t(" · 未跟踪")}${t(" · 点击查看操作")}`;
+  const total = lanes.length * TAB_W + Math.max(0, lanes.length - 1) * TAB_GAP;
+  const cx = total / 2;                                   // 主干 x = 整组 tab 的中线
+  const tabX = (i: number) => i * (TAB_W + TAB_GAP) + TAB_W / 2;  // 第 i 个 tab 的中心 x
+  const beam = isCur ? (pushFlow ? "out" : pullFlow ? "in" : undefined) : undefined;
 
-  const tagCls = (name: string, remote: boolean) =>
-    `brz-tag ${remote ? "remote" : `local ${name === current ? "cur" : ""}`} ${picking && picking !== name ? "pick-target" : ""} ${picking === name ? "pick-self" : ""}`;
+  const tagTitle = (x: GitBranch) =>
+    `${x.name}${x.name === current ? t("（当前）") : ""}${x.gone ? t(" · 上游 {{up}} 已在远程删除", { up: x.upstream }) : x.upstream ? `${t(" · 上游 {{up}}", { up: x.upstream })}${x.upstreamAuthor ? t("（{{author}}）", { author: x.upstreamAuthor }) : ""}${x.ahead ? ` ↑${x.ahead}` : ""}${x.behind ? ` ↓${x.behind}` : ""}` : t(" · 未跟踪")}${t(" · 点击聚焦,右键查看操作")}`;
 
-  // 半截 stub 连线:对端还不存在时用(配虚线「新建」标签),箭头指向要被创建的那一端。
-  const wire = (dir: "right" | "left", cur: boolean, dashed: boolean) => {
-    const cls = (base: string) => `${base}${cur ? " cur" : ""}${dashed ? " dash" : ""}`;
-    const [x1, x2, dotX, tipX, tailX] = dir === "right"
-      ? [0, linkW - 7, 1, linkW, linkW - 8] : [linkW, 7, linkW - 1, 0, 8];
-    return (
-      <svg className="brz-map-svg" width={linkW} height={MAP_LINK_H}>
-        <line x1={x1} y1={CY} x2={x2} y2={CY} className={cls("brz-map-line")} />
-        <circle cx={dotX} cy={CY} r={2.5} className={cls("brz-map-dot")} />
-        <path d={`M ${tailX} ${CY - 4} L ${tipX} ${CY} L ${tailX} ${CY + 4} Z`} className={cls("brz-map-head")} />
-      </svg>
-    );
-  };
-
-  // 一对多映射的连线:本地端引一条主干到 FORK_X,再分叉到每个远程 chip 的中线,一个远端一条线。
-  // 一条线画完所有远端(把 rs 挤在一格里)读不出"分别推到哪几个";分叉画出来,每条线上就能各挂一个
-  // 单推按钮,主干上挂一次推全部 —— 图形和可做的操作是同一套结构。
-  // beam(传输中的流光)只跑主干:那是所有目标共用的一段,推一个还是推全部都成立。
-  // 光束必须和线画在同一个 svg 里 —— 之前是另起一个 absolute svg 盖上去,半像素定位差就永远对不齐。
-  const fan = (ys: number[], dashed: boolean[], cur: boolean, beam?: "out" | "in") => {
-    const h = ys[ys.length - 1] + CHIP_H / 2, cy = h / 2;  // 行是 align-items:center,本地那一格的中线就是 h/2
-    const endX = linkW - 7, R = 6;
-    const cls = (base: string, d: boolean) => `${base}${cur ? " cur" : ""}${d ? " dash" : ""}`;
-    const allDash = dashed.every(Boolean);
-    return (
-      <svg className="brz-map-svg" width={linkW} height={h}>
-        <line x1={0} y1={cy} x2={FORK_X} y2={cy} className={cls("brz-map-line", allDash)} />
-        <circle cx={1} cy={cy} r={2.5} className={cls("brz-map-dot", allDash)} />
-        {ys.map((y, i) => (
-          <g key={i}>
-            {/* 拐角走 6px 圆角:直角在 1.5px 线宽上会顶出一个小方块,圆角才读得出是"从主干分出去的" */}
-            <path fill="none" className={cls("brz-map-line", dashed[i])} d={Math.abs(y - cy) < 1
-              ? `M ${FORK_X} ${cy} H ${endX}`
-              : `M ${FORK_X} ${cy} V ${y - Math.sign(y - cy) * R} Q ${FORK_X} ${y} ${FORK_X + R} ${y} H ${endX}`} />
-            <path d={`M ${linkW - 8} ${y - 4} L ${linkW} ${y} L ${linkW - 8} ${y + 4} Z`} className={cls("brz-map-head", dashed[i])} />
-          </g>
-        ))}
-        {beam && <>
-          <defs>
-            {/* userSpaceOnUse:水平线的 bbox 高为 0,objectBoundingBox 渐变在这种退化 bbox 上不可靠 */}
-            <linearGradient id="brz-beam-grad" gradientUnits="userSpaceOnUse" x1={-TAIL} y1={0} x2={0} y2={0}>
-              <stop offset="0%" className="brz-beam-s0" />
-              <stop offset="100%" className="brz-beam-s1" />
-            </linearGradient>
-            <clipPath id="brz-beam-clip"><rect x={0} y={0} width={FORK_X} height={h} /></clipPath>
-          </defs>
-          {/* in(pull)= 把整组镜像翻过去:光点从右往左,尾迹跟着甩到右边,不用第二套动画 */}
-          <g clipPath="url(#brz-beam-clip)" transform={beam === "in" ? `translate(${FORK_X} 0) scale(-1 1)` : undefined}>
-            <g className="brz-beam" style={{ "--beam-run": `${FORK_X}px` } as React.CSSProperties}>
-              <line x1={-TAIL} y1={cy} x2={0} y2={cy} className="brz-beam-tail" />
-              <circle cx={0} cy={cy} r={2.4} className="brz-beam-dot" />
-            </g>
-          </g>
-        </>}
-      </svg>
-    );
-  };
-  // 缺失的一端画成虚线「新建」标签:点它就建出来。左=从远程检出本地,右=把本地推成远程分支。
-  const newTag = (side: "local" | "remote", title: string, onClick: () => void) => (
-    <button className={`brz-tag brz-tag-new ${side}`} title={title} onClick={onClick}>
-      {side === "remote" && <Cloud size={9} className="brz-tag-ico" />}
-      <span className="brz-tag-name">{t("新建")}</span>
-    </button>
-  );
-  // 远程行缺本地端:同名本地分支已存在(只是没设上游)→ 设上游;否则检出并跟踪
-  const newLocalCmd = (r: string) => {
-    const short = r.split("/").slice(1).join("/");
-    return local.some((b) => b.name === short)
-      ? `git branch --set-upstream-to=${q(r)} ${q(short)}` : `git switch -c ${q(short)} --track ${q(r)}`;
-  };
-
+  // 扇出:主干竖着下来到 FORK_Y,横向摊到各 tab 中心,再落一小段到 tab 顶。拐角走 6px 圆角
+  // —— 直角在 1.5px 线宽上会顶出个小方块,圆角才读得出是"从主干分出去的"。
+  // beam 只跑主干:那是所有目标共用的一段,推一个还是推全部都成立。
+  // 光束和线画在同一个 svg 里 —— 另起一个 absolute svg 盖上去,半像素定位差就永远对不齐。
+  const R = 6, tipY = FAN_H;
   return (
-    <div className="brz-map">
-      <div className="brz-row brz-head">
-        <div className="brz-cell brz-col-label sec-label">{t("本地分支")}
-          <button className="ghost brz-add" title={t("新建本地分支")} onClick={() => onNew("local")}><Plus size={12} /></button>
-        </div>
-        <div className="brz-link" style={{ width: linkW }} />
-        <div className="brz-cell brz-col-label sec-label">{t("远程分支")}
-          <button className="ghost brz-add" title={t("新建远程分支")} disabled={!hasRemote} onClick={() => onNew("remote")}><Plus size={12} /></button>
-        </div>
+    <div className="brz-spine">
+      <div className="brz-spine-h">
+        <span className="sec-label">{t("本地分支")}</span>
+        <button className="ghost brz-add" title={t("新建本地分支")} onClick={() => onNew("local")}><Plus size={12} /></button>
       </div>
       {!local.length && <span className="muted brz-empty">{t("暂无本地分支")}</span>}
-      {!remote.length && <span className="muted brz-empty">{t("暂无远程分支")}</span>}
-      {rows.map(({ l: b, rs }) => {
-        const isCur = b?.name === current;
-        const r = rs[0];
-        // 只有 upstream 那条才是 git 认的映射:裸 `git push` 只去它那儿。同名匹配来的(private/oss)
-        // 画成虚线 —— 画实线等于替 git 承诺了一件它不会做的事,用户就会以为一次 push 两边都到了。
-        const up = b?.upstream && rs.includes(b.upstream) ? b.upstream : undefined;
-        const ys = rs.map((_, i) => CHIP_H / 2 + i * PITCH);   // 每个远程 chip 的中线 y(svg 坐标)
-        // push 按钮只给当前分支这一行,且只给"确实还有东西可推"的远端(判定见 pushTargets)。
-        const pushable = isCur && b ? pushTargets(b, rs, up, remoteSha) : [];
-        const showPush = pushable.length > 0 && !pushFlow && !pushing;
-        return (
-          <div className="brz-row" key={b?.name ?? r}>
-            <div className="brz-cell">{b ? (
-              <button data-ref={b.name} title={tagTitle(b)} className={`${tagCls(b.name, false)} ${b.gone ? "gone" : ""}`} onMouseDown={(e) => onChip(b.name, false, e)}>
-                <span className="brz-tag-name">{b.name}</span>
-                {isCur && dirty && <span className="cg-ref-dirty" title={t("有未提交改动")}>*</span>}
-              </button>
-            ) : r ? newTag("local", t("从 {{r}} 新建本地分支", { r }), () => onRun(newLocalCmd(r))) : null}</div>
-            <div className="brz-link" style={{ width: linkW }}>
-              {/* push/pull 进行中:当前分支这行的连线自己长出光点(push 左→右,pull 右→左);
-                  平时不放,免得静态界面一直在动 */}
-              {b && rs.length > 0 && fan(ys, rs.map((rr) => rr !== up), isCur,
-                isCur ? (pushFlow ? "out" : pullFlow ? "in" : undefined) : undefined)}
-              {b && !rs.length && hasRemote && wire("right", false, true)}
-              {!b && r && wire("left", false, true)}
-              {/* 主干上的 push 药丸:一次推到这一行映射的全部远端(单远端时就是推那一个)。
-                  推送进行中撤掉它,连线只留左→右的流光 —— 按钮压在线上会把光束截断。 */}
-              {b && showPush && (
-                <button className="brz-push" style={{ left: FORK_X / 2 }}
-                  title={pushable.length > 1
-                    ? t("一次推到全部 {{n}} 个远端:{{list}}", { n: pushable.length, list: pushable.join("、") })
-                    : t("推送到 {{r}}:{{cmd}}", { r: pushable[0], cmd: pushCmd(b.name, pushable[0]) })}
-                  onClick={(e) => { e.stopPropagation(); onPush(pushable.map((rr) => pushCmd(b.name, rr)).join(" && ")); }}>
-                  <span>push</span>
-                </button>
-              )}
-              {/* 分叉线上各挂一个 ↑:只推这一条。主干那颗是"全推",两个都在,才既能单推又能同时推。
-                  只有一个目标时不放 —— 和主干药丸重复。 */}
-              {b && showPush && pushable.length > 1 && rs.map((rr, i) => pushable.includes(rr) && (
-                <button key={rr} className="brz-push-one" style={{ left: (FORK_X + linkW - 7) / 2, top: ys[i] }}
-                  title={t("只推到 {{r}}:{{cmd}}", { r: rr, cmd: pushCmd(b.name, rr) })}
-                  onClick={(e) => { e.stopPropagation(); onPush(pushCmd(b.name, rr)); }}>
-                  <ArrowUp size={11} />
-                </button>
-              ))}
-            </div>
-            {/* 一个本地分支挂多个远端时,右格竖着排 —— 行高跟着长,连线正对这一组的中线 */}
-            <div className={`brz-cell ${rs.length > 1 ? "multi" : ""}`}>{rs.length ? rs.map((rr) => (
-              <button key={rr} data-ref={rr} className={`${tagCls(rr, true)} ${rr === up ? "" : "loose"}`} onMouseDown={(e) => onChip(rr, true, e)}
-                title={rr === up ? t("{{r}} · 点击查看操作", { r: rr }) : t("{{r}} · 同名远程分支,不是上游:裸 git push 不会推到这里,用连线上的按钮推", { r: rr })}>
-                <Cloud size={9} className="brz-tag-ico" />
-                {/* 多远端时必须标出前缀:origin/main 和 private/main 光看 main 完全分不清是哪个仓库。
-                    前缀 flex:none,挤压时先截主名,别把"是谁家的"这个信息截掉。单远端时前缀是纯噪音,不显示。 */}
-                {multiRemote && <span className="brz-tag-remote">{rr.split("/")[0]}/</span>}
-                <span className="brz-tag-name">{rr.split("/").slice(1).join("/")}</span>
-              </button>
-            )) : b && hasRemote ? newTag("remote", t("把 {{name}} 推成远程分支", { name: b.name }), () => onRun(`git push -u ${q(remoteName)} ${q(b.name)}`)) : null}</div>
-          </div>
-        );
-      })}
+      <div className="brz-band">
+        {localSorted.map((x) => (
+          <button key={x.name} data-ref={x.name}
+            className={`brz-tag local ${x.name === current ? "cur" : ""} ${x.name === focus ? "focus" : ""} ${x.gone ? "gone" : ""} ${picking && picking !== x.name ? "pick-target" : ""} ${picking === x.name ? "pick-self" : ""}`}
+            title={tagTitle(x)}
+            // 一律 onMouseDown,不用 onClick:WKWebView 里输入框聚焦时,落在别处的第一次点击只用来切焦点、
+            // 不派发 click —— 表现就是"要点两次才生效"(菜单项早前踩过同一个坑)。
+            // 左键=聚焦(纯视角),右键=原来那套操作菜单;对比拾取中左键也走 onChip,否则选不了对端。
+            onMouseDown={(e) => { if (picking || e.button === 2) onChip(x.name, false, e); else if (e.button === 0) onFocus(x.name); }}
+            onContextMenu={(e) => e.preventDefault()}>
+            <span className="brz-tag-name">{x.name}</span>
+            {x.name === current && dirty && <span className="cg-ref-dirty" title={t("有未提交改动")}>*</span>}
+          </button>
+        ))}
+      </div>
+      {!lanes.length ? <div className="muted brz-empty">{t("暂无远程仓库")}</div> : (
+        <div className="brz-fan" style={{ width: total }}>
+          <svg className="brz-map-svg" width={total} height={FAN_H}>
+            <line x1={cx} y1={0} x2={cx} y2={FORK_Y} className={`brz-map-line ${isCur ? "cur" : ""}`} />
+            <circle cx={cx} cy={1} r={2.5} className="brz-map-dot" />
+            {lanes.map((l, i) => {
+              const x = tabX(i), dash = !l.isUpstream;
+              const cls = `brz-map-line ${isCur ? "cur" : ""} ${dash ? "dash" : ""}`;
+              return (
+                <g key={l.remote}>
+                  <path fill="none" className={cls} d={Math.abs(x - cx) < 1
+                    ? `M ${cx} ${FORK_Y} V ${tipY - 7}`
+                    : `M ${cx} ${FORK_Y} H ${x - Math.sign(x - cx) * R} Q ${x} ${FORK_Y} ${x} ${FORK_Y + R} V ${tipY - 7}`} />
+                  <path d={`M ${x - 4} ${tipY - 8} L ${x} ${tipY} L ${x + 4} ${tipY - 8} Z`} className={`brz-map-head ${dash ? "dash" : ""}`} />
+                </g>
+              );
+            })}
+            {beam && <>
+              <defs>
+                {/* userSpaceOnUse:直线的 bbox 一边宽为 0,objectBoundingBox 渐变在这种退化 bbox 上不可靠 */}
+                <linearGradient id="brz-beam-grad" gradientUnits="userSpaceOnUse" x1={-TAIL} y1={0} x2={0} y2={0}>
+                  <stop offset="0%" className="brz-beam-s0" />
+                  <stop offset="100%" className="brz-beam-s1" />
+                </linearGradient>
+                <clipPath id="brz-beam-clip"><rect x={cx - 4} y={0} width={8} height={FORK_Y} /></clipPath>
+              </defs>
+              {/* 光束本身仍是"沿 +x 跑"的那一套(brz-beam-run 是 translateX):把坐标系转 90° 就成了往下跑,
+                  pull 转 -90° 就是往上 —— 不用为竖脊再写一套 keyframes。clip 挂在外层 g 上(不带 transform),
+                  免得旋转把裁剪框一起转走。 */}
+              <g clipPath="url(#brz-beam-clip)">
+                <g transform={beam === "in" ? `translate(${cx} ${FORK_Y}) rotate(-90)` : `translate(${cx} 0) rotate(90)`}>
+                  <g className="brz-beam" style={{ "--beam-run": `${FORK_Y}px` } as React.CSSProperties}>
+                    <line x1={-TAIL} y1={0} x2={0} y2={0} className="brz-beam-tail" />
+                    <circle cx={0} cy={0} r={2.4} className="brz-beam-dot" />
+                  </g>
+                </g>
+              </g>
+            </>}
+          </svg>
+          {/* 主干上的 push 药丸:一次推到全部还有东西可推的远端。推送进行中撤掉 —— 按钮压在线上会截断光束 */}
+          {showPush && b && (
+            <button className="brz-push" style={{ left: cx, top: FORK_Y / 2 }}
+              title={pushLanes.length > 1
+                ? t("一次推到全部 {{n}} 个远端:{{list}}", { n: pushLanes.length, list: pushLanes.map((l) => l.remote).join("、") })
+                : t("推送到 {{r}}:{{cmd}}", { r: pushLanes[0].ref || pushLanes[0].remote, cmd: pushCmdFor(pushLanes[0]) })}
+              onClick={(e) => { e.stopPropagation(); onPush(pushLanes.map(pushCmdFor).join(" && ")); }}>
+              <span>push</span>
+            </button>
+          )}
+          {/* 分叉线上各挂一个 ↑:只推这一条。主干那颗是"全推",两个都在才既能单推又能同时推。
+              只有一个目标时不放 —— 和主干药丸重复。 */}
+          {showPush && b && pushLanes.length > 1 && lanes.map((l, i) => canPush(l) && (
+            <button key={l.remote} className="brz-push-one" style={{ left: tabX(i), top: FORK_Y + DROP_H / 2 }}
+              title={t("只推到 {{r}}:{{cmd}}", { r: l.ref || l.remote, cmd: pushCmdFor(l) })}
+              onClick={(e) => { e.stopPropagation(); onPush(pushCmdFor(l)); }}>
+              <ArrowUp size={11} />
+            </button>
+          ))}
+        </div>
+      )}
+      {/* 仓库 tab:扇出的落点 + 提交拓扑的切换器。副标题是这个仓库里对应聚焦分支的那条远程分支;
+          还没有就是虚线的「新建」—— 占住位说明"这里本该有条分支",点一下(经 push 按钮)就建出来。 */}
+      {!!lanes.length && (
+        <div className="brz-tabs" style={{ width: total, gap: TAB_GAP }}>
+          {lanes.map((l) => (
+            <button key={l.remote} className={`brz-tab ${l.remote === repo ? "sel" : ""} ${l.ref ? "" : "empty"} ${l.isUpstream ? "up" : ""}`}
+              style={{ width: TAB_W }} title={l.ref
+                ? (l.isUpstream ? t("{{r}} · 上游,裸 git push 去这里", { r: l.ref }) : t("{{r}} · 同名远程分支,不是上游:裸 git push 不会推到这里", { r: l.ref }))
+                : t("{{remote}} 里还没有 {{name}} 分支", { remote: l.remote, name: focus })}
+              onMouseDown={() => onRepo(l.remote)}>
+              <b className="brz-tab-remote">{l.remote}</b>
+              <span className="brz-tab-ref" data-ref={l.ref || ""}
+                // 副标题那半是个能点的分支节点(有 ref 才有):走原来那套菜单(检出/对比/删远程)。
+                // stopPropagation 拦住外层的切仓库 —— 一次点击又切视图又弹菜单,读不出自己按了什么。
+                onMouseDown={(e) => { if (l.ref) { e.stopPropagation(); onChip(l.ref, true, e); } }}>
+                <Cloud size={9} className="brz-tag-ico" />{l.ref ? l.ref.split("/").slice(1).join("/") : t("新建")}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+      {/* 远程分支多到没有本地对应物时(别人推的分支),它们不在扇出里 —— 去下面拓扑图点那些 chip 检出。
+          这里只留一个建远程分支的入口,和原来的「远程分支 +」等价。 */}
+      {!!remotes.length && (
+        <button className="ghost brz-remote-add" onClick={() => onNew("remote")}>
+          <Plus size={11} /> {t("新建远程分支")}
+        </button>
+      )}
+      {/* 远程行缺本地端的老入口:同名本地分支已存在(只是没设上游)→ 设上游;否则检出并跟踪。
+          现在挂在聚焦分支上:它有远程同名分支却没设上游时,提示一下就能补。 */}
+      {b && !b.upstream && laneRefs.length > 0 && (
+        <button className="ghost brz-spine-tip" onClick={() => onRun(`git branch --set-upstream-to=${q(laneRefs[0])} ${q(focus)}`)}>
+          {t("{{name}} 还没有上游,设为 {{ref}}", { name: focus, ref: laneRefs[0] })}
+        </button>
+      )}
     </div>
   );
 }
@@ -541,29 +529,21 @@ function buildGraph(commits: GitCommit[]) {
   return { rows, edges, laneCount };
 }
 
-function Graph({ log, current, dirty, picking, onChip }: { log: GitLogData; current: string; dirty: boolean; picking: string | null; onChip: (ref: string, remote: boolean, e: React.MouseEvent) => void }) {
+function Graph({ log, repo, current, dirty, picking, onChip }: { log: GitLogData; repo: string | null; current: string; dirty: boolean; picking: string | null; onChip: (ref: string, remote: boolean, e: React.MouseEvent) => void }) {
   const { t } = useTranslation();
   const { rows, edges, laneCount } = useMemo(() => buildGraph(log.commits), [log.commits]);
+  // 远程 chip 只画选中仓库的(切换器在上面的仓库 tab)。本地 ref 全留 —— 它们不属于任何远端,
+  // 藏了反而看不出 main/cloud 停在哪。
   const headsBySha = useMemo(() => {
     const m = new Map<string, { name: string; remote: boolean }[]>();
-    for (const h of log.heads) { const a = m.get(h.sha) || []; a.push({ name: h.name, remote: h.remote }); m.set(h.sha, a); }
-    return m;
-  }, [log.heads]);
-  // 未推送 = 从任一远程 ref 沿父链走不到的提交(只在本地)。没有远程 ref 时不标(否则全标,没意义)。
-  const unpushed = useMemo(() => {
-    const remoteShas = log.heads.filter((h) => h.remote).map((h) => h.sha);
-    if (!remoteShas.length) return new Set<string>();
-    const byHash = new Map(log.commits.map((c) => [c.hash, c]));
-    const onRemote = new Set<string>();
-    const stack = [...remoteShas];
-    while (stack.length) {
-      const h = stack.pop()!;
-      if (onRemote.has(h)) continue;
-      onRemote.add(h);
-      for (const p of byHash.get(h)?.parents || []) if (!onRemote.has(p)) stack.push(p);
+    for (const h of log.heads) {
+      if (h.remote && repo && h.name.split("/")[0] !== repo) continue;
+      const a = m.get(h.sha) || []; a.push({ name: h.name, remote: h.remote }); m.set(h.sha, a);
     }
-    return new Set(log.commits.filter((c) => !onRemote.has(c.hash)).map((c) => c.hash));
-  }, [log.commits, log.heads]);
+    return m;
+  }, [log.heads, repo]);
+  // 未推送(琥珀点)也按选中仓库算 —— 判定和自检见 gitcmd.ts 的 unpushedFor
+  const unpushed = useMemo(() => unpushedFor(log.commits, log.heads, repo), [log.commits, log.heads, repo]);
   const gutter = laneCount * LANE_W;
   const x = (col: number) => LANE_W / 2 + col * LANE_W;
   const y = (row: number) => ROW_H / 2 + row * ROW_H;
