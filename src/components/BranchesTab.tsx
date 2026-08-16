@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, RotateCw, ChevronRight, ChevronDown, Cloud, X, FileDiff, Plus, ArrowDown } from "lucide-react";
 import { createPortal } from "react-dom";
 import { openUrl } from "../native";
@@ -61,6 +61,9 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
   const [wtFile, setWtFile] = useState<string | null>(null); // 工作区单文件 diff 弹窗:正在查看的文件
   const lastChanged = useRef<ReturnType<typeof parseStatus>>([]); // 暂存区折叠退场时还得渲染的最后一份文件列表
   const [pushing, setPushing] = useState(false); // 映射图上的 push 进行中:禁二次点击 + 菊花
+  // 竖线①要对准当前分支 chip 的上边缘正中,而 chip 的中心不在容器中线上(宽度随名字变)。
+  // 由竖脊量好偏移送上来,这里整条线平移过去。
+  const [stemDx, setStemDx] = useState(0);
   // 竖脊只画一条本地分支。focus/repo 都是**纯视角**,不改仓库状态,所以留在组件里不进全局 store;
   // null = 跟着 git 走(聚焦当前分支 / 选当前分支上游那个远端),用户点过才钉住。
   const [focus, setFocus] = useState<string | null>(null);
@@ -234,7 +237,7 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
               流光(flow-down)只在真的 commit 进行时点亮:平时一直流会让人以为有活在跑。 */}
           <div className={`brz-collapse ${dirty ? "open" : ""}`}>
             <div className="brz-collapse-in">
-              <div className={`sync-link ${commitFlow ? "flow-down" : ""}`}>
+              <div className={`sync-link ${commitFlow ? "flow-down" : ""}`} style={{ transform: `translateX(${stemDx}px)` }}>
                 <span className="sync-wire" />
                 {/* 提交进行中:按钮撤掉换成等高的线段 —— 它这时既点不动又正好挡住流光,留着只剩噪音 */}
                 {commitFlow ? <span className="sync-wire wire-gap" /> : <div className="sync-hub">
@@ -243,6 +246,8 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
                   </button>
                 </div>}
                 <span className="sync-wire" />
+                {/* 延长段:跨过 gap + 「本地分支」标题带,把箭头一路送到当前分支 chip 的上边缘正中 */}
+                <span className="sync-wire sync-stem" />
                 <span className="sync-arrow" />
               </div>
             </div>
@@ -257,6 +262,7 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
               pushing={pushing} pushFlow={pushFlow} pullFlow={pullFlow}
               onNew={(target) => { setConfirm(null); setMenu(null); setPrompt({ kind: "newbranch", target, ref: focusName || "HEAD", val: "" }); }}
               onPush={(cmd) => { if (pushing) return; setPushing(true); runTerminal(session.id, cmd); }}
+              onStem={setStemDx}
               // 地址行由外面给、在脊里渲染:它讲的是"上面选中的那个远端在哪",贴着 tab 才读得出这层关系。
               // 传节点而不是 4 个数据 prop —— 拼这行要 repoUrl/repoWeb/multiRemote/urlRemote,全塞进 BranchSpine 是给它塞它不管的事。
               urlLine={repoUrl ? <div className="brz-url-row">
@@ -347,14 +353,30 @@ const TAB_W = 118, TAB_GAP = 10;
 const SIDE_W = 46;
 const FORK_Y = 34, DROP_H = 40, FAN_H = FORK_Y + DROP_H; // 主干高 / 分叉后下落段高
 const TAIL = 26; // 传输光点的尾迹长度(px,svg 用户坐标)
-function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, dirty, picking, onChip, onFocus, onRepo, onRun, pushing, pushFlow, pullFlow, onPush, onNew, urlLine }:
+function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, dirty, picking, onChip, onFocus, onRepo, onRun, pushing, pushFlow, pullFlow, onPush, onNew, urlLine, onStem }:
   { local: GitBranch[]; remote: string[]; remoteSha?: Record<string, string>; remotes: string[]; current: string; focus: string; repo: string | null; dirty: boolean;
     picking: string | null; onChip: (ref: string, remote: boolean, e: React.MouseEvent) => void; onFocus: (name: string) => void; onRepo: (name: string) => void;
     onRun: (cmd: string) => void; pushing: boolean; pushFlow: boolean; pullFlow: boolean; onPush: (cmd: string) => void;
-    onNew: (target: "local" | "remote") => void; urlLine: React.ReactNode }) {
+    onNew: (target: "local" | "remote") => void; urlLine: React.ReactNode; onStem: (dx: number) => void }) {
   const { t } = useTranslation();
   // 这次 push 点的是哪几个远端。只喂光束用,不进全局 —— 推完 pushFlow 一落就没人读了。
   const [beamTo, setBeamTo] = useState<string[] | null>(null);
+  const bandRef = useRef<HTMLDivElement>(null);
+  const [dx, setDx] = useState({ focus: 0, cur: 0 }); // chip 中心相对竖脊中线的偏移(px)
+  useLayoutEffect(() => {
+    const band = bandRef.current, root = band?.parentElement;
+    if (!band || !root) return;
+    const mid = root.getBoundingClientRect(), c0 = mid.left + mid.width / 2;
+    const at = (name: string) => {
+      const el = band.querySelector(`[data-ref="${CSS.escape(name)}"]`) as HTMLElement | null;
+      if (!el) return 0;
+      const r = el.getBoundingClientRect();
+      return Math.round(r.left + r.width / 2 - c0);
+    };
+    const next = { focus: at(focus), cur: at(current) };
+    setDx((p) => (p.focus === next.focus && p.cur === next.cur ? p : next));
+    onStem(next.cur);
+  });
   const b = local.find((x) => x.name === focus);
   const isCur = focus === current;
   // 顶排顺序:main → 当前分支 → 其余按名排。聚焦的那个不挪位置 —— 点一下 chip 就重排,眼睛会跟丢。
@@ -375,7 +397,10 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
 
   const total = lanes.length * TAB_W + Math.max(0, lanes.length - 1) * TAB_GAP;
   const rowW = total + (SIDE_W + TAB_GAP) * 2;            // 整排宽 = 左侧槽 + tab 组 + 右侧槽
-  const cx = rowW / 2;                                    // 主干 x = 整组 tab 的中线(侧槽等宽,所以也是整排中线)
+  // 主干 x 不再是容器中线,而是聚焦那个 chip 的中线 —— 线要从这条分支底边正中长出来才读得通。
+  // chip 宽度随分支名变,只能量:dx = chip 中心 - 竖脊中心。上面竖线①同样按 dx.cur 平移(它指的是当前分支)。
+  // ponytail: 每次渲染量一遍(值没变就不 setState),不上 ResizeObserver —— 抽屉宽变了会重渲染,够用。
+  const cx = rowW / 2 + dx.focus;
   const tabX = (i: number) => SIDE_W + TAB_GAP + i * (TAB_W + TAB_GAP) + TAB_W / 2;  // 第 i 个 tab 的中心 x
   const beam = isCur ? (pushFlow ? "out" : pullFlow ? "in" : undefined) : undefined;
   // 光束跑哪几条:点主干药丸=这次推的全部远端,点某条 ↑=只那条。在终端手敲 git push 时 beamTo 为空,
@@ -393,19 +418,21 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
   const R = 6, tipY = FAN_H;
   // 一条 lane 的完整走线。y0=FORK_Y 画的是分叉段(主干另画),y0=0 画的是"主干+分叉"整条 —— 光束要跑的就是后者:
   // 推到哪个远端,光就顺着哪条线一路走到那个 tab,不能在分叉口停下。
+  // 圆角半径按横移距离收:主干挪到 chip 中线后,某条 lane 可能离主干只有几 px,固定 6px 会把线折回去
+  const rOf = (x: number) => Math.min(R, Math.abs(x - cx));
   const forkPath = (x: number, y0: number) => Math.abs(x - cx) < 1
     ? `M ${cx} ${y0} V ${tipY - 7}`
-    : `M ${cx} ${y0} V ${FORK_Y} H ${x - Math.sign(x - cx) * R} Q ${x} ${FORK_Y} ${x} ${FORK_Y + R} V ${tipY - 7}`;
+    : `M ${cx} ${y0} V ${FORK_Y} H ${x - Math.sign(x - cx) * rOf(x)} Q ${x} ${FORK_Y} ${x} ${FORK_Y + rOf(x)} V ${tipY - 7}`;
   // 整条走线的长度(圆角按 1/4 圆算)。光束靠 stroke-dashoffset 跑,得知道跑多远才停。
   const forkLen = (x: number) => Math.abs(x - cx) < 1 ? tipY - 7
-    : FORK_Y + (Math.abs(x - cx) - R) + (Math.PI * R) / 2 + (tipY - 7 - FORK_Y - R);
+    : FORK_Y + (Math.abs(x - cx) - rOf(x)) + (Math.PI * rOf(x)) / 2 + (tipY - 7 - FORK_Y - rOf(x));
   return (
     <div className="brz-spine">
       <div className="brz-spine-h">
         <span className="sec-label">{t("本地分支")}</span>
       </div>
       {!local.length && <span className="muted brz-empty">{t("暂无本地分支")}</span>}
-      <div className="brz-band">
+      <div className="brz-band" ref={bandRef}>
         {localSorted.map((x) => (
           <button key={x.name} data-ref={x.name}
             className={`brz-tag local ${x.name === current ? "cur" : ""} ${x.name === focus ? "focus" : ""} ${x.gone ? "gone" : ""} ${picking && picking !== x.name ? "pick-target" : ""} ${picking === x.name ? "pick-self" : ""}`}
@@ -453,8 +480,10 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
                 style={{ "--beam-len": `${forkLen(x)}`, "--beam-end": `${-forkLen(x)}`, "--beam-tail": `${TAIL}` } as React.CSSProperties} />;
             })}
           </svg>
-          {/* 主干上的 push 药丸:一次推到全部还有东西可推的远端。推送进行中撤掉 —— 按钮压在线上会截断光束 */}
-          {showPush && b && (
+          {/* 主干上的 push 药丸:一次推到全部还有东西可推的远端。推送进行中撤掉 —— 按钮压在线上会截断光束。
+              只有"全部 lane 都还能推"时才挂在主干上:推完其中一个远端后主干那颗还留着,读起来像"还要全推一次",
+              可它实际只推剩下那条 —— 那种时候按钮该待在剩下那条分叉线上。 */}
+          {showPush && b && pushLanes.length === lanes.length && (
             <button className="brz-push" style={{ left: cx, top: FORK_Y / 2 }}
               title={pushLanes.length > 1
                 ? t("一次推到全部 {{n}} 个远端:{{list}}", { n: pushLanes.length, list: pushLanes.map((l) => l.remote).join("、") })
@@ -463,9 +492,9 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
               <span>push</span>
             </button>
           )}
-          {/* 分叉线上各挂一个 ↑:只推这一条。主干那颗是"全推",两个都在才既能单推又能同时推。
-              只有一个目标时不放 —— 和主干药丸重复。 */}
-          {showPush && b && pushLanes.length > 1 && lanes.map((l, i) => canPush(l) && (
+          {/* 分叉线上各挂一个 ↑:只推这一条。多远端时一直画 —— 主干那颗"全推"只在全都能推时才在,
+              它一撤,这排就是唯一入口,位置也正好指出剩的是哪条。单远端时不画:和主干药丸重复。 */}
+          {showPush && b && lanes.length > 1 && lanes.map((l, i) => canPush(l) && (
             <button key={l.remote} className="brz-push-one" style={{ left: tabX(i), top: FORK_Y + DROP_H / 2 }}
               title={t("只推到 {{r}}:{{cmd}}", { r: l.ref || l.remote, cmd: pushCmdFor(l) })}
               onClick={(e) => { e.stopPropagation(); setBeamTo([l.remote]); onPush(pushCmdFor(l)); }}>

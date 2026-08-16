@@ -1760,8 +1760,10 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
 .brz-collapse.open { grid-template-rows: 1fr; opacity: 1; }
 .brz-collapse-in { overflow: hidden; min-height: 0; }
 /* 竖脊:分支带 → 扇出 → 仓库 tab,整列居中,主干落在容器中线上(和上面竖线①同轴) */
-.brz-spine { display: flex; flex-direction: column; align-items: center; gap: 0; margin-top: 4px; }
-.brz-spine-h { display: flex; align-items: center; gap: 4px; align-self: stretch; margin-bottom: 6px; }
+.brz-spine { position: relative; display: flex; flex-direction: column; align-items: center; gap: 0; margin-top: 4px; padding-top: 20px; }
+/* 标题绝对定位钉左边,和「远程分支」一个路子:它不占高度,chip 排的顶就是这 20px 标题带的下沿 ——
+   上面那条线的落点才算得准(算法见 .branches-tab > .brz-collapse)。 */
+.brz-spine-h { position: absolute; left: 0; top: 0; display: flex; align-items: center; gap: 4px; }
 /* 顶排本地分支 chip:一行排不下就换行,聚焦的那个不挪位置 */
 /* align-items:center 是给「新建」虚线框留的:它两行高,默认 stretch 会把旁边的 chip 一起拉长 */
 .brz-band { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 5px; margin-bottom: 2px; }
@@ -1949,10 +1951,15 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
 .sync-zone { padding: 8px 2px; }
 /* 拓扑图那段没标题了,自己的上内边距 + 上一段的下内边距 + 列表 gap 叠出一大块空白,
    图看着像和上面的地址行断开。收掉自己那份,再吃掉 gap 的大半 */
-.brz-graph-zone { padding-top: 0; margin-top: -12px; }
+.brz-graph-zone { padding-top: 0; margin-top: -22px; }
 /* 暂存区 → 连线:同样是三层空白叠加(段落下内边距 + 列表 gap + 连线自己的上内边距),
-   线看着不是从文件列表里长出来的。吃掉 gap */
-.branches-tab > .brz-collapse { margin-top: -12px; }
+   线看着不是从文件列表里长出来的。吃掉 gap。
+   margin-bottom 是延长段的配重:线要一路画到分支 chip 的上边缘,中间隔着 gap 10 + 段内边距 8 +
+   竖脊 margin 4 + 标题带 20 = 42px,加上自己的 padding-bottom 2 —— 尾段 .sync-stem 高 44,
+   这里就减回 44,后面的竖脊一点不动。收起时不减 —— 那段线本来就不在,减了会把竖脊往上拽。 */
+.branches-tab > .brz-collapse { margin-top: -12px; transition: grid-template-rows .26s cubic-bezier(0.23,1,0.32,1), opacity .16s ease, margin-bottom .26s cubic-bezier(0.23,1,0.32,1); }
+.branches-tab > .brz-collapse.open { margin-bottom: -44px; }
+.sync-wire.sync-stem { flex: 0 0 44px; }
 .sync-zone-h { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-bottom: 6px; }
 .sync-zone-tag { flex-shrink: 0; font-size: 10.5px; font-weight: 700; padding: 1px 8px; border-radius: 999px; }
 .sync-zone-tag.local { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
