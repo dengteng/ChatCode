@@ -13,7 +13,9 @@ import { loadExtensions, loadMarketplace, marketplaceNames, installPlugin, unins
 import { EXT_NOTE_ZH } from "../extNotesZh";
 import { openEditorWindow } from "../popout";
 import { copyText } from "./Chat";
-import { getAvatar, getUserName, setAvatar, setUserName, fileToAvatar, modelLogo } from "./Avatar";
+import { modelLogo } from "./Avatar";
+// 「个人资料」页单独成文件:开源版与内部版这一页装的东西不同,差异全收在那里,本文件两版逐字相同
+import { ProfilePane } from "./ProfilePane";
 import { checkVersion, APP_VERSION, SDK_VERSION, ApiError, type VersionCheck } from "../version";
 
 type Tab = "appearance" | "account" | "profile" | "github" | "ssh" | "extensions" | "about";
@@ -56,7 +58,7 @@ export function Settings({ onClose, initialTab, theme, onPickTheme, customBg, cu
           <div className="settings-content">
             {tab === "appearance" && <AppearanceTab theme={theme} onPick={onPickTheme} customBg={customBg} customBlur={customBlur} customBrightness={customBrightness} onSetCustomBg={onSetCustomBg} onSetCustomBlur={onSetCustomBlur} onSetCustomBrightness={onSetCustomBrightness} />}
             {tab === "account" && <AccountTab />}
-            {tab === "profile" && <ProfileTab />}
+            {tab === "profile" && <ProfilePane />}
             {tab === "github" && <GithubTab />}
             {tab === "ssh" && <SshTab />}
             {tab === "extensions" && <ExtensionsTab />}
@@ -453,38 +455,6 @@ const errMsg = (e: any) => (e instanceof ApiError ? e.message : String(e?.messag
 const GithubMark = () => (
   <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
 );
-
-// 个人资料:头像 + 昵称
-function ProfileTab() {
-  const { t } = useTranslation();
-  const [src, setSrc] = useState<string | null>(getAvatar);
-  const [name, setName] = useState(getUserName);
-  const fileRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    const sync = () => { setSrc(getAvatar()); setName(getUserName()); };
-    window.addEventListener("chatcode-avatar-change", sync);
-    return () => window.removeEventListener("chatcode-avatar-change", sync);
-  }, []);
-  const pick = (e: React.ChangeEvent<HTMLInputElement>) => { const f = e.target.files?.[0]; if (f) fileToAvatar(f); };
-  return (
-    <section className="settings-section">
-      <h4>{t("个人资料")}</h4>
-      <div className="profile-row">
-        <span className="avatar avatar-user profile-avatar" onClick={() => fileRef.current?.click()} title={t("点击更换头像")}>
-          {src ? <img src={src} alt={t("我")} /> : <span className="avatar-fallback">{name ? name.slice(0, 1).toUpperCase() : t("我")}</span>}
-        </span>
-        <div className="profile-avatar-actions">
-          <button className="primary" onClick={() => fileRef.current?.click()}>{t("上传头像")}</button>
-          {src && <button className="ghost" onClick={() => setAvatar(null)}>{t("移除")}</button>}
-          <input ref={fileRef} type="file" accept="image/*" hidden onChange={pick} />
-        </div>
-      </div>
-      <label className="profile-name">{t("昵称")}
-        <input value={name} onChange={(e) => { setName(e.target.value); setUserName(e.target.value); }} placeholder={t("我")} maxLength={24} />
-      </label>
-    </section>
-  );
-}
 
 // 关于:当前版本 + 检查更新
 function AboutTab() {
