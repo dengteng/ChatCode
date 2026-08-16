@@ -536,6 +536,7 @@
   "从 {{r}} 新建本地分支": "Create local branch from {{r}}",
   "推送 {{n}} 个提交到 {{r}}": "Push {{n}} commits to {{r}}",
   "{{r}} · 点击查看操作": "{{r}} · click to view actions",
+  "{{r}} · 同名远程分支,不是上游:git push 不会推到这里,得手动 git push {{rn}} {{name}}": "{{r}} · same-named remote branch, not the upstream: git push won't reach it — run git push {{rn}} {{name}}",
   "把 {{name}} 推成远程分支": "Push {{name}} as a remote branch",
   "(未推送)": "(unpushed)",
   "对比左端": "Compare left side",

@@ -107,9 +107,13 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
   if (dirty) lastChanged.current = changed;
   const exiting = dirty ? changed : lastChanged.current;
   const remoteName = git.remotes.includes("origin") ? "origin" : (git.remotes[0] || "origin");
+  const multiRemote = git.remotes.length > 1;
   // 当前分支有待推送的提交 → 映射图的连线上放一个 push 按钮
   const pushRef = git.local.find((b) => b.name === current && (b.ahead || 0) > 0 && b.upstream);
   const repoWeb = webUrl(git.remoteUrl);          // 远程仓库网页地址(ssh/git → https)
+  // 拓扑顶上那行 url 是哪个远端的(后端按当前分支上游选,这里同一套回退跟着算,只为显示个名字)。
+  // 多远端时不标名字,光看 url 得逐字比域名和仓库名才知道换了仓库。
+  const urlRemote = git.local.find((b) => b.name === current)?.upstream?.split("/")[0] || remoteName;
   // 点分支标签:对比拾取中 → 选它当对端;否则开菜单
   const onChip = (ref: string, remote: boolean, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -252,7 +256,8 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
               <span style={{ flex: 1 }} />
               <button className="ghost" title={t("刷新")} onClick={() => requestGitLog(session.id)}><RotateCw size={13} /></button>
             </div>
-            {git.remoteUrl && <button className="branches-subline" title={repoWeb ? t("在浏览器打开远程仓库") : git.remoteUrl} disabled={!repoWeb} onClick={() => repoWeb && openUrl(repoWeb)}>{git.remoteUrl}</button>}
+            {git.remoteUrl && <button className="branches-subline" title={repoWeb ? t("在浏览器打开远程仓库") : git.remoteUrl} disabled={!repoWeb} onClick={() => repoWeb && openUrl(repoWeb)}>
+              {multiRemote && <b className="branches-subline-remote">{urlRemote}</b>}{git.remoteUrl}</button>}
             {log?.commits.length
               ? <div className="branches-graph"><Graph log={log} current={current} dirty={dirty} picking={compareFrom} onChip={onChip} /></div>
               : <div className="muted branches-empty">{t("暂无提交记录")}</div>}
@@ -329,14 +334,24 @@ function BranchMap({ local, remote, remoteName, hasRemote, multiRemote, current,
   const { t } = useTranslation();
   const CY = MAP_LINK_H / 2;
   const remoteSet = new Set(remote);
-  const mappedUp = new Set(local.filter((b) => b.upstream && remoteSet.has(b.upstream)).map((b) => b.upstream));
+  const shortOf = (r: string) => r.split("/").slice(1).join("/");
+  // 上游绑定是独占的:被谁认领过的远程分支不再被同名规则抢去别的行。
+  // (反过来两条本地分支共用一个 upstream 是合法的,那它就该在两行都出现 —— 这是事实,不是重复。)
+  const upstreams = new Set(local.map((b) => b.upstream).filter((u) => u && remoteSet.has(u)));
+  // 一个本地分支对应的远程 = 它的 upstream + 所有同名、且没被别人认领的远程分支。
+  // git 只存得下一个 upstream,但「oss 同时推 origin/main 和 private/oss」是常态;
+  // 只画 upstream 那一条,等于在界面上宣称另一个远端不存在 —— 用户照着这张图判断推没推,就会漏推。
+  const rsOf = (b: GitBranch) => [
+    ...(b.upstream && remoteSet.has(b.upstream) ? [b.upstream] : []),   // upstream 排头:push 默认去它那
+    ...remote.filter((r) => !upstreams.has(r) && shortOf(r) === b.name),
+  ];
   const localRank = (b: GitBranch) =>
-    b.name === "main" ? 0 : b.name === current ? 1 : (b.upstream && remoteSet.has(b.upstream) ? 2 : 3);
+    b.name === "main" ? 0 : b.name === current ? 1 : (rsOf(b).length ? 2 : 3);
   const localSorted = [...local].sort((a, b) => localRank(a) - localRank(b) || a.name.localeCompare(b.name));
-  // 一本地一行,带上它映射的远程(上游已删 [gone] 的不算);没配对的远程分支按名排追加在最后
-  const rows: { l?: GitBranch; r?: string }[] =
-    localSorted.map((b) => ({ l: b, r: b.upstream && remoteSet.has(b.upstream) ? b.upstream : undefined }));
-  for (const r of [...remote].sort((a, b) => a.localeCompare(b))) if (!mappedUp.has(r)) rows.push({ r });
+  // 一本地一行,带上它映射的全部远程(上游已删 [gone] 的不算);没配对的远程分支按名排追加在最后
+  const rows: { l?: GitBranch; rs: string[] }[] = localSorted.map((b) => ({ l: b, rs: rsOf(b) }));
+  const paired = new Set(rows.flatMap((x) => x.rs));
+  for (const r of [...remote].sort((a, b) => a.localeCompare(b))) if (!paired.has(r)) rows.push({ rs: [r] });
 
   const tagTitle = (b: GitBranch) =>
     `${b.name}${b.name === current ? t("（当前）") : ""}${b.gone ? t(" · 上游 {{up}} 已在远程删除", { up: b.upstream }) : b.upstream ? `${t(" · 上游 {{up}}", { up: b.upstream })}${b.upstreamAuthor ? t("（{{author}}）", { author: b.upstreamAuthor }) : ""}${b.ahead ? ` ↑${b.ahead}` : ""}${b.behind ? ` ↓${b.behind}` : ""}` : t(" · 未跟踪")}${t(" · 点击查看操作")}`;
@@ -404,8 +419,12 @@ function BranchMap({ local, remote, remoteName, hasRemote, multiRemote, current,
       </div>
       {!local.length && <span className="muted brz-empty">{t("暂无本地分支")}</span>}
       {!remote.length && <span className="muted brz-empty">{t("暂无远程分支")}</span>}
-      {rows.map(({ l: b, r }) => {
+      {rows.map(({ l: b, rs }) => {
         const isCur = b?.name === current;
+        const r = rs[0];   // 主远端:有 upstream 就是它,连线/push 都以它为准
+        // 只有 upstream 那条才是 git 认的映射:`git push` 只去它那儿。同名匹配来的(private/oss)
+        // 画成虚线 —— 画实线等于替 git 承诺了一件它不会做的事,用户就会以为一次 push 两边都到了。
+        const up = b?.upstream && rs.includes(b.upstream) ? b.upstream : undefined;
         return (
           <div className="brz-row" key={b?.name ?? r}>
             <div className="brz-cell">{b ? (
@@ -417,9 +436,9 @@ function BranchMap({ local, remote, remoteName, hasRemote, multiRemote, current,
             <div className="brz-link" style={{ width: linkW }}>
               {/* push/pull 进行中:当前分支这行的连线自己长出光点(push 左→右,pull 右→左);
                   平时不放,免得静态界面一直在动 */}
-              {b && r && wire("right", isCur, false,
+              {b && rs.length > 0 && wire("right", isCur, !up,
                 b.name === current ? (pushFlow ? "out" : pullFlow ? "in" : undefined) : undefined)}
-              {b && !r && hasRemote && wire("right", false, true)}
+              {b && !rs.length && hasRemote && wire("right", false, true)}
               {!b && r && wire("left", false, true)}
               {/* 有待推送提交:连线中间压一个 push 按钮(盖住线,自带底色)。
                   推送进行中撤掉它,连线只留左→右的流光 —— 按钮压在线上会把光束截断。 */}
@@ -430,15 +449,17 @@ function BranchMap({ local, remote, remoteName, hasRemote, multiRemote, current,
                 </button>
               )}
             </div>
-            <div className="brz-cell">{r ? (
-              <button data-ref={r} title={t("{{r}} · 点击查看操作", { r })} className={tagCls(r, true)} onMouseDown={(e) => onChip(r, true, e)}>
+            {/* 一个本地分支挂多个远端时,右格竖着排 —— 行高跟着长,连线正对这一组的中线 */}
+            <div className={`brz-cell ${rs.length > 1 ? "multi" : ""}`}>{rs.length ? rs.map((rr) => (
+              <button key={rr} data-ref={rr} className={`${tagCls(rr, true)} ${rr === up ? "" : "loose"}`} onMouseDown={(e) => onChip(rr, true, e)}
+                title={rr === up ? t("{{r}} · 点击查看操作", { r: rr }) : t("{{r}} · 同名远程分支,不是上游:git push 不会推到这里,得手动 git push {{rn}} {{name}}", { r: rr, rn: rr.split("/")[0], name: rr.split("/").slice(1).join("/") })}>
                 <Cloud size={9} className="brz-tag-ico" />
                 {/* 多远端时必须标出前缀:origin/main 和 private/main 光看 main 完全分不清是哪个仓库。
                     前缀 flex:none,挤压时先截主名,别把"是谁家的"这个信息截掉。单远端时前缀是纯噪音,不显示。 */}
-                {multiRemote && <span className="brz-tag-remote">{r.split("/")[0]}/</span>}
-                <span className="brz-tag-name">{r.split("/").slice(1).join("/")}</span>
+                {multiRemote && <span className="brz-tag-remote">{rr.split("/")[0]}/</span>}
+                <span className="brz-tag-name">{rr.split("/").slice(1).join("/")}</span>
               </button>
-            ) : b && hasRemote ? newTag("remote", t("把 {{name}} 推成远程分支", { name: b.name }), () => onRun(`git push -u ${q(remoteName)} ${q(b.name)}`)) : null}</div>
+            )) : b && hasRemote ? newTag("remote", t("把 {{name}} 推成远程分支", { name: b.name }), () => onRun(`git push -u ${q(remoteName)} ${q(b.name)}`)) : null}</div>
           </div>
         );
       })}

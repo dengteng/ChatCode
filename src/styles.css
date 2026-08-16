@@ -1758,6 +1758,8 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
 .brz-map { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
 .brz-row { display: flex; align-items: center; }
 .brz-cell { flex: 1 1 0; min-width: 0; display: flex; }
+/* 一个本地分支挂多个远端:右格竖排。行是 align-items:center,所以连线自动对准这一组的中线 */
+.brz-cell.multi { flex-direction: column; gap: 4px; }
 .brz-link { position: relative; flex: none; display: flex; align-items: center; justify-content: center; }
 /* 连线上的 push 按钮:绝对居中压住连线(自带底色遮线),连线带宽度由 JS 按需加宽到能塞下它 */
 .brz-push { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 1;
@@ -1812,6 +1814,8 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
 .brz-tag.local.cur { border-color: transparent; background: var(--accent); color: #fff; font-weight: 600; }
 .brz-tag.local.cur:hover { background: color-mix(in srgb, var(--accent) 88%, #000); }
 .brz-tag.remote { color: var(--muted); background: transparent; }
+/* 同名但不是 upstream 的远程分支:虚线框 —— 和实线的上游区分开,`git push` 不会推到它 */
+.brz-tag.remote.loose { border-style: dashed; }
 .brz-tag.remote:hover { color: var(--text); }
 /* 上游已在远程删掉([gone]):只在边框和一个琥珀点上说这件事,**不染文字**。
    原来整条分支名都是琥珀色,和当前分支的实心 accent 撞成两套色码,而且黄字在浅底上本身就难读。
@@ -1874,6 +1878,9 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
 /* 卡片标题下的可点子行:项目目录(开 Finder)/ 远程地址(开浏览器)。等宽、截断、悬停高亮 */
 .branches-subline { display: block; width: 100%; margin: -2px 0 8px; padding: 0; border: 0; background: none; text-align: left; font: 11px Menlo, monospace; color: var(--muted); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color .12s ease; }
 .branches-subline:hover:not(:disabled) { color: var(--accent); text-decoration: underline; }
+/* 这行 url 属于哪个远端(多远端时才有):url 本身要逐字比域名才看得出换了仓库,名字直说 */
+.branches-subline-remote { margin-right: 6px; padding: 0 4px; border-radius: 3px; font-weight: 700;
+  color: var(--text); background: color-mix(in srgb, var(--accent) 14%, transparent); }
 .branches-subline:disabled { cursor: default; }
 
 /* 分支页:本地 / 远程 两个分区(不再是两张卡片),中间夹一条同步连接器 */

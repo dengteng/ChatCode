@@ -598,13 +598,20 @@ async function gitInfo(cwd, sessionId) {
   if (!root.ok) return { cwd, isRepo: false, local: [], remote: [], remotes: [], github, runtime: await runtimeInfo(cwd, sessionId) };
   const repo = root.stdout.trim();
   maybeFetch(repo); // 后台刷新 remote-tracking ref,让顶部 领先/落后 计数不至于长期过期
-  const [current, status, locals, remote, remotes, originUrl, runtime] = await Promise.all([
+  const [current, status, locals, remote, remotesV, runtime] = await Promise.all([
     // --no-optional-locks:status 默认会把刷新后的索引写回去,要抢 .git/index.lock。这是 15s 一轮的后台轮询,
     // 撞上用户正在跑的 git add/commit 就让对方报 "index.lock: File exists"。只读轮询不需要那把锁。
     execOut("git", ["branch", "--show-current"], repo), execOut("git", ["--no-optional-locks", "status", "--short"], repo),
     execOut("git", ["for-each-ref", "--format=%(refname:short)\t%(upstream:short)\t%(upstream:track)\t%(objectname:short)", "refs/heads"], repo),
-    execOut("git", ["for-each-ref", "--format=%(refname:short)\t%(objectname:short)\t%(authorname)", "refs/remotes"], repo), execOut("git", ["remote"], repo), execOut("git", ["remote", "get-url", "origin"], repo), runtimeInfo(repo, sessionId),
+    execOut("git", ["for-each-ref", "--format=%(refname:short)\t%(objectname:short)\t%(authorname)", "refs/remotes"], repo),
+    // `git remote -v` 一条顶原来的 `git remote` + `git remote get-url origin` 两条:名字和 url 一起给。
+    // 每个远端两行(fetch/push),push 行在后、直接覆盖 —— 界面上那个地址回答的是"推到哪",按 push url 取才对。
+    execOut("git", ["remote", "-v"], repo), runtimeInfo(repo, sessionId),
   ]);
+  const urlByRemote = new Map(remotesV.stdout.split("\n").filter(Boolean).map((line) => {
+    const [name, rest] = line.split("\t");
+    return [name, (rest || "").replace(/\s+\((fetch|push)\)$/, "")];
+  }));
   const remoteRows = remote.stdout.split("\n").filter(Boolean).map((line) => line.split("\t"));
   const shaByRemote = new Map(remoteRows.map(([name, sha]) => [name, sha]));
   const authorByRemote = new Map(remoteRows.map(([name, , author]) => [name, author]));
@@ -613,17 +620,22 @@ async function gitInfo(cwd, sessionId) {
     return { name, upstream: upstream || undefined, sha, upstreamSha: upstream ? shaByRemote.get(upstream) : undefined,
       upstreamAuthor: upstream ? authorByRemote.get(upstream) || undefined : undefined, ...trackCounts(track) };
   });
+  const curName = current.stdout.trim();
+  const cur = local.find((b) => b.name === curName);
   // 顺手喂给 gitBrief 的缓存:面板每 15s 就跑一次这条 status,发消息那一刻没必要再扫一遍工作树。
   {
-    const name = current.stdout.trim();
-    const cur = local.find((b) => b.name === name);
     const marks = [cur?.ahead && `ahead ${cur.ahead}`, cur?.behind && `behind ${cur.behind}`, cur?.gone && "gone"].filter(Boolean);
-    cacheStatus(repo, cur?.sha, name + (cur?.upstream ? `...${cur.upstream}` : "") + (marks.length ? ` [${marks.join(", ")}]` : ""),
+    cacheStatus(repo, cur?.sha, curName + (cur?.upstream ? `...${cur.upstream}` : "") + (marks.length ? ` [${marks.join(", ")}]` : ""),
       status.stdout.split("\n").filter(Boolean));
   }
-  return { cwd, isRepo: true, root: repo, current: current.stdout.trim(), status: status.stdout.trim(), local,
+  // 提交拓扑顶上那行仓库地址跟着**当前分支的上游**走。钉死 origin 在多远端仓库里会张冠李戴:
+  // 站在上游是 private/cloud 的分支上,却挂着 origin 的 url,等于告诉用户这些提交推去了另一个仓库。
+  // 没上游(新分支/detached)再退回 origin,还没有就取第一个远端。
+  const urlRemote = cur?.upstream?.split("/")[0];
+  return { cwd, isRepo: true, root: repo, current: curName, status: status.stdout.trim(), local,
     // 远程跟踪分支必含 "remote/branch" 的斜杠;origin/HEAD 的短名会塌成裸 "origin"(远程名,非分支),用斜杠过滤掉
-    remote: remoteRows.map(([name]) => name).filter((x) => x && x.includes("/") && !/\/HEAD$/.test(x)), remotes: remotes.stdout.split("\n").filter(Boolean), remoteUrl: originUrl.ok ? originUrl.stdout.trim() : undefined, github, runtime };
+    remote: remoteRows.map(([name]) => name).filter((x) => x && x.includes("/") && !/\/HEAD$/.test(x)), remotes: [...urlByRemote.keys()],
+    remoteUrl: (urlRemote && urlByRemote.get(urlRemote)) || urlByRemote.get("origin") || [...urlByRemote.values()][0], github, runtime };
 }
 // 分支 Tab 的提交拓扑图数据:全部分支的提交(含 parents,供前端画分叉线)+ 各分支头(全长 sha,和 %H 对齐)。
 async function gitLog(cwd, limit = 80) {
