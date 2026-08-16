@@ -6,7 +6,7 @@ import { html as diffToHtml } from "diff2html";
 import "diff2html/bundles/css/diff2html.min.css";
 import type { Session, GitLogData, GitCommit, GitBranch } from "../types";
 import { useStore } from "../store";
-import { q, pushCmd } from "../lib/gitcmd";
+import { q, pushCmd, pushTargets } from "../lib/gitcmd";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { useTranslation } from "react-i18next";
 import i18n from "../i18n";
@@ -241,7 +241,7 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
               行序以本地为主:main→当前→有映射→无映射(组内按名排);没配对的远程分支按名排追加在最后 */}
           <section className="sync-zone">
             {compareFrom && <div className="branches-pick-hint">{t("选择要与")} <b>{compareFrom}</b> {t("对比的另一个分支节点…")} <button className="ghost" onClick={() => setCompareFrom(null)}><X size={12} /> {t("取消")}</button></div>}
-            <BranchMap local={git.local} remote={git.remote} remoteName={remoteName} hasRemote={git.remotes.length > 0} multiRemote={git.remotes.length > 1}
+            <BranchMap local={git.local} remote={git.remote} remoteSha={git.remoteSha} remoteName={remoteName} hasRemote={git.remotes.length > 0} multiRemote={git.remotes.length > 1}
               current={current} dirty={dirty} picking={compareFrom} onChip={onChip} onRun={run}
               pushing={pushing} pushFlow={pushFlow} pullFlow={pullFlow}
               onNew={(target) => { setConfirm(null); setMenu(null); setPrompt({ kind: "newbranch", target, ref: current || git.local[0]?.name || "HEAD", val: "" }); }}
@@ -331,8 +331,8 @@ const MAP_LINK_W = 84, FORK_X = 52, linkW = MAP_LINK_W;
 const CHIP_H = 26, CHIP_GAP = 4, PITCH = CHIP_H + CHIP_GAP;
 const MAP_LINK_H = CHIP_H;
 const TAIL = 26; // 传输光点的尾迹长度(px,svg 用户坐标)
-function BranchMap({ local, remote, remoteName, hasRemote, multiRemote, current, dirty, picking, onChip, onRun, pushing, pushFlow, pullFlow, onPush, onNew }:
-  { local: GitBranch[]; remote: string[]; remoteName: string; hasRemote: boolean; multiRemote: boolean; current: string; dirty: boolean;
+function BranchMap({ local, remote, remoteSha, remoteName, hasRemote, multiRemote, current, dirty, picking, onChip, onRun, pushing, pushFlow, pullFlow, onPush, onNew }:
+  { local: GitBranch[]; remote: string[]; remoteSha?: Record<string, string>; remoteName: string; hasRemote: boolean; multiRemote: boolean; current: string; dirty: boolean;
     picking: string | null; onChip: (ref: string, remote: boolean, e: React.MouseEvent) => void; onRun: (cmd: string) => void;
     pushing: boolean; pushFlow: boolean; pullFlow: boolean; onPush: (cmd: string) => void; onNew: (target: "local" | "remote") => void }) {
   const { t } = useTranslation();
@@ -454,9 +454,8 @@ function BranchMap({ local, remote, remoteName, hasRemote, multiRemote, current,
         // 画成虚线 —— 画实线等于替 git 承诺了一件它不会做的事,用户就会以为一次 push 两边都到了。
         const up = b?.upstream && rs.includes(b.upstream) ? b.upstream : undefined;
         const ys = rs.map((_, i) => CHIP_H / 2 + i * PITCH);   // 每个远程 chip 的中线 y(svg 坐标)
-        // push 按钮只给当前分支这一行。upstream 那条按 ahead 判断有没有东西可推;非上游的远端 git
-        // 根本不算 ahead/behind,没法判断,所以常驻 —— 那是够到它的唯一入口。
-        const pushable = isCur && b ? rs.filter((rr) => rr !== up || (b.ahead || 0) > 0) : [];
+        // push 按钮只给当前分支这一行,且只给"确实还有东西可推"的远端(判定见 pushTargets)。
+        const pushable = isCur && b ? pushTargets(b, rs, up, remoteSha) : [];
         const showPush = pushable.length > 0 && !pushFlow && !pushing;
         return (
           <div className="brz-row" key={b?.name ?? r}>

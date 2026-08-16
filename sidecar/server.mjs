@@ -635,6 +635,9 @@ async function gitInfo(cwd, sessionId) {
   return { cwd, isRepo: true, root: repo, current: curName, status: status.stdout.trim(), local,
     // 远程跟踪分支必含 "remote/branch" 的斜杠;origin/HEAD 的短名会塌成裸 "origin"(远程名,非分支),用斜杠过滤掉
     remote: remoteRows.map(([name]) => name).filter((x) => x && x.includes("/") && !/\/HEAD$/.test(x)), remotes: [...urlByRemote.keys()],
+    // 每个远程跟踪分支的 sha。界面判断"这条还有东西可推吗"要用:git 只给 upstream 算 ahead/behind,
+    // 同名撞上的非上游远端(oss → private/oss)一个数都没有,只能拿 sha 和本地 head 比。
+    remoteSha: Object.fromEntries(shaByRemote),
     remoteUrl: (urlRemote && urlByRemote.get(urlRemote)) || urlByRemote.get("origin") || [...urlByRemote.values()][0], github, runtime };
 }
 // 分支 Tab 的提交拓扑图数据:全部分支的提交(含 parents,供前端画分叉线)+ 各分支头(全长 sha,和 %H 对齐)。

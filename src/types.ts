@@ -247,6 +247,8 @@ export interface GitDiffData { from: string; to: string; ahead: number; behind: 
 export interface GitInfo {
   cwd: string; isRepo: boolean; root?: string; current?: string; status?: string;
   local: GitBranch[]; remote: string[]; remotes: string[]; remoteUrl?: string;
+  // 远程跟踪分支名 → 短 sha(和 GitBranch.sha 同一种短法,可直接比)
+  remoteSha?: Record<string, string>;
   // task 有值 = agent 起的后台任务(SDK 报的),没有真 pid,停止走 stopTask 而非 kill_pid
   runtime?: { processes: { pid: string; name: string; elapsed: string; task?: string }[]; ports: { process: string; port: string }[] };
   github?: { installed: boolean; loggedIn: boolean; account?: string; detail?: string };
