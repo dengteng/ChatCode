@@ -238,7 +238,7 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
               行序以本地为主:main→当前→有映射→无映射(组内按名排);没配对的远程分支按名排追加在最后 */}
           <section className="sync-zone">
             {compareFrom && <div className="branches-pick-hint">{t("选择要与")} <b>{compareFrom}</b> {t("对比的另一个分支节点…")} <button className="ghost" onClick={() => setCompareFrom(null)}><X size={12} /> {t("取消")}</button></div>}
-            <BranchMap local={git.local} remote={git.remote} remoteName={remoteName} hasRemote={git.remotes.length > 0}
+            <BranchMap local={git.local} remote={git.remote} remoteName={remoteName} hasRemote={git.remotes.length > 0} multiRemote={git.remotes.length > 1}
               current={current} dirty={dirty} picking={compareFrom} onChip={onChip} onRun={run}
               pushBranch={pushRef?.name} pushing={pushing} pushFlow={pushFlow} pullFlow={pullFlow}
               onNew={(target) => { setConfirm(null); setMenu(null); setPrompt({ kind: "newbranch", target, ref: current || git.local[0]?.name || "HEAD", val: "" }); }}
@@ -322,8 +322,8 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
 // 连线带尺寸:够宽才塞得下 push 按钮和箭头(两侧 tag 是 flex:1,连线带越宽 tag 越短)
 const MAP_LINK_W = 66, MAP_LINK_H = 22, linkW = MAP_LINK_W;
 const TAIL = 26; // 传输光点的尾迹长度(px,svg 用户坐标)
-function BranchMap({ local, remote, remoteName, hasRemote, current, dirty, picking, onChip, onRun, pushBranch, pushing, pushFlow, pullFlow, onPush, onNew }:
-  { local: GitBranch[]; remote: string[]; remoteName: string; hasRemote: boolean; current: string; dirty: boolean;
+function BranchMap({ local, remote, remoteName, hasRemote, multiRemote, current, dirty, picking, onChip, onRun, pushBranch, pushing, pushFlow, pullFlow, onPush, onNew }:
+  { local: GitBranch[]; remote: string[]; remoteName: string; hasRemote: boolean; multiRemote: boolean; current: string; dirty: boolean;
     picking: string | null; onChip: (ref: string, remote: boolean, e: React.MouseEvent) => void; onRun: (cmd: string) => void;
     pushBranch?: string; pushing: boolean; pushFlow: boolean; pullFlow: boolean; onPush: () => void; onNew: (target: "local" | "remote") => void }) {
   const { t } = useTranslation();
@@ -433,6 +433,9 @@ function BranchMap({ local, remote, remoteName, hasRemote, current, dirty, picki
             <div className="brz-cell">{r ? (
               <button data-ref={r} title={t("{{r}} · 点击查看操作", { r })} className={tagCls(r, true)} onMouseDown={(e) => onChip(r, true, e)}>
                 <Cloud size={9} className="brz-tag-ico" />
+                {/* 多远端时必须标出前缀:origin/main 和 private/main 光看 main 完全分不清是哪个仓库。
+                    前缀 flex:none,挤压时先截主名,别把"是谁家的"这个信息截掉。单远端时前缀是纯噪音,不显示。 */}
+                {multiRemote && <span className="brz-tag-remote">{r.split("/")[0]}/</span>}
                 <span className="brz-tag-name">{r.split("/").slice(1).join("/")}</span>
               </button>
             ) : b && hasRemote ? newTag("remote", t("把 {{name}} 推成远程分支", { name: b.name }), () => onRun(`git push -u ${q(remoteName)} ${q(b.name)}`)) : null}</div>

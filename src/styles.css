@@ -1806,6 +1806,8 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
 .brz-tag:hover { border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); background: color-mix(in srgb, var(--accent) 12%, var(--bg)); }
 /* 名字占满剩余宽度,超长省略号(不设字数上限,随标签实际宽度截断) */
 .brz-tag-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 远端前缀(多远端时才有):压暗一档当限定词读,flex:none 保证挤压时先截分支名而不是它 —— 截掉前缀就又分不清仓库了 */
+.brz-tag-remote { flex: none; opacity: .55; font-size: .92em; }
 .brz-tag.local { border-color: color-mix(in srgb, var(--accent) 34%, var(--border)); background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .brz-tag.local.cur { border-color: transparent; background: var(--accent); color: #fff; font-weight: 600; }
 .brz-tag.local.cur:hover { background: color-mix(in srgb, var(--accent) 88%, #000); }
