@@ -1316,10 +1316,13 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 .mem-card-body { padding: 2px 12px 4px 29px; }
 .mem-body-md { font-size: 12.5px; color: var(--text); }
 .mem-body-md > :first-child { margin-top: 0; }
-.mem-card-actions { display: flex; align-items: center; gap: 8px; padding: 0 11px 9px 29px; }
+.mem-card-actions { display: flex; align-items: center; gap: 8px; padding: 0 11px 6px 29px; }
 .mem-card-actions button { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; font-size: 11.5px; border: 1px solid var(--border); border-radius: 7px; background: none; color: var(--muted); cursor: pointer; }
 .mem-card-actions button:hover { color: var(--text); border-color: var(--accent); }
-.mem-card-file { font-size: 11px; margin-left: auto; font-family: Menlo, monospace; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 文件名单独一行、跟按钮左对齐:挤在按钮右边时它总是被省略号吃掉大半,而这一行正是这条记忆的身份 */
+.mem-card-file { font-size: 11px; font-family: Menlo, monospace; padding: 0 11px 9px 29px; cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: color .12s ease; }
+.mem-card-file:hover { color: var(--accent); text-decoration: underline; }
 .mem-card-actions button { flex-shrink: 0; }
 /* 仅索引条目:无独立文件,hook 是主内容要完整换行,不做单行省略;不可点故去掉 hover */
 .mem-note .mem-card-head:hover { background: none; }
@@ -1765,6 +1768,9 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
 /* 标题绝对定位钉左边,和「远程分支」一个路子:它不占高度,chip 排的顶就是这 20px 标题带的下沿 ——
    上面那条线的落点才算得准(算法见 .branches-tab > .brz-collapse)。 */
 .brz-spine-h { position: absolute; left: 0; top: 0; display: flex; align-items: center; gap: 4px; }
+/* 上面那条 commit 连线要一路画到 chip 上边缘,必然穿过这条标题带。给标题文字铺一块抽屉同色的底,
+   线就从字底下过去(字压线,不是线切字)—— 挪线的话箭头就落不到 chip 上了。 */
+.brz-spine-h .sec-label { padding-right: 8px; background: var(--panel); }
 /* 顶排本地分支 chip:左对齐、一行排到底不换行,当前分支钉在第一格(排序在 JS 里)。
    排不下就横向滚动 —— 换行会让这排的高度随分支数跳,下面整张图跟着上下移。
    ponytail: 滚动后主干仍按渲染时量的位置画,和滚走的 chip 会错开 —— 第一格永远是当前分支,不滚就对得上。
@@ -1791,12 +1797,12 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
 .brz-tabs { display: flex; justify-content: flex-start; align-items: stretch; }
 .brz-tabrow { display: flex; justify-content: flex-start; flex-wrap: nowrap; }
 .brz-side { width: var(--side-w); flex: none; }
-/* 地址行:紧贴 tab 下方(5px),左边和「远程分支」标题对齐。右端挂刷新 —— 原来它在「提交拓扑」标题那行,
-   标题去掉后没地方站,挪来这里正好:这行讲的就是"在看哪个远端",刷的也是那个远端的历史。 */
+/* 地址行:紧贴 tab 下方(5px),左边和「远程分支」标题对齐。
+   地址最多两行:一行截断的话 github.com/owner/repo 这种长地址只剩域名,看不出是哪个仓库;
+   再多就该收进 title 了。break-all 是给没有空格的 url 用的,不然整段不换行照样溢出。 */
 .brz-url-row { align-self: stretch; display: flex; align-items: center; gap: 6px; margin-top: 5px; }
-.brz-url-row .branches-subline { margin: 0; }
-.brz-url-row .ghost { flex: none; display: inline-flex; padding: 2px; border: 0; background: none; color: var(--muted); cursor: pointer; }
-.brz-url-row .ghost:hover { color: var(--text); }
+.brz-url-row .branches-subline { margin: 0; white-space: normal; word-break: break-all; line-height: 1.45;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 /* 「新建」虚线框:远端排是竖的(第一行 +,第二行「新建」,跟着 tab 长到等高);
    本地排 .inline 是横的 —— 那排 chip 只有 26px 高,竖排框会高出一截。 */
 .brz-new { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
@@ -1877,9 +1883,10 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
 .brz-tag.local { border-color: color-mix(in srgb, var(--accent) 34%, var(--border)); background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .brz-tag.local.cur { border-color: transparent; background: var(--accent); color: #fff; font-weight: 600; }
 .brz-tag.local.cur:hover { background: color-mix(in srgb, var(--accent) 88%, #000); }
-/* 聚焦 = 主脊现在画的是哪条分支。用外圈的环表示,不动填充 —— 填充已经被"当前分支"占用了,
-   两件事(我在哪 / 我在看哪)必须能同时看出来,常态下它俩是同一条,不同时才更需要分得清。 */
-.brz-tag.local.focus { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent); }
+/* 聚焦 = 主脊现在画的是哪条分支。左键点标签现在直接 git switch,聚焦和当前分支基本永远同一条,
+   两者用同一个实心填充 —— 外圈那道环是给"选中却不是当前"留的,而那个状态已经只剩 switch 跑完前的一瞬。 */
+.brz-tag.local.focus { border-color: transparent; background: var(--accent); color: #fff; font-weight: 600; }
+.brz-tag.local.focus:hover { background: color-mix(in srgb, var(--accent) 88%, #000); }
 /* 上游已在远程删掉([gone]):只在边框和一个琥珀点上说这件事,**不染文字**。
    原来整条分支名都是琥珀色,和当前分支的实心 accent 撞成两套色码,而且黄字在浅底上本身就难读。
    状态是状态,名字是名字 —— 分开表达,一眼还能读出分支叫什么。 */

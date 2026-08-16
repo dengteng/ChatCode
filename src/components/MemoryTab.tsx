@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Brain, RefreshCw, Pencil, FolderOpen, TriangleAlert, ChevronRight, ChevronDown, LoaderCircle } from "lucide-react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -108,6 +109,14 @@ export function MemoryTab({ cwd, highlight }: { cwd: string; highlight?: string 
 
 function MemoryCard({ m, expanded, onToggle }: { m: MemoryEntry; expanded: boolean; onToggle: () => void }) {
   const { t } = useTranslation();
+  const [ctx, setCtx] = useState<{ x: number; y: number } | null>(null); // 文件名的右键菜单
+  // 点别处 / 右键别处 关掉(和「文件」tab 的树是同一套)
+  useEffect(() => {
+    if (!ctx) return;
+    const close = () => setCtx(null);
+    window.addEventListener("click", close); window.addEventListener("contextmenu", close);
+    return () => { window.removeEventListener("click", close); window.removeEventListener("contextmenu", close); };
+  }, [ctx]);
   return (
     <div className={`mem-card ${m.indexed ? "" : "unindexed"}`} data-mem={m.file}>
       <div className="mem-card-head" onClick={onToggle}>
@@ -127,8 +136,16 @@ function MemoryCard({ m, expanded, onToggle }: { m: MemoryEntry; expanded: boole
       <div className="mem-card-actions">
         <button onClick={() => openEditorWindow(m.path, m.file)}><Pencil size={12} /> {t("编辑")}</button>
         <button onClick={() => revealPath(m.path)}><FolderOpen size={12} /> {t("打开目录")}</button>
-        <span className="mem-card-file muted" title={m.file}>{m.file}</span>
       </div>
+      {/* 文件名自己一行(不再挤在按钮右边被截成半截),交互和「文件」tab 里的文件行一致:
+          左键打开、右键出「打开目录」 */}
+      <div className="mem-card-file muted" title={m.file}
+        onClick={() => openEditorWindow(m.path, m.file)}
+        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtx({ x: e.clientX, y: e.clientY }); }}>{m.file}</div>
+      {ctx && createPortal(
+        <div className="tree-ctx-menu" style={{ left: ctx.x, top: ctx.y }} onClick={(e) => e.stopPropagation()} onContextMenu={(e) => e.preventDefault()}>
+          <button onMouseDown={(e) => { e.preventDefault(); revealPath(m.path); setCtx(null); }}><FolderOpen size={13} /> {t("打开目录")}</button>
+        </div>, document.body)}
     </div>
   );
 }

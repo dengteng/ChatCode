@@ -239,12 +239,16 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
               流光(flow-down)只在真的 commit 进行时点亮:平时一直流会让人以为有活在跑。 */}
           <div className={`brz-collapse ${dirty ? "open" : ""}`}>
             <div className="brz-collapse-in">
-              <div className={`sync-link ${commitFlow ? "flow-down" : ""}`} style={{ transform: `translateX(${stemDx}px)` }}>
+              {/* 线要平移到当前分支 chip 的中线上,但当前分支永远排在最左第一格 —— 直接平移会把线上的
+                  commit 按钮推出容器左边(外层 .brz-collapse-in 是 overflow:hidden,截掉就没了)。
+                  max(…, -50% + 42px):-50% 是容器半宽(线回到左边缘),再往右留 42px 给按钮的左半边。 */}
+              <div className={`sync-link ${commitFlow ? "flow-down" : ""}`} style={{ transform: `translateX(max(${stemDx}px, calc(-50% + 42px)))` }}>
                 <span className="sync-wire" />
                 {/* 提交进行中:按钮撤掉换成等高的线段 —— 它这时既点不动又正好挡住流光,留着只剩噪音 */}
                 {commitFlow ? <span className="sync-wire wire-gap" /> : <div className="sync-hub">
-                  <button className="sync-act commit" title={t("提交改动")} onClick={onCommit}>
-                    <span>commit <em>{t("{{count}} 处", { count: exiting.length })}</em></span>
+                  {/* 只写 commit:改动条数上面暂存区那排文件已经逐条列着,按钮再报一遍只是把自己撑宽 */}
+                  <button className="sync-act commit" title={t("提交改动（{{count}} 处）", { count: exiting.length })} onClick={onCommit}>
+                    <span>commit</span>
                   </button>
                 </div>}
                 <span className="sync-wire" />
@@ -270,7 +274,6 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
               urlLine={repoUrl ? <div className="brz-url-row">
                 <button className="branches-subline" title={repoWeb ? t("在浏览器打开远程仓库") : repoUrl} disabled={!repoWeb} onClick={() => repoWeb && openUrl(repoWeb)}>
                   {multiRemote && <b className="branches-subline-remote">{urlRemote}</b>}{repoUrl}</button>
-                <button className="ghost" title={t("刷新")} onClick={() => requestGitLog(session.id)}><RotateCw size={13} /></button>
               </div> : null} />
           </section>
 
@@ -282,8 +285,8 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
               : <div className="muted branches-empty">{t("暂无提交记录")}</div>}
           </section>
           <div className="branches-hint muted">{multiRemote
-            ? t("点分支标签聚焦、右键看操作 · 琥珀点=还没推到 {{repo}}", { repo: urlRemote })
-            : t("点分支标签聚焦、右键看操作 · 琥珀点=未推送")}</div>
+            ? t("点本地分支标签切换、右键看操作 · 琥珀点=还没推到 {{repo}}", { repo: urlRemote })
+            : t("点本地分支标签切换、右键看操作 · 琥珀点=未推送")}</div>
         </>
       )}
       {menu && createPortal(
@@ -416,7 +419,7 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
   const beamShow = beamLanes.length ? beamLanes : lanes;
 
   const tagTitle = (x: GitBranch) =>
-    `${x.name}${x.name === current ? t("（当前）") : ""}${x.gone ? t(" · 上游 {{up}} 已在远程删除", { up: x.upstream }) : x.upstream ? `${t(" · 上游 {{up}}", { up: x.upstream })}${x.upstreamAuthor ? t("（{{author}}）", { author: x.upstreamAuthor }) : ""}${x.ahead ? ` ↑${x.ahead}` : ""}${x.behind ? ` ↓${x.behind}` : ""}` : t(" · 未跟踪")}${t(" · 点击聚焦,右键查看操作")}`;
+    `${x.name}${x.name === current ? t("（当前）") : ""}${x.gone ? t(" · 上游 {{up}} 已在远程删除", { up: x.upstream }) : x.upstream ? `${t(" · 上游 {{up}}", { up: x.upstream })}${x.upstreamAuthor ? t("（{{author}}）", { author: x.upstreamAuthor }) : ""}${x.ahead ? ` ↑${x.ahead}` : ""}${x.behind ? ` ↓${x.behind}` : ""}` : t(" · 未跟踪")}${t(" · 点击切换到它,右键查看操作")}`;
 
   // 扇出:主干竖着下来到 FORK_Y,横向摊到各 tab 中心,再落一小段到 tab 顶。拐角走 6px 圆角
   // —— 直角在 1.5px 线宽上会顶出个小方块,圆角才读得出是"从主干分出去的"。
@@ -445,8 +448,13 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
             title={tagTitle(x)}
             // 一律 onMouseDown,不用 onClick:WKWebView 里输入框聚焦时,落在别处的第一次点击只用来切焦点、
             // 不派发 click —— 表现就是"要点两次才生效"(菜单项早前踩过同一个坑)。
-            // 左键=聚焦(纯视角),右键=原来那套操作菜单;对比拾取中左键也走 onChip,否则选不了对端。
-            onMouseDown={(e) => { if (picking || e.button === 2) onChip(x.name, false, e); else if (e.button === 0) onFocus(x.name); }}
+            // 左键=切到这条分支(顺手先聚焦,git switch 跑完前脊就已经指过去了),右键=原来那套操作菜单;
+            // 对比拾取中左键也走 onChip,否则选不了对端。
+            // ponytail: 工作区脏时 git 自己会拒绝并把原因打进时间线,这里不预判 —— 它的判断比我们准。
+            onMouseDown={(e) => {
+              if (picking || e.button === 2) onChip(x.name, false, e);
+              else if (e.button === 0) { onFocus(x.name); if (x.name !== current) onRun(`git switch ${q(x.name)}`); }
+            }}
             onContextMenu={(e) => e.preventDefault()}>
             <span className="brz-tag-name">{x.name}</span>
             {x.name === current && dirty && <span className="cg-ref-dirty" title={t("有未提交改动")}>*</span>}
