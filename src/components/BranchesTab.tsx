@@ -239,10 +239,10 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
               流光(flow-down)只在真的 commit 进行时点亮:平时一直流会让人以为有活在跑。 */}
           <div className={`brz-collapse ${dirty ? "open" : ""}`}>
             <div className="brz-collapse-in">
-              {/* 线要平移到当前分支 chip 的中线上,但当前分支永远排在最左第一格 —— 直接平移会把线上的
-                  commit 按钮推出容器左边(外层 .brz-collapse-in 是 overflow:hidden,截掉就没了)。
-                  max(…, -50% + 42px):-50% 是容器半宽(线回到左边缘),再往右留 42px 给按钮的左半边。 */}
-              <div className={`sync-link ${commitFlow ? "flow-down" : ""}`} style={{ transform: `translateX(max(${stemDx}px, calc(-50% + 42px)))` }}>
+              {/* 线要平移到当前分支 chip 的中线上,而当前分支现在可能排在任意一格(顺序固定后不再钉最左)。
+                  直接平移会把线上的 commit 按钮推出容器(外层 .brz-collapse-in 是 overflow:hidden,截掉就没了),
+                  所以两头都夹一下:±50% 是容器半宽(线到左/右边缘),再各留 42px 给按钮的一半。 */}
+              <div className={`sync-link ${commitFlow ? "flow-down" : ""}`} style={{ transform: `translateX(clamp(calc(-50% + 42px), ${stemDx}px, calc(50% - 42px)))` }}>
                 <span className="sync-wire" />
                 {/* 提交进行中:按钮撤掉换成等高的线段 —— 它这时既点不动又正好挡住流光,留着只剩噪音 */}
                 {commitFlow ? <span className="sync-wire wire-gap" /> : <div className="sync-hub">
@@ -384,9 +384,9 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
   });
   const b = local.find((x) => x.name === focus);
   const isCur = focus === current;
-  // 顶排顺序:当前分支 → main → 其余按名排。当前分支钉死在最左第一位 —— 整排不换行、从左往右排,
-  // 排在第一格的那个才是永远看得见的;而这张图讲的就是当前分支往哪推。聚焦切换不重排,眼睛才跟得住。
-  const rank = (x: GitBranch) => (x.name === current ? 0 : x.name === "main" ? 1 : 2);
+  // 顶排顺序:main → 其余按名排。**不掺当前分支** —— 切一次分支就整排重洗的话,
+  // 刚点的那个标签会从手指底下跑到最左边,下一次要点谁得重新找。位置固定,肌肉记忆才立得住。
+  const rank = (x: GitBranch) => (x.name === "main" ? 0 : 1);
   const localSorted = [...local].sort((x, y) => rank(x) - rank(y) || x.name.localeCompare(y.name));
   // 上游那条 lane 同理排最左:它是当前分支真正映射到的远程分支,和上面第一格的 chip 对齐着读。
   // sort 稳定,其余远端保持 remotes 的原顺序。
