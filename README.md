@@ -1,6 +1,6 @@
 <div align="center">
 
-**English** · [简体中文](README.zh-CN.md)
+**English** · [简体中文](https://github.com/dengteng/ChatCode/blob/main/README.zh-CN.md)
 
 <img src="https://chatcode.dengteng.xyz/logo.png" width="88" alt="ChatCode">
 
