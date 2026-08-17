@@ -24,19 +24,6 @@ ChatCode 是封装了终端内核的对话式编程客户端，轻量、好用�
 
 ---
 
-## 下载
-
-按 CPU 分两个包，对着自己的 Mac 拿一个。两个都用 Developer ID 证书签名并经 Apple 公证，装的时候不会被 Gatekeeper 拦成「已损坏」。
-
-| 你的 Mac | 到 [Releases](https://github.com/dengteng/ChatCode/releases/latest) 下这个 | 体积 |
-| --- | --- | --- |
-| Apple Silicon（M1 及以后） | `ChatCode-<版本>-arm64.dmg` | 59M |
-| Intel | `ChatCode-<版本>-intel.dmg` | 62M |
-
-不确定自己是哪种？苹果菜单 →「关于本机」→ 看「芯片」一行；或在终端跑 `uname -m`，`arm64` 是 Apple Silicon，`x86_64` 是 Intel。
-
-打开 `.dmg`，把 ChatCode 拖进「应用程序」就完事。**不需要先装 Node.js** —— 包里自带一份签好名的 Node 运行时，那 60M 里大头就是它。
-
 ## 快速开始
 
 所有模型都由 [Claude Code CLI](https://docs.claude.com/en/docs/claude-code/overview)（v2+）执行，因此能直接用上它整套 harness 工具。已经装过的，ChatCode 自己就能找到；没装的，引导页有「一键安装」（在国内会自动探测并改用 npmmirror 镜像源）。

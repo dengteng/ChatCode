@@ -24,18 +24,6 @@ Read files, edit code, run tests, drive Git, execute shell commands — all in o
 
 ---
 
-## Download
-
-One build per CPU — take the one that matches your Mac. Both are signed with a Developer ID certificate and notarized by Apple, so they open without a Gatekeeper warning.
-
-| Your Mac | File on [Releases](https://github.com/dengteng/ChatCode/releases/latest) | Size |
-| --- | --- | --- |
-| Apple Silicon (M1 and later) | `ChatCode-<version>-arm64.dmg` | 59 MB |
-| Intel | `ChatCode-<version>-intel.dmg` | 62 MB |
-
-Not sure which one you are on? Apple menu → About This Mac → Chip, or run `uname -m` in a terminal: `arm64` means Apple Silicon, `x86_64` means Intel.
-
-Open the `.dmg`, drag ChatCode into Applications, done. **Node.js is not a prerequisite** — a signed Node runtime ships inside the app, which is what most of those 60 MB are.
 
 ## Quick start
 
