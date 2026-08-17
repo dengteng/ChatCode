@@ -41,11 +41,32 @@ fn sidecar_token() -> String {
 }
 
 /// 登录 shell 里的 PATH。GUI 进程自己的 PATH 里没有 homebrew / ~/.local/bin。
+///
+/// `-i` 不能省。zsh 只有**交互** shell 才读 .zshrc,而 nvm / fnm / volta / `~/.local/bin`
+/// 这些 PATH 改动九成写在 .zshrc 里(装 node 的脚本默认往那写)。Terminal.app 开的是
+/// login+interactive,所以用户在终端 `claude --version` 有输出,GUI 这边只跑 `-lc` 却找不到
+/// —— 「装了但没识别出来」就是这一个字母的差。
+///
+/// 加了 `-i` 就得防两件事:
+///   - .zshrc 里的 instant prompt / fastfetch / 欢迎语会往 stdout 吐东西 → 用 \x1f 夹住再抠;
+///   - 有人的 .zshrc 会读 stdin(问 y/n) → stdin 接 null,让它立刻拿到 EOF 而不是挂住。
+/// 结果缓存:带 `-i` 要跑完整个 .zshrc,五个调用点各跑一遍能拖出好几秒。
 fn login_path() -> Option<String> {
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
-    let out = Command::new(shell).arg("-lc").arg("printf %s \"$PATH\"").output().ok()?;
-    let p = String::from_utf8(out.stdout).ok()?;
-    if p.trim().is_empty() { None } else { Some(p) }
+    static CACHE: OnceLock<Option<String>> = OnceLock::new();
+    CACHE
+        .get_or_init(|| {
+            let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+            let out = Command::new(shell)
+                .arg("-lic")
+                .arg("printf '\x1f%s\x1f' \"$PATH\"")
+                .stdin(Stdio::null())
+                .output()
+                .ok()?;
+            let s = String::from_utf8_lossy(&out.stdout);
+            let p = s.split('\x1f').nth(1)?.trim().to_string();
+            if p.is_empty() { None } else { Some(p) }
+        })
+        .clone()
 }
 
 fn is_exec(p: &Path) -> bool {
@@ -121,13 +142,19 @@ fn find_node(app: &tauri::AppHandle, path: Option<&str>) -> Option<PathBuf> {
 }
 
 fn find_claude(path: Option<&str>) -> Option<PathBuf> {
+    // PATH 兜不住的几处:装 claude 的路子太多,而 nvm 那种版本号在路径里的只能靠 PATH。
     which(
         "claude",
         &[
             "~/.ChatCode/npm/bin/claude",
-            "~/.local/bin/claude",
+            "~/.local/bin/claude",          // 官方 native installer
+            "~/.claude/local/claude",       // 老的 migrate-installer 落点
             "/opt/homebrew/bin/claude",
             "/usr/local/bin/claude",
+            "~/.bun/bin/claude",
+            "~/.volta/bin/claude",
+            "~/.npm-global/bin/claude",     // 自己改过 npm prefix 的常见值
+            "~/.yarn/bin/claude",
         ],
         path,
     )
