@@ -18,7 +18,7 @@ Read files, edit code, run tests, drive Git, execute shell commands — all in o
 
 [Website](https://chatcode.dengteng.xyz/) · [Download for macOS](#download)
 
-<img src="https://chatcode.dengteng.xyz/shots/1.webp" width="880" alt="ChatCode main window">
+<img src="https://chatcode.dengteng.xyz/shots/en/1.webp" width="880" alt="ChatCode main window">
 
 </div>
 
@@ -107,35 +107,35 @@ One window, and a lot inside it. Built for solo vibe coding or a small team.
 
 **Branch management** — AI-written commit messages; manage the staging area, local and remote branches, and the commit graph right from the sidebar
 
-<img src="https://chatcode.dengteng.xyz/shots/6.webp" width="820">
+<img src="https://chatcode.dengteng.xyz/shots/en/2.webp" width="820">
 
 **Activity** — see which processes a session started and which ports they hold, then stop them in one click; essential for local debugging
 
-<img src="https://chatcode.dengteng.xyz/shots/8.webp" width="820">
+<img src="https://chatcode.dengteng.xyz/shots/en/3.webp" width="820">
 
 **@ file references** — `@` opens a project-wide search; type a fragment to match files and show the AI exactly what you want changed
 
-<img src="https://chatcode.dengteng.xyz/shots/3.webp" width="820">
+<img src="https://chatcode.dengteng.xyz/shots/en/4.webp" width="820">
 
 **Images and quotes** — paste images into the input box and quote earlier messages; inline rendering keeps the prompt tightly focused
 
-<img src="https://chatcode.dengteng.xyz/shots/4.webp" width="820">
+<img src="https://chatcode.dengteng.xyz/shots/en/5.webp" width="820">
 
 **Multi-model** — Claude over subscription OAuth, everything else over Anthropic-compatible direct connections; add a key and switch anytime
 
-<img src="https://chatcode.dengteng.xyz/shots/2.webp" width="820">
+<img src="https://chatcode.dengteng.xyz/shots/en/6.webp" width="820">
 
 **Plugins · MCP · Skills** — one place to search, install, disable, uninstall, and annotate
 
-<img src="https://chatcode.dengteng.xyz/shots/5.webp" width="820">
+<img src="https://chatcode.dengteng.xyz/shots/en/7.webp" width="820">
 
 **Themes** — five color schemes, plus a custom background image with automatic palette extraction
 
-<img src="https://chatcode.dengteng.xyz/shots/9.webp" width="820">
+<img src="https://chatcode.dengteng.xyz/shots/en/8.webp" width="820">
 
 **Quick actions** — URLs and file paths are parsed out for you: copy, open, or jump to the directory
 
-<img src="https://chatcode.dengteng.xyz/shots/7.webp" width="820">
+<img src="https://chatcode.dengteng.xyz/shots/en/9.webp" width="820">
 
 </details>
 
