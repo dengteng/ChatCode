@@ -78,6 +78,39 @@ fn which(bin: &str, fallbacks: &[&str], path: Option<&str>) -> Option<PathBuf> {
     None
 }
 
+/// 我们用 npm -g 装出来的 claude 落在这里 —— 不进 /usr/local(要 sudo),也不跟用户自己装的那份打架。
+/// which() 的 fallback 里排在最前:引导页刚装完立刻能被认出来。
+fn npm_prefix() -> PathBuf {
+    PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".chat-code").join("npm")
+}
+
+/// .app 里自带的 node / npm(和 sidecar.mjs 同一个 resources 目录)。
+/// 开发时这个目录不存在,返回 None,调用方退回系统那份。
+fn bundled(app: &tauri::AppHandle, rel: &str) -> Option<PathBuf> {
+    use tauri::Manager;
+    let p = app.path().resolve(format!("resources/{rel}"), tauri::path::BaseDirectory::Resource).ok()?;
+    p.exists().then_some(p)
+}
+
+/// node 的解析顺序:包内 > 登录 shell PATH > 常见安装位置。
+fn find_node(app: &tauri::AppHandle, path: Option<&str>) -> Option<PathBuf> {
+    bundled(app, "node")
+        .or_else(|| which("node", &["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"], path))
+}
+
+fn find_claude(path: Option<&str>) -> Option<PathBuf> {
+    which(
+        "claude",
+        &[
+            "~/.chat-code/npm/bin/claude",
+            "~/.local/bin/claude",
+            "/opt/homebrew/bin/claude",
+            "/usr/local/bin/claude",
+        ],
+        path,
+    )
+}
+
 fn log_path() -> PathBuf {
     let dir = PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".chat-code");
     let _ = fs::create_dir_all(&dir);
@@ -109,15 +142,15 @@ fn relay_env() -> Vec<(String, String)> {
 fn spawn_sidecar(script: &Path) -> Result<Child, String> {
     let path = login_path();
     let p = path.as_deref();
-    let node = which("node", &["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"], p)
+    // 优先用 .app 里自带的 node(和 sidecar.mjs 同一个 resources 目录):
+    // 用户机器不一定装了 Node,装了的也可能是 nvm 那种只在交互 shell 里才有的。
+    // 找不到才回落到系统的 —— 开发时 resources 目录是空的,走的就是这条。
+    let bundled = script.parent().map(|d| d.join("node")).filter(|f| is_exec(f));
+    let node = bundled
+        .or_else(|| which("node", &["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"], p))
         .ok_or("找不到 node。请安装 Node.js,或确认它在登录 shell 的 PATH 里。")?;
     // SDK 默认从 node_modules 解析原生 CLI,打包后没有 node_modules,必须显式指定
-    let claude = which(
-        "claude",
-        &["~/.local/bin/claude", "/opt/homebrew/bin/claude", "/usr/local/bin/claude"],
-        p,
-    )
-    .ok_or("找不到 claude 可执行文件。请先安装 Claude Code。")?;
+    let claude = find_claude(p).ok_or("找不到 claude 可执行文件。请先安装 Claude Code。")?;
 
     let log = File::create(log_path()).map_err(|e| e.to_string())?;
     let errlog = log.try_clone().map_err(|e| e.to_string())?;
@@ -306,12 +339,7 @@ fn spawn_proc(cmd: String, cwd: String) -> Result<(), String> {
 #[tauri::command]
 fn run_claude(args: Vec<String>, cwd: Option<String>) -> Result<(i32, String, String), String> {
     let path = login_path();
-    let bin = which(
-        "claude",
-        &["~/.local/bin/claude", "/opt/homebrew/bin/claude", "/usr/local/bin/claude"],
-        path.as_deref(),
-    )
-    .ok_or("找不到 claude 可执行文件")?;
+    let bin = find_claude(path.as_deref()).ok_or("找不到 claude 可执行文件")?;
     let mut cmd = Command::new(&bin);
     cmd.args(&args);
     if let Some(d) = cwd.filter(|d| !d.is_empty()) {
@@ -444,15 +472,100 @@ fn probe_ports(ports: Vec<u16>) -> Vec<(u16, String, String)> {
 /// 启动前依赖检测。sidecar 靠 node 起、SDK 靠 claude 二进制干活,缺任一 app 全瘫。
 /// 返回 [(依赖名, 是否找到, 找到的绝对路径或"")],前端据此门控引导安装。
 #[tauri::command]
-fn check_deps() -> Vec<(String, bool, String)> {
+fn check_deps(app: tauri::AppHandle) -> Vec<(String, bool, String)> {
     let path = login_path();
     let p = path.as_deref();
-    let node = which("node", &["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"], p);
-    let claude = which("claude", &["~/.local/bin/claude", "/opt/homebrew/bin/claude", "/usr/local/bin/claude"], p);
+    // node 现在是包内自带的,打包版永远为真 —— 用户没装 Node 也不该再被挡在门外
+    let node = find_node(&app, p);
+    let claude = find_claude(p);
     vec![
         ("node".into(), node.is_some(), node.map(|x| x.to_string_lossy().into_owned()).unwrap_or_default()),
         ("claude".into(), claude.is_some(), claude.map(|x| x.to_string_lossy().into_owned()).unwrap_or_default()),
     ]
+}
+
+const NPM_OFFICIAL: &str = "https://registry.npmjs.org";
+const NPM_MIRROR: &str = "https://registry.npmmirror.com";
+
+/// 选默认 registry:官方源连得上就用官方,连不上(国内常态)就用 npmmirror。
+/// 直接拿 curl 探,不引 HTTP 依赖 —— macOS 自带,3 秒超时,失败即判定走镜像。
+/// ponytail: 只测"通不通"不测快慢。官方源在国内时常是"能连但极慢",那种情况用户在引导页手动切。
+#[tauri::command]
+fn probe_registry() -> String {
+    let ok = Command::new("curl")
+        .args(["-sfI", "--max-time", "3", "-o", "/dev/null", NPM_OFFICIAL])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if ok { NPM_OFFICIAL.into() } else { NPM_MIRROR.into() }
+}
+
+/// 引导页的「一键安装 Claude Code」。用包内 node + 包内 npm 装,所以用户机器可以完全没有 Node。
+/// 装进 ~/.chat-code/npm(不碰系统目录、不要 sudo),装完 find_claude 的第一条 fallback 就能命中。
+#[tauri::command]
+async fn install_claude(app: tauri::AppHandle, registry: Option<String>) -> Result<(String, String), String> {
+    let reg = match registry.filter(|r| !r.trim().is_empty()) {
+        Some(r) => r,
+        None => probe_registry(),
+    };
+    let path = login_path();
+    let node = find_node(&app, path.as_deref()).ok_or("找不到 node")?;
+    // 包内没有 npm(开发模式)就退回系统 npm 的 cli.js —— 找不到就让用户走复制命令那条路
+    let npm_cli = bundled(&app, "npm/bin/npm-cli.js")
+        .or_else(|| which("npm", &["/opt/homebrew/bin/npm", "/usr/local/bin/npm"], path.as_deref())
+            .map(|p| p.with_file_name("npm")))
+        .ok_or("找不到 npm")?;
+    let prefix = npm_prefix();
+    let reg2 = reg.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        use std::io::BufReader;
+        let _ = fs::create_dir_all(&prefix);
+        let mut child = Command::new(&node)
+            .arg(&npm_cli)
+            .args(["install", "-g", "@anthropic-ai/claude-code"])
+            .arg(format!("--registry={reg2}"))
+            .arg("--prefix")
+            .arg(&prefix)
+            // 非 TTY 下 npm 默认几乎不吐东西(进度条只在 TTY 画),装 267MB 时按钮会静默转几分钟。
+            // --loglevel=http 让它每次网络请求打一行,才有得流。
+            .arg("--loglevel=http")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("起不了 npm:{e}"))?;
+
+        // npm 的日志走 stderr、结果走 stdout,两条都要读:只读一条,另一条写满管道缓冲就会把 npm 卡死。
+        let out_lines = child.stdout.take().map(|s| {
+            let app = app.clone();
+            std::thread::spawn(move || pump(BufReader::new(s), &app))
+        });
+        let err_lines = child.stderr.take().map(|s| pump(BufReader::new(s), &app)).unwrap_or_default();
+        let out_lines = out_lines.and_then(|h| h.join().ok()).unwrap_or_default();
+        let status = child.wait().map_err(|e| e.to_string())?;
+
+        let tail = |v: &[String]| v.iter().rev().take(12).rev().cloned().collect::<Vec<_>>().join("\n");
+        if status.success() {
+            Ok((reg2, tail(&out_lines)))
+        } else {
+            Err(format!("npm 退出码 {:?}\n{}", status.code(), tail(&err_lines)))
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// 逐行读子进程输出,每行往前端发一次 —— 前端只显示最新一行,不做日志窗。
+/// 同时把行留下来:失败时那才是原因,成功时给用户看装到哪了。
+fn pump<R: std::io::BufRead>(r: R, app: &tauri::AppHandle) -> Vec<String> {
+    use tauri::Emitter;
+    let mut all = Vec::new();
+    for line in r.lines().map_while(Result::ok) {
+        let line = line.trim().to_string();
+        if line.is_empty() { continue; }
+        let _ = app.emit("claude-install", &line);
+        all.push(line);
+    }
+    all
 }
 
 /// 会话需要用户处理时,让 dock 图标持续跳动直到 app 被激活。app 已在前台时无操作。
@@ -608,7 +721,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_http::init())
-        .invoke_handler(tauri::generate_handler![open_url, open_path, reveal_path, resolve_path_cmd, kill_pid, kill_port, spawn_proc, run_claude, choose_directory, set_app_theme, list_dir, walk_project, read_file, write_file, read_dir_meta, probe_ports, bounce_dock, check_deps, install_skill_git, remove_path, rename_path, sidecar_token])
+        .invoke_handler(tauri::generate_handler![open_url, open_path, reveal_path, resolve_path_cmd, kill_pid, kill_port, spawn_proc, run_claude, choose_directory, set_app_theme, list_dir, walk_project, read_file, write_file, read_dir_meta, probe_ports, bounce_dock, check_deps, probe_registry, install_claude, install_skill_git, remove_path, rename_path, sidecar_token])
         .manage(Sidecar(Mutex::new(None)))
         .setup(|app| {
             // 开发时 npm run dev 已经起了一个 sidecar,别再起第二个

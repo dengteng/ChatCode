@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- 内置 node 的签名 entitlement。hardened runtime 默认禁掉可写可执行内存,
+     V8 的 JIT 直接起不来 —— 少这几条,node 一启动就被系统 kill。
+     只给这个二进制,不给主程序:webview 那边不需要。 -->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <!-- sidecar 会 require 原生 .node 模块(不是我们签的),库校验开着就加载不了 -->
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+</dict>
+</plist>

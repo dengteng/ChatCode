@@ -2314,3 +2314,17 @@ body.dragging-session, body.dragging-session * { cursor: grabbing !important; us
 [data-sb-narrow] .avatar.footer-brand-badge,
 [data-sb-narrow] .avatar.footer-brand-badge img { width: 16px; height: 16px; }
 [data-sb-narrow] .footer-model-logos > :nth-child(n+4) { display: none; }
+
+/* 引导页的一键安装:按钮 + 源选择一行,结果消息压在下面 */
+.depgate-install { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0; }
+.depgate-go { padding: 5px 14px; font-size: 12px; font-weight: 600; border-radius: 7px; border: 0; background: var(--accent); color: #fff; cursor: pointer; }
+.depgate-go:disabled { opacity: .6; cursor: default; }
+.depgate-install select { padding: 4px 8px; font-size: 11.5px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); }
+.depgate-msg { flex: 1 0 100%; margin: 0; font-size: 11.5px; white-space: pre-wrap; }
+/* 进行中那行是 npm 的实时输出:单行、截断,不让卡片高度随输出上下跳 */
+/* 等待提示:比日志行显眼,和成功/失败消息区分开 */
+.depgate-wait { flex: 1 0 100%; margin: 2px 0 0; font-size: 11.5px; line-height: 1.6; color: var(--text); }
+.depgate-wait b { color: var(--accent); font-variant-numeric: tabular-nums; }
+.depgate-msg.run { color: var(--muted); font-family: Menlo, monospace; font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.depgate-msg.ok { color: var(--accent); }
+.depgate-msg.err { color: var(--amber); }

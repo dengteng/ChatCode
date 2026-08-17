@@ -726,5 +726,13 @@
   "{{r}} · 上游,裸 git push 去这里": "{{r}} · upstream — a bare git push goes here",
   "{{r}} · 同名远程分支,不是上游:裸 git push 不会推到这里": "{{r}} · same-named remote branch, not the upstream: a bare git push will not reach it",
   "{{remote}} 里还没有 {{name}} 分支": "{{remote}} does not have a {{name}} branch yet",
-  "{{name}} 还没有上游,设为 {{ref}}": "{{name}} has no upstream — set it to {{ref}}"
+  "{{name}} 还没有上游,设为 {{ref}}": "{{name}} has no upstream — set it to {{ref}}",
+  "已从 {{reg}} 安装完成": "Installed from {{reg}}",
+  "一键安装": "Install now",
+  "官方源 npmjs.org": "Official registry (npmjs.org)",
+  "国内镜像 npmmirror.com": "China mirror (npmmirror.com)",
+  "准备中…": "Preparing…",
+  "安装中…": "Installing…",
+  "正在下载 Claude Code（约 270MB），首次安装通常需要 1–5 分钟，网络慢时更久。请耐心等待，别关闭窗口 —— 关了要重新下。": "Downloading Claude Code (~270MB). First install usually takes 1–5 minutes, longer on a slow connection. Please wait and keep this window open — closing it means starting over.",
+  "已等待 {{s}} 秒": "{{s}}s elapsed"
 }

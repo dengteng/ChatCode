@@ -1,10 +1,15 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, X, ExternalLink } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "../native";
 
 type Dep = { name: string; ok: boolean; path: string };
+
+// 和 Rust 那边 NPM_OFFICIAL / NPM_MIRROR 是同两个值
+const OFFICIAL = "https://registry.npmjs.org";
+const MIRROR = "https://registry.npmmirror.com";
 
 // 依赖名 -> 引导文案:说明 + 安装命令(+ 国内镜像那条)+ 官方链接(+ 国内镜像下载页)
 const GUIDE: Record<string, { title: string; desc: string; cmd?: string; cmdCN?: string; url: string; urlCN?: string }> = {
@@ -34,6 +39,11 @@ export function DepGate({ children }: { children: React.ReactNode }) {
   const { t } = useTranslation();
   const [deps, setDeps] = useState<Dep[] | null>(null);
   const [checking, setChecking] = useState(false);
+  // 装 claude 的状态:null=没开始,字符串=进行中/结果
+  const [installing, setInstalling] = useState(false);
+  const [installMsg, setInstallMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  // 默认源由 Rust 探测:官方源连不上(国内常态)就自动落到 npmmirror,用户仍可手动切
+  const [registry, setRegistry] = useState<string>("");
 
   const check = useCallback(() => {
     setChecking(true);
@@ -44,6 +54,45 @@ export function DepGate({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => { check(); }, [check]);
+  // 探测一次就够:结果只用来定"默认勾哪个源"
+  useEffect(() => { invoke<string>("probe_registry").then(setRegistry).catch(() => setRegistry(MIRROR)); }, []);
+
+  // npm 的每行输出。只留最新一行 —— 装包时用户要的是"还活着、在干什么",不是一份日志。
+  // 用 ref 存 unlisten:listen 是异步的,组件在装完前被卸载时得能取消掉。
+  const [progress, setProgress] = useState("");
+  const unlisten = useRef<null | (() => void)>(null);
+  useEffect(() => () => unlisten.current?.(), []);
+
+  // 已等待秒数。267MB 那个包在日志里只占一行,下载那几分钟最新行是不动的 ——
+  // 没有这个计时器,界面看着就像卡死了,用户会去关窗口(关了就得重下)。
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!installing) return;
+    const id = setInterval(() => setElapsed((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [installing]);
+
+  // 一键装 claude:用包内 node + 包内 npm,装进 ~/.chat-code/npm —— 用户机器可以完全没有 Node/npm
+  const install = async () => {
+    setInstalling(true);
+    setInstallMsg(null);
+    setProgress("");
+    setElapsed(0);
+    unlisten.current?.();
+    unlisten.current = await listen<string>("claude-install", (e) => setProgress(e.payload));
+    try {
+      const [reg] = await invoke<[string, string]>("install_claude", { registry });
+      setInstallMsg({ ok: true, text: t("已从 {{reg}} 安装完成", { reg }) });
+      check();
+    } catch (e) {
+      setInstallMsg({ ok: false, text: String(e) });
+    } finally {
+      unlisten.current?.();
+      unlisten.current = null;
+      setInstalling(false);
+      setProgress("");
+    }
+  };
 
   if (deps === null) return <div className="depgate-loading">{t("检测运行环境…")}</div>;
   const missing = deps.filter((d) => !d.ok);
@@ -67,6 +116,29 @@ export function DepGate({ children }: { children: React.ReactNode }) {
                 {!d.ok && g && (
                   <div className="depgate-help">
                     <p>{t(g.desc)}</p>
+                    {/* claude 这条能一键装:app 自带 node 和 npm,不必先让用户去装 Node。
+                        源默认跟 probe_registry 的结果走,国内连不上官方源时自动是镜像。 */}
+                    {d.name === "claude" && (
+                      <div className="depgate-install">
+                        <button className="depgate-go" disabled={installing} onClick={install}>
+                          {installing ? t("安装中…") : t("一键安装")}
+                        </button>
+                        <select value={registry} onChange={(e) => setRegistry(e.target.value)} disabled={installing}>
+                          <option value={OFFICIAL}>{t("官方源 npmjs.org")}</option>
+                          <option value={MIRROR}>{t("国内镜像 npmmirror.com")}</option>
+                        </select>
+                        {/* 装包时只滚最新一行。整行不换行 + 省略号:npm 的 URL 很长,
+                            换行会让整块卡片高度随每行输出上下跳。 */}
+                        {/* 说清「要等多久、别关窗口」:下载主包那几分钟日志是不动的,
+                            只给一行静止的日志会被当成卡死。计时器是唯一还在动的东西。 */}
+                        {installing && <p className="depgate-wait">
+                          {t("正在下载 Claude Code（约 270MB），首次安装通常需要 1–5 分钟，网络慢时更久。请耐心等待，别关闭窗口 —— 关了要重新下。")}
+                          {" "}<b>{t("已等待 {{s}} 秒", { s: elapsed })}</b>
+                        </p>}
+                        {installing && <p className="depgate-msg run" title={progress}>{progress || t("准备中…")}</p>}
+                        {installMsg && <p className={installMsg.ok ? "depgate-msg ok" : "depgate-msg err"}>{installMsg.text}</p>}
+                      </div>
+                    )}
                     {g.cmd && <div className="depgate-cmd"><code>{g.cmd}</code>
                       <button onClick={() => navigator.clipboard?.writeText(g.cmd!)}>{t("复制")}</button></div>}
                     {/* 国内直连 npm 官方源常年慢/断,给一条镜像命令,别让人卡在第一步 */}
