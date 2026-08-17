@@ -11,12 +11,12 @@
 ChatCode 是封装了终端内核的对话式编程客户端，轻量、好用、安全、功能强大。<br>
 读文件、改代码、跑测试、Git 操作、Shell 命令，都在一个窗口里搞定。
 
-[![platform](https://img.shields.io/badge/platform-macOS%20·%20Apple%20Silicon-111?style=flat-square)](https://github.com/dengteng/ChatCode/releases/latest)
+[![platform](https://img.shields.io/badge/platform-macOS%20·%20Apple%20Silicon%20%2F%20Intel-111?style=flat-square)](https://github.com/dengteng/ChatCode/releases/latest)
 [![license](https://img.shields.io/badge/license-MIT-111?style=flat-square)](LICENSE)
 [![core](https://img.shields.io/badge/core-Claude%20Agent%20SDK-111?style=flat-square)](https://github.com/anthropics/claude-agent-sdk-typescript)
 [![models](https://img.shields.io/badge/models-9-111?style=flat-square)](#多模型兼容)
 
-[官网](https://chatcode.dengteng.xyz/) · [下载 macOS 版](https://github.com/dengteng/ChatCode/releases/latest)
+[官网](https://chatcode.dengteng.xyz/) · [下载 macOS 版](#下载)
 
 <img src="https://chatcode.dengteng.xyz/shots/1.webp" width="880" alt="ChatCode 主界面">
 
@@ -24,15 +24,26 @@ ChatCode 是封装了终端内核的对话式编程客户端，轻量、好用�
 
 ---
 
+## 下载
+
+按 CPU 分两个包，对着自己的 Mac 拿一个。两个都用 Developer ID 证书签名并经 Apple 公证，装的时候不会被 Gatekeeper 拦成「已损坏」。
+
+| 你的 Mac | 到 [Releases](https://github.com/dengteng/ChatCode/releases/latest) 下这个 | 体积 |
+| --- | --- | --- |
+| Apple Silicon（M1 及以后） | `ChatCode-<版本>-arm64.dmg` | 59M |
+| Intel | `ChatCode-<版本>-intel.dmg` | 62M |
+
+不确定自己是哪种？苹果菜单 →「关于本机」→ 看「芯片」一行；或在终端跑 `uname -m`，`arm64` 是 Apple Silicon，`x86_64` 是 Intel。
+
+打开 `.dmg`，把 ChatCode 拖进「应用程序」就完事。**不需要先装 Node.js** —— 包里自带一份签好名的 Node 运行时，那 60M 里大头就是它。
+
 ## 快速开始
 
-前提：先装好并登录 [Claude Code CLI](https://docs.claude.com/en/docs/claude-code/overview)（v2+）。所有模型都由它执行，因此能直接用上它整套 harness 工具。
+所有模型都由 [Claude Code CLI](https://docs.claude.com/en/docs/claude-code/overview)（v2+）执行，因此能直接用上它整套 harness 工具。已经装过的，ChatCode 自己就能找到；没装的，引导页有「一键安装」（在国内会自动探测并改用 npmmirror 镜像源）。
 
 ```sh
-claude --version   # 确认 CLI 就位
+claude --version   # 装过的话这里会打印 v2.x
 ```
-
-然后到 [Releases](https://github.com/dengteng/ChatCode/releases/latest) 下载 `.dmg`，拖进「应用程序」即可。安装包不到 30M，冷启动一两秒。
 
 Claude 走订阅 OAuth，不用填 API Key；其余模型在「设置 → 模型」里配好 key 随时切。
 
@@ -74,7 +85,7 @@ Claude 走订阅 OAuth，其余走 Anthropic 兼容直连，共享 Claude 强大
 
 Tauri 打包的原生窗口，不是又一个套壳 Electron。
 
-- 安装包不到 30M，冷启动一两秒
+- 冷启动一两秒
 - 常驻内存几十兆，插着电写一天不烫手
 - 五套主题，还能丢一张壁纸进来自动取色
 
@@ -89,7 +100,7 @@ Tauri 打包的原生窗口，不是又一个套壳 Electron。
 
 ## 界面
 
-20M 体积不大，功能却不少。适合个人 Vibe Coding 或小团队。
+一个窗口，功能却不少。适合个人 Vibe Coding 或小团队。
 
 <details>
 <summary>展开全部 9 张截图</summary>
@@ -142,7 +153,7 @@ Node sidecar (sidecar/server.mjs)
 Claude Code harness（工具 / 权限 / hooks / MCP / 会话）
 ```
 
-会话数据持久化在 `~/.chat-code/`。
+会话数据持久化在 `~/.ChatCode/`（老版本的 `~/.chat-code/` 会自动搬过去）。
 
 ## 安全
 

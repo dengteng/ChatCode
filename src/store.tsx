@@ -98,6 +98,7 @@ type Action =
   | { type: "go_home" }
   | { type: "mark_created"; id: string | null } // 标记/清除刚新建会话(驱动侧栏入场动效)
   | { type: "patch"; id: string; patch: Partial<Session> }
+  | { type: "revive"; id: string }   // 断连的会话重新起来了(只解除 closed,不碰运行中的状态)
   | { type: "sdk_init"; id: string; info: SessionInfo; keepModel: boolean } // 回放历史 init 时保留已选模型(旧 init 记的是当时的模型)
   | { type: "append"; id: string; item: TimelineItem }
   | { type: "tool_result"; id: string; toolUseId: string; result: any; isError?: boolean }
@@ -249,6 +250,8 @@ function reducer(s: State, a: Action): State {
     case "mark_created":
       return { ...s, justCreatedId: a.id };
     case "patch": return upd(a.id, (x) => ({ ...x, ...a.patch }));
+    // 只把「已断开」抬回空闲:此刻可能正有一轮在跑(重连后立刻续跑),别把 running 抹平
+    case "revive": return upd(a.id, (x) => (x.status === "closed" ? { ...x, status: "idle" } : x));
     case "sdk_init":
       return upd(a.id, (x) => {
         // 保留带 provider 前缀的第三方选择(kimi/…, deepseek/…):SDK init 只回裸模型 id(如 kimi-k3),
@@ -436,6 +439,10 @@ function handleSdkMessage(dispatch: (a: Action) => void, id: string, msg: any, l
     } });
     // 新的 CLI 进程:SDK 不会在启动时补发后台任务电平,必须重置为空,等下次 membership 变化再填充。
     dispatch({ type: "patch", id, patch: { bgTasks: [], bgWait: false } });
+    // 实时 init = CLI 真的跑起来了,断连状态到此解除。少了这一步,重连成功后底部仍挂着
+    // 「会话已断开 · 点此重连」(输入框根本不渲染),用户只能得出"点了没反应"的结论 ——
+    // status 得等下一条 result 才会变,而没有输入框就永远发不出下一轮。
+    if (live) dispatch({ type: "revive", id });
     return;
   }
   // 后台任务电平信号(REPLACE 语义):有任务在跑 → 上一轮没完全了结,待发队列不许出队,等续跑结束的 result 再放行。

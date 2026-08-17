@@ -26,3 +26,6 @@ src-tauri/resources/
 
 # 本地代码索引工具的产物
 .codegraph/
+
+# 发布产物(dmg)。不放 dist/ —— vite build 会清空那个目录
+release/

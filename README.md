@@ -11,12 +11,12 @@
 ChatCode is a conversational coding client wrapped around a terminal core — light, easy, safe, and capable.<br>
 Read files, edit code, run tests, drive Git, execute shell commands — all in one window.
 
-[![platform](https://img.shields.io/badge/platform-macOS%20·%20Apple%20Silicon-111?style=flat-square)](https://github.com/dengteng/ChatCode/releases/latest)
+[![platform](https://img.shields.io/badge/platform-macOS%20·%20Apple%20Silicon%20%2F%20Intel-111?style=flat-square)](https://github.com/dengteng/ChatCode/releases/latest)
 [![license](https://img.shields.io/badge/license-MIT-111?style=flat-square)](LICENSE)
 [![core](https://img.shields.io/badge/core-Claude%20Agent%20SDK-111?style=flat-square)](https://github.com/anthropics/claude-agent-sdk-typescript)
 [![models](https://img.shields.io/badge/models-9-111?style=flat-square)](#multi-model-support)
 
-[Website](https://chatcode.dengteng.xyz/) · [Download for macOS](https://github.com/dengteng/ChatCode/releases/latest)
+[Website](https://chatcode.dengteng.xyz/) · [Download for macOS](#download)
 
 <img src="https://chatcode.dengteng.xyz/shots/1.webp" width="880" alt="ChatCode main window">
 
@@ -24,15 +24,26 @@ Read files, edit code, run tests, drive Git, execute shell commands — all in o
 
 ---
 
+## Download
+
+One build per CPU — take the one that matches your Mac. Both are signed with a Developer ID certificate and notarized by Apple, so they open without a Gatekeeper warning.
+
+| Your Mac | File on [Releases](https://github.com/dengteng/ChatCode/releases/latest) | Size |
+| --- | --- | --- |
+| Apple Silicon (M1 and later) | `ChatCode-<version>-arm64.dmg` | 59 MB |
+| Intel | `ChatCode-<version>-intel.dmg` | 62 MB |
+
+Not sure which one you are on? Apple menu → About This Mac → Chip, or run `uname -m` in a terminal: `arm64` means Apple Silicon, `x86_64` means Intel.
+
+Open the `.dmg`, drag ChatCode into Applications, done. **Node.js is not a prerequisite** — a signed Node runtime ships inside the app, which is what most of those 60 MB are.
+
 ## Quick start
 
-Prerequisite: install and sign in to the [Claude Code CLI](https://docs.claude.com/en/docs/claude-code/overview) (v2+). Every model runs through it, so they all inherit its full harness of tools.
+Every model runs through the [Claude Code CLI](https://docs.claude.com/en/docs/claude-code/overview) (v2+), so they all inherit its full harness of tools. If you already have it, ChatCode finds it on its own; if not, the setup screen installs it for you in one click (behind the Great Firewall it detects that and switches to the npmmirror registry automatically).
 
 ```sh
-claude --version   # confirm the CLI is in place
+claude --version   # already installed? this prints v2.x
 ```
-
-Then grab the `.dmg` from [Releases](https://github.com/dengteng/ChatCode/releases/latest) and drag it into Applications. Under 30 MB, cold start in a second or two.
 
 Claude uses subscription OAuth — no API key needed. Other models take a key under Settings → Models, and you can switch between them at any time.
 
@@ -74,7 +85,7 @@ It interrupts you for the calls that are actually yours to make, and handles the
 
 A native Tauri window, not another Electron shell.
 
-- Under 30 MB installed, cold start in a second or two
+- Cold start in a second or two
 - Tens of megabytes resident — write all day on battery without your lap getting hot
 - Five themes, or drop in a wallpaper and let it pick the palette for you
 
@@ -89,7 +100,7 @@ In sync with Claude Code, plus a plugin marketplace.
 
 ## Interface
 
-20 MB isn't much space, but there's a lot in it. Built for solo vibe coding or a small team.
+One window, and a lot inside it. Built for solo vibe coding or a small team.
 
 <details>
 <summary>Expand all 9 screenshots</summary>
@@ -142,7 +153,7 @@ Node sidecar (sidecar/server.mjs)
 Claude Code harness (tools / permissions / hooks / MCP / sessions)
 ```
 
-Session data is persisted under `~/.chat-code/`.
+Session data is persisted under `~/.ChatCode/` (older installs are moved there automatically).
 
 ## Security
 

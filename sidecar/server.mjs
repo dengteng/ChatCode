@@ -27,6 +27,8 @@ const PORT = Number(process.env.CHAT_CODE_PORT) || 8975;
 // 这里的默认值只给「不经 Rust、直接 node sidecar/server.mjs」的裸跑用,不做改名。
 const DATA_DIR = process.env.CHAT_CODE_DATA_DIR || path.join(os.homedir(), ".ChatCode");
 const CLAUDE_BIN = process.env.CHAT_CODE_CLAUDE_BIN || undefined;
+// 老数据目录名。目录本身由 Rust 那边改名搬走了,但 index 里存的 cwd 还是老路径 —— loadIndex 里改写
+const OLD_DATA_DIR = path.join(os.homedir(), ".chat-code");
 const SESS_DIR = path.join(DATA_DIR, "sessions");
 const SSH_DIR = path.join(DATA_DIR, "ssh"); // SSH ControlMaster 套接字
 const INDEX = path.join(DATA_DIR, "index.json");
@@ -158,6 +160,11 @@ function loadIndex() {
     if (e.title === "新会话" && e.cwd) e.title = e.cwd.split("/").filter(Boolean).pop() || e.title;
     // 老会话没落盘 lastUser:从日志回填一次(写回 index,下次不再扫日志)
     if (e.lastUser === undefined) { e.lastUser = lastUserFromLog(e.id); dirty = true; }
+    // 数据目录改名(~/.chat-code → ~/.ChatCode)只搬了文件,index 里的 cwd 还指着老路径。
+    // 闲聊会话的工作目录就在数据目录里面,不改写就整条失效:spawn 报 ENOENT,而 SDK 会把它
+    // 归咎于 claude 可执行文件("native binary … exists but failed to launch"),
+    // 用户点「重连」只会一遍遍收到同一句风马牛不相及的报错。改写幂等,只动前缀。
+    if (e.cwd?.startsWith(OLD_DATA_DIR + path.sep)) { e.cwd = DATA_DIR + e.cwd.slice(OLD_DATA_DIR.length); dirty = true; }
   }
   if (dirty) saveIndex(idx);
   return idx;
@@ -962,6 +969,9 @@ const EN_DICT = {
   "项目目录必须是绝对路径: {{path}}": "Project directory must be an absolute path: {{path}}",
   "无法创建项目目录 {{dir}}: {{err}}": "Could not create project directory {{dir}}: {{err}}",
   "无法创建闲聊临时目录: {{err}}": "Could not create casual-chat temp directory: {{err}}",
+  "无法重建闲聊临时目录 {{dir}}: {{err}}": "Could not recreate casual-chat temp directory {{dir}}: {{err}}",
+  "工作目录不存在: {{dir}} —— 目录被删或改名了。恢复该目录后再重连,或新建一个会话。":
+    "Working directory is gone: {{dir}} — it was deleted or renamed. Restore it and reconnect, or start a new session.",
   "闲聊": "Casual",
   "新会话": "New session",
   "会话": "session",
@@ -1602,6 +1612,27 @@ function spawnAgent(ws, sess, { id, resume }) {
   // 恢复上次选的模型:直接进 query options,启动即生效("default" 不传,用 SDK 默认)。
   // 之前用 spawn 后补发 setModel,CLI 未就绪时会被静默吞掉,导致重开后回到默认模型。
   const idxEntry = loadIndex().find((e) => e.id === id);
+  // cwd 不在了就先处理掉,别让 spawn 去撞 ENOENT —— SDK 会把 spawn 的任何失败都算到
+  // claude 可执行文件头上(报 "native binary … exists but failed to launch"),用户按「点此重连」
+  // 只会一次次收到同一句与真实原因无关的报错,查不出是目录没了。
+  // 闲聊的临时目录本就是一次性的,重建即可;项目目录被删/改名不能替用户凭空造,直接说清是哪个目录。
+  if (!fs.existsSync(sess.agentCwd)) {
+    let err = null;
+    if (idxEntry?.casual) {
+      try { fs.mkdirSync(sess.agentCwd, { recursive: true }); }
+      catch (e) { err = tr("无法重建闲聊临时目录 {{dir}}: {{err}}", { dir: sess.agentCwd, err: e.message }); }
+    } else {
+      err = tr("工作目录不存在: {{dir}} —— 目录被删或改名了。恢复该目录后再重连,或新建一个会话。", { dir: sess.agentCwd });
+    }
+    if (err) {
+      // 删掉会话再报错:留着一个没人消费 queue 的空壳,之后发消息会静默掉进黑洞;
+      // 删了则前端显示「点此重连」,下次重连会走 startSession 重新起。
+      sessions.delete(id);
+      broadcast({ type: "session_error", sessionId: id, error: err });
+      broadcast({ type: "session_closed", sessionId: id });
+      return;
+    }
+  }
   const savedModel = idxEntry?.model;
   // 闲聊会话额外追加"别暴露临时工作目录"的约定
   const sysAppend = [COMMIT_SUMMARY_INSTRUCTION, NEXT_STEPS_INSTRUCTION, ...(idxEntry?.casual ? [CASUAL_INSTRUCTION] : [])].join("\n\n");

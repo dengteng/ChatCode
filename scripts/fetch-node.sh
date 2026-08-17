@@ -21,8 +21,16 @@ NODE_ARCHS="${NODE_ARCHS:-arm64 x64}"
 OUT="src-tauri/resources/node"
 CACHE="${TMPDIR:-/tmp}/chat-code-node"
 
-if [ -x "$OUT" ] && [ "$("$OUT" -v 2>/dev/null)" = "$NODE_VERSION" ]; then
-  echo "==> node $NODE_VERSION 已就位,跳过下载"
+# 「已就位」得连架构一起看,不能只比版本:分架构出包时 NODE_ARCHS 会变,
+# 只比版本就会把上一次留下的那份原样用掉 —— Intel 包里塞 arm64 的 node,
+# 用户装上就是白窗口 + 日志一行「找不到 node」,正是这脚本要消灭的那个 bug。
+# node 的 x64 在 lipo 里叫 x86_64,两套叫法这里对齐后再比。
+WANT_ARCHS="$(for a in $NODE_ARCHS; do if [ "$a" = x64 ]; then echo x86_64; else echo "$a"; fi; done | sort | tr '\n' ' ')"
+HAVE_ARCHS="$(lipo -archs "$OUT" 2>/dev/null | tr ' ' '\n' | sort | tr '\n' ' ')"
+# 版本要执行 node 才知道,而 arm 机器上跑纯 x86_64 那份未必成(没装 Rosetta 就直接失败)——
+# 取不到版本就当没就位重来一遍。tarball 有缓存,代价只是重新解包+签名几秒。
+if [ -x "$OUT" ] && [ "$WANT_ARCHS" = "$HAVE_ARCHS" ] && [ "$("$OUT" -v 2>/dev/null)" = "$NODE_VERSION" ]; then
+  echo "==> node $NODE_VERSION ($(lipo -archs "$OUT")) 已就位,跳过下载"
 else
   mkdir -p "$CACHE" "$(dirname "$OUT")"
   # SHASUMS256.txt 走 https 从 nodejs.org 取,拿它校验两个 tarball ——
