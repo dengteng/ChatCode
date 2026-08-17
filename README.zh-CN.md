@@ -16,7 +16,7 @@ ChatCode 是封装了终端内核的对话式编程客户端，轻量、好用�
 [![core](https://img.shields.io/badge/core-Claude%20Agent%20SDK-111?style=flat-square)](https://github.com/anthropics/claude-agent-sdk-typescript)
 [![models](https://img.shields.io/badge/models-9-111?style=flat-square)](#多模型兼容)
 
-[官网](https://chatcode.dengteng.xyz/) · [下载 macOS 版](#下载)
+[官网](https://chatcode.dengteng.xyz/) · [下载 macOS 版](https://github.com/dengteng/ChatCode/releases/latest)
 
 <img src="https://chatcode.dengteng.xyz/shots/1.webp" width="880" alt="ChatCode 主界面">
 

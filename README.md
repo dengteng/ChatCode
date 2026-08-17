@@ -16,7 +16,7 @@ Read files, edit code, run tests, drive Git, execute shell commands — all in o
 [![core](https://img.shields.io/badge/core-Claude%20Agent%20SDK-111?style=flat-square)](https://github.com/anthropics/claude-agent-sdk-typescript)
 [![models](https://img.shields.io/badge/models-9-111?style=flat-square)](#multi-model-support)
 
-[Website](https://chatcode.dengteng.xyz/) · [Download for macOS](#download)
+[Website](https://chatcode.dengteng.xyz/) · [Download for macOS](https://github.com/dengteng/ChatCode/releases/latest)
 
 <img src="https://chatcode.dengteng.xyz/shots/en/1.webp" width="880" alt="ChatCode main window">
 
