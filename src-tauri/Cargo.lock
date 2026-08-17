@@ -3,6 +3,18 @@
 version = 4
 
 [[package]]
+name = "ChatCode"
+version = "1.0.0"
+dependencies = [
+ "objc2",
+ "objc2-foundation",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-http",
+]
+
+[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -324,18 +336,6 @@ dependencies = [
  "cfg-if",
  "cpufeatures 0.3.0",
  "rand_core",
-]
-
-[[package]]
-name = "chat-code"
-version = "1.0.0"
-dependencies = [
- "objc2",
- "objc2-foundation",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-http",
 ]
 
 [[package]]

@@ -68,7 +68,7 @@ export function popoutRoute(): { kind: "editor" | "image"; params: URLSearchPara
 
 export function Popout({ kind, params }: { kind: "editor" | "image"; params: URLSearchParams }) {
   // 主题跟主窗口走(同源共享 localStorage);独立窗口有原生标题栏,不留 overlay 的顶部内边距
-  const theme = localStorage.getItem("chat-code-theme") === "light" ? "light" : "dark";
+  const theme = localStorage.getItem("ChatCode-theme") === "light" ? "light" : "dark";
   // 关窗前把焦点还给主窗口:否则 macOS 下主窗口失焦,回去点图片标签的第一下只会激活窗口、被吞掉(看着像没反应)。
   const close = () => {
     WebviewWindow.getByLabel("main").then((w) => w?.setFocus()).catch(() => {});

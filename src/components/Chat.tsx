@@ -97,7 +97,7 @@ async function absPath(raw: string, cwd: string): Promise<string> {
 }
 
 // 路径/URL 令牌:hover 弹操作菜单。文件=复制路径+打开+打开目录,在线链接=复制链接+打开。点令牌本身直接打开。
-// 打开:内置编辑器支持的文件格式直接在 chat-code 内置编辑器打开;其余交系统默认程序;在线链接用浏览器开。
+// 打开:内置编辑器支持的文件格式直接在 ChatCode 内置编辑器打开;其余交系统默认程序;在线链接用浏览器开。
 // 菜单用 portal 挂到 body + fixed 定位 —— 否则在 <pre>/overflow 容器里会被裁掉,弹不出来。
 function PathToken({ raw, cwd, isUrl }: { raw: string; cwd: string; isUrl: boolean }) {
   const { t } = useTranslation();
@@ -110,7 +110,7 @@ function PathToken({ raw, cwd, isUrl }: { raw: string; cwd: string; isUrl: boole
   const primaryRef = useRef<HTMLButtonElement>(null); // 最常用的按钮,要落在光标正下方
   const href = webHref(raw, isUrl);   // 非 null = 在线链接
   const isWeb = href !== null;
-  const editable = !isWeb && isEditable(raw); // 内置编辑器支持的文件 → 在 chat-code 内打开,不交系统程序
+  const editable = !isWeb && isEditable(raw); // 内置编辑器支持的文件 → 在 ChatCode 内打开,不交系统程序
   const open = async () => {
     if (isWeb) { openUrl(href); return; }
     if (editable) { openEditorWindow(await absPath(raw, cwd), raw.split("/").pop() || raw); return; }

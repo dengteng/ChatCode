@@ -23,7 +23,9 @@ process.env.PATH = [...commonBinDirs.filter((dir) => !currentPath.includes(dir))
 //   CLAUDE_BIN —— SDK 默认从 node_modules 里解析原生 CLI,但打包后没有 node_modules,
 //                 必须显式告诉它 claude 可执行文件在哪(见 spawnAgent 的 pathToClaudeCodeExecutable)
 const PORT = Number(process.env.CHAT_CODE_PORT) || 8975;
-const DATA_DIR = process.env.CHAT_CODE_DATA_DIR || path.join(os.homedir(), ".chat-code");
+// 打包版这个 env 一定有(Rust 那边 data_dir() 注入,老目录 ~/.chat-code 的改名也在那做)。
+// 这里的默认值只给「不经 Rust、直接 node sidecar/server.mjs」的裸跑用,不做改名。
+const DATA_DIR = process.env.CHAT_CODE_DATA_DIR || path.join(os.homedir(), ".ChatCode");
 const CLAUDE_BIN = process.env.CHAT_CODE_CLAUDE_BIN || undefined;
 const SESS_DIR = path.join(DATA_DIR, "sessions");
 const SSH_DIR = path.join(DATA_DIR, "ssh"); // SSH ControlMaster 套接字
@@ -186,7 +188,7 @@ const NEXT_STEPS_INSTRUCTION =
   '(例:"提交并推送"、"修掉第 3 条"、"给这段加测试");' +
   '不要写"要不要…""是否需要…"这类问句,也不要写需要用户补充信息才能执行的模糊指令;' +
   "判断不出明确下一步时,直接不输出这行。";
-// 闲聊会话:工作目录是我们后台建的临时空目录(~/.chat-code/casual/<id>),对用户没有意义。
+// 闲聊会话:工作目录是我们后台建的临时空目录(~/.ChatCode/casual/<id>),对用户没有意义。
 // 让 agent 别把这个路径暴露/评论出来(不说"当前工作目录 … 不是 git 仓库"之类),就当普通对话。
 const CASUAL_INSTRUCTION =
   "【闲聊模式】这是一个不绑定任何项目的闲聊会话,当前工作目录只是后台自动分配的临时空目录,与用户无关。" +

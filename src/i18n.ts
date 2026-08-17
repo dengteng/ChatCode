@@ -12,7 +12,7 @@ import { initReactI18next } from "react-i18next";
 import enDict from "./i18n/en.json";
 import zhDict from "./i18n/zh.json";
 
-const LANG_KEY = "chat-code-lang";
+const LANG_KEY = "ChatCode-lang";
 export type Lang = "zh" | "en";
 
 export function getLang(): Lang {

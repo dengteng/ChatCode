@@ -1,4 +1,4 @@
-// 一次性迁移:把老日志里内联的图片 base64 抽到 ~/.chat-code/blobs/<sha1>,日志里只留引用。
+// 一次性迁移:把老日志里内联的图片 base64 抽到 ~/.ChatCode/blobs/<sha1>,日志里只留引用。
 // sidecar 已改为落盘即外置(server.mjs 的 externalizeImages),这里补清存量。
 // 按内容 hash 存 = 天然去重,同一张图贴过多少次都只占一份磁盘。
 //
@@ -11,7 +11,7 @@ import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
 
-const DATA = process.env.CHAT_CODE_DATA_DIR || path.join(os.homedir(), ".chat-code");
+const DATA = process.env.CHAT_CODE_DATA_DIR || path.join(os.homedir(), ".ChatCode");
 const SESS = path.join(DATA, "sessions");
 const BLOBS = path.join(DATA, "blobs");
 const APPLY = process.argv.includes("--apply");

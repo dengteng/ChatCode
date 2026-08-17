@@ -1,3 +1,4 @@
+import "./lsKeys"; // 必须是第一条:后面任何模块 import 时读到的都得是新键名
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";

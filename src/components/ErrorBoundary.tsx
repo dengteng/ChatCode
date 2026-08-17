@@ -17,7 +17,7 @@ export class ErrorBoundary extends Component<Props, State> {
   componentDidCatch(error: Error, info: { componentStack?: string | null }) {
     // 存一份到 state 显示;同时打 console,方便接上 Safari 调试器时看完整信息
     this.setState({ stack: info.componentStack || "" });
-    console.error("[chat-code] 渲染异常:", error, info.componentStack);
+    console.error("[ChatCode] 渲染异常:", error, info.componentStack);
   }
 
   render() {

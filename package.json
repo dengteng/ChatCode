@@ -10,7 +10,7 @@
     "dev": "concurrently -n sidecar,web \"npm run sidecar:dev\" \"vite\"",
     "sidecar": "node sidecar/server.mjs",
     "_comment:sidecar:dev": "开发用独立数据目录 —— 与打包版并存时,两个 sidecar 都全量覆写 index.json,共用目录会互相抹掉会话",
-    "sidecar:dev": "CHAT_CODE_DATA_DIR=\"$HOME/.chat-code-dev\" node sidecar/server.mjs",
+    "sidecar:dev": "CHAT_CODE_DATA_DIR=\"$HOME/.ChatCode-dev\" node sidecar/server.mjs",
     "build": "tsc && vite build",
     "check:i18n": "node scripts/i18n-check.mjs",
     "build:sidecar": "esbuild sidecar/server.mjs --bundle --platform=node --format=esm --banner:js=\"import{createRequire as __cr}from'module';const require=__cr(import.meta.url);\" --outfile=src-tauri/resources/sidecar.mjs",

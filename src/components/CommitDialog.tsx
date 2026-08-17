@@ -6,8 +6,8 @@ import { useStore } from "../store";
 
 // 最近 5 条提交说明(localStorage),弹窗里点一条即可回填 —— 提交信息高度重复,省得每次重打。
 // 按 git 项目(scope=项目根目录)分桶存:不同仓库的提交描述天差地别,混在一起点错的概率比省的事还多。
-const HIST_KEY = "chat-code-commit-history";           // 旧的全局键:一次性迁移到当前项目桶后删掉
-const keyOf = (scope: string) => `chat-code-commit-history:${scope || "_"}`;
+const HIST_KEY = "ChatCode-commit-history";           // 旧的全局键:一次性迁移到当前项目桶后删掉
+const keyOf = (scope: string) => `ChatCode-commit-history:${scope || "_"}`;
 const readHistory = (scope: string): string[] => {
   try { const v = JSON.parse(localStorage.getItem(keyOf(scope)) || "[]"); return Array.isArray(v) ? v.slice(0, 5) : []; } catch { return []; }
 };

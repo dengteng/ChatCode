@@ -101,11 +101,11 @@ export function Sidebar({ onSearch, onOpenSettings, update, onShowUpdate }:
   };
   // 分组折叠态 + 正在重命名的分组(本地态,折叠持久化到 localStorage)
   const [collapsed, setCollapsed] = useState<Set<string>>(() => {
-    try { return new Set(JSON.parse(localStorage.getItem("chat-code-collapsed-groups") || "[]")); } catch { return new Set(); }
+    try { return new Set(JSON.parse(localStorage.getItem("ChatCode-collapsed-groups") || "[]")); } catch { return new Set(); }
   });
   const toggleCollapse = (gid: string) => setCollapsed((prev) => {
     const next = new Set(prev); next.has(gid) ? next.delete(gid) : next.add(gid);
-    localStorage.setItem("chat-code-collapsed-groups", JSON.stringify([...next]));
+    localStorage.setItem("ChatCode-collapsed-groups", JSON.stringify([...next]));
     return next;
   });
   const [editGroupId, setEditGroupId] = useState<string | null>(null);

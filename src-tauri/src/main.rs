@@ -78,10 +78,32 @@ fn which(bin: &str, fallbacks: &[&str], path: Option<&str>) -> Option<PathBuf> {
     None
 }
 
+/// 用户数据目录。会话、settings.json、relay.env、装出来的 claude 全在这。
+///
+/// 老版本叫 ~/.chat-code。这里顺手做整目录改名 —— 光换个路径等于用户的会话和密钥凭空消失。
+/// 新目录已经在了就不动:两个版本都跑过的话,不去猜哪份才是用户要的那份。
+/// 每次调用都探一下(而不是启动时做一次):省掉「谁先跑」的时序坑,rename 本身幂等。
+/// ponytail: 没做合并、没做回滚。老目录还在就是没搬成,原样躺着,用户不会丢东西。
+fn data_dir() -> PathBuf {
+    data_dir_in(&PathBuf::from(std::env::var("HOME").unwrap_or_default()))
+}
+
+/// 拆出 home 参数只为可测:测试里造个临时 home,不用去动进程的 HOME 环境变量。
+fn data_dir_in(home: &Path) -> PathBuf {
+    let dir = home.join(".ChatCode");
+    if !dir.exists() {
+        let old = home.join(".chat-code");
+        if old.exists() {
+            let _ = fs::rename(&old, &dir);
+        }
+    }
+    dir
+}
+
 /// 我们用 npm -g 装出来的 claude 落在这里 —— 不进 /usr/local(要 sudo),也不跟用户自己装的那份打架。
 /// which() 的 fallback 里排在最前:引导页刚装完立刻能被认出来。
 fn npm_prefix() -> PathBuf {
-    PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".chat-code").join("npm")
+    data_dir().join("npm")
 }
 
 /// .app 里自带的 node / npm(和 sidecar.mjs 同一个 resources 目录)。
@@ -102,7 +124,7 @@ fn find_claude(path: Option<&str>) -> Option<PathBuf> {
     which(
         "claude",
         &[
-            "~/.chat-code/npm/bin/claude",
+            "~/.ChatCode/npm/bin/claude",
             "~/.local/bin/claude",
             "/opt/homebrew/bin/claude",
             "/usr/local/bin/claude",
@@ -112,17 +134,16 @@ fn find_claude(path: Option<&str>) -> Option<PathBuf> {
 }
 
 fn log_path() -> PathBuf {
-    let dir = PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".chat-code");
+    let dir = data_dir();
     let _ = fs::create_dir_all(&dir);
     dir.join("sidecar.log")
 }
 
-/// 读 ~/.chat-code/relay.env（每行 KEY=VALUE）里的 relay 配置,注入 sidecar 以启用手机远程会话。
+/// 读 ~/.ChatCode/relay.env（每行 KEY=VALUE）里的 relay 配置,注入 sidecar 以启用手机远程会话。
 /// 密钥只放这个文件里,不进源码/仓库;文件不存在 = 不启用远程,sidecar 照常本地运行。
 /// 只认这两个键,其余忽略,防止把无关变量带进子进程。
 fn relay_env() -> Vec<(String, String)> {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let path = PathBuf::from(&home).join(".chat-code").join("relay.env");
+    let path = data_dir().join("relay.env");
     let Ok(content) = fs::read_to_string(&path) else { return Vec::new(); };
     let mut out = Vec::new();
     for line in content.lines() {
@@ -138,7 +159,7 @@ fn relay_env() -> Vec<(String, String)> {
     out
 }
 
-/// 起 sidecar。失败原因写进 ~/.chat-code/sidecar.log —— GUI 应用的 stderr 无处可看。
+/// 起 sidecar。失败原因写进 ~/.ChatCode/sidecar.log —— GUI 应用的 stderr 无处可看。
 fn spawn_sidecar(script: &Path) -> Result<Child, String> {
     let path = login_path();
     let p = path.as_deref();
@@ -160,6 +181,9 @@ fn spawn_sidecar(script: &Path) -> Result<Child, String> {
         .env("CHAT_CODE_PORT", SIDECAR_PORT)
         .env("CHAT_CODE_TOKEN", sidecar_token_value())
         .env("CHAT_CODE_CLAUDE_BIN", &claude)
+        // 数据目录以 Rust 这边为准,别让 sidecar 自己再算一遍 ——
+        // 老目录改名那一下要是两边各算各的,就会出现「一个搬完、一个新建空目录」
+        .env("CHAT_CODE_DATA_DIR", data_dir())
         // claude 靠 USER 定位钥匙串里的凭据,缺了它会一直报 "Not logged in"
         .env("USER", std::env::var("USER").unwrap_or_default())
         .env("HOME", std::env::var("HOME").unwrap_or_default());
@@ -501,7 +525,7 @@ fn probe_registry() -> String {
 }
 
 /// 引导页的「一键安装 Claude Code」。用包内 node + 包内 npm 装,所以用户机器可以完全没有 Node。
-/// 装进 ~/.chat-code/npm(不碰系统目录、不要 sudo),装完 find_claude 的第一条 fallback 就能命中。
+/// 装进 ~/.ChatCode/npm(不碰系统目录、不要 sudo),装完 find_claude 的第一条 fallback 就能命中。
 #[tauri::command]
 async fn install_claude(app: tauri::AppHandle, registry: Option<String>) -> Result<(String, String), String> {
     let reg = match registry.filter(|r| !r.trim().is_empty()) {
@@ -738,7 +762,7 @@ fn main() {
                     *state.0.lock().unwrap() = Some(child);
                 }
                 Err(e) => {
-                    let _ = fs::write(log_path(), format!("[chat-code] {e}\n"));
+                    let _ = fs::write(log_path(), format!("[ChatCode] {e}\n"));
                 }
             }
             Ok(())
@@ -765,7 +789,32 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_path;
+    use super::{data_dir_in, resolve_path};
+
+    // 老目录 ~/.chat-code 必须原样搬成 ~/.ChatCode(会话、settings.json、relay.env 都在里面);
+    // 新目录已存在时不许碰老的 —— 两个版本都跑过的话,乱合并比留着更糟。
+    #[test]
+    fn migrates_legacy_data_dir() {
+        let home = std::env::temp_dir().join(format!("chatcode-home-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(home.join(".chat-code/sessions")).unwrap();
+        std::fs::write(home.join(".chat-code/settings.json"), b"{}").unwrap();
+
+        let dir = data_dir_in(&home);
+        assert_eq!(dir, home.join(".ChatCode"));
+        assert!(dir.join("settings.json").exists(), "老数据没搬过来");
+        assert!(dir.join("sessions").is_dir());
+        assert!(!home.join(".chat-code").exists(), "老目录该消失");
+
+        // 新目录已在:再跑一遍不动它,老目录原样留着
+        std::fs::create_dir_all(home.join(".chat-code")).unwrap();
+        std::fs::write(dir.join("settings.json"), b"{\"new\":1}").unwrap();
+        data_dir_in(&home);
+        assert_eq!(std::fs::read(dir.join("settings.json")).unwrap(), b"{\"new\":1}");
+        assert!(home.join(".chat-code").exists());
+
+        std::fs::remove_dir_all(&home).unwrap();
+    }
 
     // agent 省略仓名时(cwd=…/ws/repo-a,路径是相对兄弟仓 repo-b 的),resolve_path 应能找到 repo-b 下的文件
     #[test]

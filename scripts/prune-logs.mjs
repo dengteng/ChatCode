@@ -10,7 +10,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const SESS = path.join(process.env.CHAT_CODE_DATA_DIR || path.join(os.homedir(), ".chat-code"), "sessions");
+const SESS = path.join(process.env.CHAT_CODE_DATA_DIR || path.join(os.homedir(), ".ChatCode"), "sessions");
 const APPLY = process.argv.includes("--apply");
 const mb = (n) => (n / 1048576).toFixed(1) + "M";
 

@@ -116,16 +116,16 @@ export default function App() {
   const [update, setUpdate] = useState<VersionCheck | null>(null); // 有新版:侧栏底部常驻"新版本"入口
   const [showUpdate, setShowUpdate] = useState(false);             // 更新弹窗是否展开
   const [theme, setTheme] = useState<ThemeId>(() => {
-    const saved = localStorage.getItem("chat-code-theme");
+    const saved = localStorage.getItem("ChatCode-theme");
     return THEMES.some((t) => t.id === saved) ? (saved as ThemeId) : "dark";
   });
-  const applyTheme = (id: ThemeId) => { localStorage.setItem("chat-code-theme", id); setTheme(id); };
+  const applyTheme = (id: ThemeId) => { localStorage.setItem("ChatCode-theme", id); setTheme(id); };
   // 自定义主题:背景图(dataURL)+ 毛玻璃开关,各存 localStorage。
   // ponytail: dataURL 直存 localStorage,单图几 MB 够用;超大图会顶到 ~5MB 配额,真需要再加压缩。
-  const [customBg, setCustomBg] = useState<string>(() => localStorage.getItem("chat-code-custom-bg") || "");
+  const [customBg, setCustomBg] = useState<string>(() => localStorage.getItem("ChatCode-custom-bg") || "");
   // 上传时的图分析结果(主色/亮度/复杂度);壳与各表面透明度由 customLayout 推导
   const [customArt, setCustomArt] = useState<CustomArt | null>(() => {
-    try { return JSON.parse(localStorage.getItem("chat-code-custom-art") || "null"); } catch { return null; }
+    try { return JSON.parse(localStorage.getItem("ChatCode-custom-art") || "null"); } catch { return null; }
   });
   const applyCustomBg = (url: string, artJson?: string) => {
     setCustomBg(url); // 先应用,存储失败也不影响本次会话
@@ -133,16 +133,16 @@ export default function App() {
     if (url && artJson) { try { art = JSON.parse(artJson); } catch { /* 分析失败走默认布局 */ } }
     setCustomArt(art);
     try {
-      if (url) localStorage.setItem("chat-code-custom-bg", url); else localStorage.removeItem("chat-code-custom-bg");
-      if (art) localStorage.setItem("chat-code-custom-art", JSON.stringify(art)); else localStorage.removeItem("chat-code-custom-art");
-      localStorage.removeItem("chat-code-custom-accent"); localStorage.removeItem("chat-code-custom-overlay"); // 旧版遗留键
+      if (url) localStorage.setItem("ChatCode-custom-bg", url); else localStorage.removeItem("ChatCode-custom-bg");
+      if (art) localStorage.setItem("ChatCode-custom-art", JSON.stringify(art)); else localStorage.removeItem("ChatCode-custom-art");
+      localStorage.removeItem("ChatCode-custom-accent"); localStorage.removeItem("ChatCode-custom-overlay"); // 旧版遗留键
     } catch { /* 超配额:本次生效,但重启不保留 */ }
   };
   // 侧栏磨砂参数:高斯模糊半径(px)+ 亮度(1=100%),设置里可调,存 localStorage
-  const [customBlur, setCustomBlur] = useState<number>(() => { const v = Number(localStorage.getItem("chat-code-custom-blur")); return v >= 0 ? v : 18; });
-  const [customBrightness, setCustomBrightness] = useState<number>(() => { const v = Number(localStorage.getItem("chat-code-custom-brightness")); return v > 0 ? v : 1; });
-  const applyCustomBlur = (v: number) => { localStorage.setItem("chat-code-custom-blur", String(v)); setCustomBlur(v); };
-  const applyCustomBrightness = (v: number) => { localStorage.setItem("chat-code-custom-brightness", String(v)); setCustomBrightness(v); };
+  const [customBlur, setCustomBlur] = useState<number>(() => { const v = Number(localStorage.getItem("ChatCode-custom-blur")); return v >= 0 ? v : 18; });
+  const [customBrightness, setCustomBrightness] = useState<number>(() => { const v = Number(localStorage.getItem("ChatCode-custom-brightness")); return v > 0 ? v : 1; });
+  const applyCustomBlur = (v: number) => { localStorage.setItem("ChatCode-custom-blur", String(v)); setCustomBlur(v); };
+  const applyCustomBrightness = (v: number) => { localStorage.setItem("ChatCode-custom-brightness", String(v)); setCustomBrightness(v); };
   const lay = customLayout(customArt); // 自定义主题的智能布局(壳 + 各表面透明度)
   // 明暗基座:管原生标题栏 + 浅色附属样式。自定义主题按图分析出的壳定。
   const base = theme === "custom" ? lay.shell : (THEMES.find((t) => t.id === theme)?.base ?? "dark");
@@ -179,8 +179,8 @@ export default function App() {
   // 侧栏宽度可拖,300 = 设计稿默认宽,也是上限
   // 下限 76 = 红绿灯那三颗按钮的宽度(再窄就压到窗口按钮上了);窄到 SB_NARROW 以下切图标模式,
   // 逐级砍掉名字/新建分组/副标题/文字标签(见 styles.css 的 [data-sb-narrow])。
-  const [sbw, setSbw] = useState(() => Math.min(300, Math.max(SB_MIN, Number(localStorage.getItem("chat-code-sbw")) || 300)));
-  useEffect(() => { localStorage.setItem("chat-code-sbw", String(sbw)); }, [sbw]);
+  const [sbw, setSbw] = useState(() => Math.min(300, Math.max(SB_MIN, Number(localStorage.getItem("ChatCode-sbw")) || 300)));
+  useEffect(() => { localStorage.setItem("ChatCode-sbw", String(sbw)); }, [sbw]);
   // 侧栏宽上限:除了设计上限 300,还要保证右侧聊天区 ≥ 600px(减去 5px 分隔条)。窗口越窄,侧栏能拉得越窄。
   const maxSidebar = () => Math.min(300, window.innerWidth - 605);
   const startResize = (e: React.MouseEvent) => {

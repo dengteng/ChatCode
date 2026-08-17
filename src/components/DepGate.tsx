@@ -72,7 +72,7 @@ export function DepGate({ children }: { children: React.ReactNode }) {
     return () => clearInterval(id);
   }, [installing]);
 
-  // 一键装 claude:用包内 node + 包内 npm,装进 ~/.chat-code/npm —— 用户机器可以完全没有 Node/npm
+  // 一键装 claude:用包内 node + 包内 npm,装进 ~/.ChatCode/npm —— 用户机器可以完全没有 Node/npm
   const install = async () => {
     setInstalling(true);
     setInstallMsg(null);

@@ -213,9 +213,9 @@ export const removeSkill = (path: string) =>
   invoke<void>("remove_path", { path: path.replace(/\/SKILL\.md(\.off)?$/, "") });
 
 // MCP:claude 没有"停用"命令,只有 add/remove。
-// 停用 = 配置原样存进 ~/.chat-code/disabled-mcp.json 再 `mcp remove`;启用 = 按原 scope `mcp add-json` 装回。
+// 停用 = 配置原样存进 ~/.ChatCode/disabled-mcp.json 再 `mcp remove`;启用 = 按原 scope `mcp add-json` 装回。
 type McpStash = Record<string, { scope: McpScope; config: any; cwd?: string }>;
-const stashPath = async () => `${(await homeDir()).replace(/\/$/, "")}/.chat-code/disabled-mcp.json`;
+const stashPath = async () => `${(await homeDir()).replace(/\/$/, "")}/.ChatCode/disabled-mcp.json`;
 const readMcpStash = async (): Promise<McpStash> => parseJson(await readText(await stashPath()));
 const writeMcpStash = async (s: McpStash) =>
   invoke<void>("write_file", { path: await stashPath(), content: JSON.stringify(s, null, 2) });

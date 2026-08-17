@@ -38,12 +38,12 @@ function langOf(name: string) {
 
 // 当前主题(浅/深)。独立弹出窗口里 data-theme 挂在 .app 上,主窗口挂在 <html> 上;
 // 但弹窗首帧渲染时 .app 还没进 DOM(querySelector 拿不到)、其 <html> 又不带 data-theme,
-// 会误判成浅色 —— 所以最后兜底到两个窗口共享的主题键(chat-code-theme,默认深色)。
+// 会误判成浅色 —— 所以最后兜底到两个窗口共享的主题键(ChatCode-theme,默认深色)。
 const detectDark = () => {
   const attr = document.querySelector(".app")?.getAttribute("data-theme")
     ?? document.documentElement.getAttribute("data-theme");
   if (attr) return attr === "dark";
-  return localStorage.getItem("chat-code-theme") !== "light";
+  return localStorage.getItem("ChatCode-theme") !== "light";
 };
 
 // 文件编辑器:左编辑(CodeMirror 6 语法高亮 + 行号)右预览(md)/纯编辑(其他)。⌘S 保存,点"关闭"按钮退出。

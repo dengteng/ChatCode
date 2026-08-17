@@ -1,5 +1,7 @@
 [package]
-name = "chat-code"
+# 包名 = 二进制名 = 活动监视器里显示的进程名。和 tauri.conf.json 的 mainBinaryName 必须一致,
+# 只改一处 tauri 会找不到编出来的二进制,打包直接失败。
+name = "ChatCode"
 # 版本号四处保持一致:这里 / tauri.conf.json / package.json / src/cloud.ts 的 APP_VERSION
 version = "1.0.0"
 edition = "2021"
@@ -18,5 +20,5 @@ objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSUserDefaults", "NSString"] }
 
 [[bin]]
-name = "chat-code"
+name = "ChatCode"
 path = "src/main.rs"
