@@ -263,7 +263,10 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
           {/* 竖线①(暂存区→本地分支):只有待提交改动时才画,线垂直对准左侧「本地分支」列中心
               —— 指明这些改动是 commit 到当前本地分支的。线上挂 commit 按钮。
               流光(flow-down)只在真的 commit 进行时点亮:平时一直流会让人以为有活在跑。 */}
-          <div className={`brz-collapse ${dirty ? "open" : ""}`}>
+          {/* commitFlow 也算"展开":commit 一成功 git 就刷新、dirty 立刻变 false,只看 dirty 的话
+              这条线连着流光一起被折叠掉 —— 光才跑了几百毫秒就没了,比 push 那条(竖脊常驻)短一大截。
+              留到 commitFlow 落下再收,COMMIT_HOLD_MS 那 3s 才真的看得见。 */}
+          <div className={`brz-collapse ${dirty || commitFlow ? "open" : ""}`}>
             <div className="brz-collapse-in">
               {/* 线要平移到当前分支 chip 的中线上,而当前分支现在可能排在任意一格(顺序固定后不再钉最左)。
                   直接平移会把线上的 commit 按钮推出容器(外层 .brz-collapse-in 是 overflow:hidden,截掉就没了),
