@@ -13,7 +13,7 @@ import i18n from "../i18n";
 
 // 统一 diff 渲染:把 git 的 unified patch 交给 diff2html,得到行内(word 级)高亮 + 行号的可视化视图。
 // 空 patch = 无文本差异(如仅权限变化/二进制)。样式在 styles.css 的 .d2h-wrap 里对齐主题。
-function DiffHtml({ patch }: { patch: string }) {
+function DiffHtml({ patch, clipped }: { patch: string; clipped?: boolean }) {
   const { t } = useTranslation();
   const out = useMemo(
     () => patch.trim() ? diffToHtml(patch, { drawFileList: false, matching: "words", outputFormat: "line-by-line" }) : "",
@@ -21,7 +21,8 @@ function DiffHtml({ patch }: { patch: string }) {
   );
   if (!out) return <div className="muted branches-empty">{t("（无文本差异）")}</div>;
   return <>
-    <div className="d2h-legend">{t("左列=改前行号")} · {t("右列=改后行号")} · <span className="d2h-lg-ins">{t("diff.added")}</span> <span className="d2h-lg-del">{t("diff.deleted")}</span></div>
+    <div className="d2h-legend">{t("左列=改前行号")} · {t("右列=改后行号")} · <span className="d2h-lg-ins">{t("diff.added")}</span> <span className="d2h-lg-del">{t("diff.deleted")}</span>
+      {clipped && <> · <span className="d2h-lg-clip">{t("文件较大，只显示改动附近")}</span></>}</div>
     <div className="d2h-wrap" dangerouslySetInnerHTML={{ __html: out }} />
   </>;
 }
@@ -53,9 +54,11 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
   const diff = state.gitDiff[session.id];
   const fileDiff = state.gitFileDiff[session.id];
   const [confirm, setConfirm] = useState<{ cmd: string; label: string } | null>(null); // 待弹窗确认的危险操作
-  const [menu, setMenu] = useState<{ ref: string; remote: boolean; x: number; y: number } | null>(null);
+  // kind="repo" 时 ref = 远端名(不是分支名),菜单换成远端管理那一组
+  const [menu, setMenu] = useState<{ ref: string; remote: boolean; x: number; y: number; kind?: "repo" } | null>(null);
   // newbranch 的 ref = 来源分支(弹窗里可改),target = 建到本地还是远程;rename/upstream 的 ref = 被操作的分支
-  const [prompt, setPrompt] = useState<{ kind: "rename" | "newbranch" | "upstream"; ref: string; val: string; target?: "local" | "remote" } | null>(null);
+  // remote* 三种的 ref = 远端名;remoteadd 是唯一要两个输入框的(名字 val + URL val2)
+  const [prompt, setPrompt] = useState<{ kind: "rename" | "newbranch" | "upstream" | "remoteadd" | "remotename" | "remoteurl"; ref: string; val: string; val2?: string; target?: "local" | "remote" } | null>(null);
   const [compareFrom, setCompareFrom] = useState<string | null>(null); // 已选对比左端,等点第二个节点选右端
   const [compareView, setCompareView] = useState<{ from: string; to: string } | null>(null);
   const [wtFile, setWtFile] = useState<string | null>(null); // 工作区单文件 diff 弹窗:正在查看的文件
@@ -137,11 +140,22 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
     setConfirm(null); setPrompt(null);
     setMenu({ ref, remote, x: e.clientX, y: e.clientY });
   };
+  // 右键仓库 tab:远端本身的增删改在这里(git remote 那组),和分支菜单共用同一个弹层
+  const onRepoMenu = (name: string, e: React.MouseEvent) => {
+    e.preventDefault(); e.stopPropagation();
+    setConfirm(null); setPrompt(null);
+    setMenu({ ref: name, remote: false, kind: "repo", x: e.clientX, y: e.clientY });
+  };
+  const newRemote = () => { setConfirm(null); setMenu(null); setPrompt({ kind: "remoteadd", ref: "", val: "", val2: "" }); };
 
   const submitPrompt = () => {
     if (!prompt) return;
     const v = prompt.val.trim();
     if (!v) return;
+    // 新加的远端在 fetch 之前没有任何 refs,泳道是空的,看着像没加上 —— 加完顺手拉一次
+    if (prompt.kind === "remoteadd") { const u = (prompt.val2 || "").trim(); if (u) run(`git remote add ${q(v)} ${q(u)} && git fetch ${q(v)} --prune`); return; }
+    if (prompt.kind === "remotename") return run(`git remote rename ${q(prompt.ref)} ${q(v)}`);
+    if (prompt.kind === "remoteurl") return run(`git remote set-url ${q(prompt.ref)} ${q(v)}`);
     if (prompt.kind === "rename") run(`git branch -m ${q(prompt.ref)} ${q(v)}`);
     // 建远程分支 = 把来源 ref 推到远程的新分支名下(不带 -u:来源不一定是想跟踪它的那条本地分支)
     else if (prompt.kind === "newbranch") run(prompt.target === "remote"
@@ -163,6 +177,15 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
     // 输入类操作(改名/新建/设上游)统一走居中弹窗,不再挤在点击位置的小菜单里
     const openPrompt = (kind: "rename" | "newbranch" | "upstream") =>
       { setPrompt({ kind, ref, val: kind === "rename" ? ref : "", target: kind === "newbranch" ? "local" : undefined }); setMenu(null); };
+
+    // 远端管理:git remote 那组。--prune 顺带清掉远端已删分支留下的幽灵 remote/xxx
+    if (menu.kind === "repo") return <>
+      <div className="bmenu-head"><Cloud size={11} /> {ref} <span className="muted">{t("远端")}</span></div>
+      {item(t("拉取远端信息"), () => run(`git fetch ${q(ref)} --prune`))}
+      {item(t("重命名远端…"), () => { setPrompt({ kind: "remotename", ref, val: ref }); setMenu(null); })}
+      {item(t("修改 URL…"), () => { setPrompt({ kind: "remoteurl", ref, val: git.remoteUrls?.[ref] || "" }); setMenu(null); })}
+      {dItem(`rmremote:${ref}`, t("移除远端"), `git remote remove ${q(ref)}`)}
+    </>;
 
     if (remote) {
       const short = ref.split("/").slice(1).join("/");
@@ -196,6 +219,9 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
       {item(t("分支对比…"), () => { setCompareFrom(ref); setMenu(null); })}
       {item(t("基于它新建分支…"), () => openPrompt("newbranch"))}
       {item(t("改名…"), () => openPrompt("rename"))}
+      {/* 加远端不是分支操作,但挂这里:本地分支排永远画得出来,而仓库 tab 排在零远端时整排不画 ——
+          放那儿的话,最需要「新建远端」的那一刻恰好没有入口。 */}
+      {item(t("新建远端…"), newRemote)}
       {/* -d 只删"已合并"的分支,有未合并提交时 git 会拒绝(这是它在护着你)。
           所以再给一条 -D:仅当分支还有提交没进当前分支时才需要,单列一条并说清后果。 */}
       {!isCur && dItem(`del:${ref}`, t("删除分支"), `git branch -d ${q(ref)}`)}
@@ -265,6 +291,7 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
             <BranchSpine local={git.local} remote={git.remote} remoteSha={git.remoteSha} remotes={git.remotes}
               current={current} focus={focusName} repo={graphRepo} dirty={dirty} picking={compareFrom}
               onChip={onChip} onFocus={setFocus} onRepo={setRepo} onRun={run}
+              onRepoMenu={onRepoMenu}
               pushing={pushing} pushFlow={pushFlow} pullFlow={pullFlow}
               onNew={(target) => { setConfirm(null); setMenu(null); setPrompt({ kind: "newbranch", target, ref: focusName || "HEAD", val: "" }); }}
               onPush={(cmd) => { if (pushing) return; setPushing(true); runTerminal(session.id, cmd); }}
@@ -300,16 +327,31 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
         <div className="commit-modal-overlay" onMouseDown={() => setPrompt(null)}>
           <div className="commit-modal" onMouseDown={(e) => e.stopPropagation()}>
             <div className="commit-modal-title">
-              {prompt.kind === "rename" ? t("改名 {{ref}}", { ref: prompt.ref }) : prompt.kind === "newbranch" ? t("新建{{type}}分支", { type: prompt.target === "remote" ? t("远程") : t("本地") }) : t("设 {{ref}} 的上游", { ref: prompt.ref })}
+              {prompt.kind === "rename" ? t("改名 {{ref}}", { ref: prompt.ref })
+                : prompt.kind === "newbranch" ? t("新建{{type}}分支", { type: prompt.target === "remote" ? t("远程") : t("本地") })
+                : prompt.kind === "remoteadd" ? t("新建远端")
+                : prompt.kind === "remotename" ? t("重命名远端 {{ref}}", { ref: prompt.ref })
+                : prompt.kind === "remoteurl" ? t("修改 {{ref}} 的 URL", { ref: prompt.ref })
+                : t("设 {{ref}} 的上游", { ref: prompt.ref })}
             </div>
             {prompt.kind === "upstream"
               ? <select className="git-map-input" autoFocus value={prompt.val} onChange={(e) => setPrompt({ ...prompt, val: e.target.value })}>
                   <option value="">{t("选择远程分支")}</option>
                   {git.remote.map((r) => <option key={r} value={r}>{r}</option>)}
                 </select>
-              : <input className="git-map-input" autoFocus value={prompt.val} placeholder={prompt.kind === "rename" ? t("新名字") : t("新分支名")}
+              : <input className="git-map-input" autoFocus value={prompt.val}
+                  placeholder={prompt.kind === "rename" || prompt.kind === "remotename" ? t("新名字")
+                    : prompt.kind === "remoteadd" ? t("远端名（如 origin）")
+                    : prompt.kind === "remoteurl" ? t("仓库 URL") : t("新分支名")}
                   onChange={(e) => setPrompt({ ...prompt, val: e.target.value })}
                   onKeyDown={(e) => { if (e.key === "Escape") setPrompt(null); if (e.key === "Enter" && !e.nativeEvent.isComposing) submitPrompt(); }} />}
+            {/* 新建远端要两截:名字 + URL。分两个框而不是让用户按空格拼一行 —— URL 里本来就可能带空格转义 */}
+            {prompt.kind === "remoteadd" && <>
+              <div className="git-map-sublabel">{t("仓库 URL")}</div>
+              <input className="git-map-input" value={prompt.val2 || ""} placeholder="git@github.com:user/repo.git"
+                onChange={(e) => setPrompt({ ...prompt, val2: e.target.value })}
+                onKeyDown={(e) => { if (e.key === "Escape") setPrompt(null); if (e.key === "Enter" && !e.nativeEvent.isComposing) submitPrompt(); }} />
+            </>}
             {/* 来源(照搬 GitHub 的 Create a branch):新分支从哪个 ref 拉出来,本地/远程 ref 都能选 */}
             {prompt.kind === "newbranch" && <>
               <div className="git-map-sublabel">{t("来源")}</div>
@@ -320,7 +362,7 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
             </>}
             <div className="commit-modal-actions">
               <button type="button" onClick={() => setPrompt(null)}>{t("取消")}</button>
-              <button type="button" className="hi" disabled={!prompt.val.trim()} onClick={submitPrompt}>{t("确定")}</button>
+              <button type="button" className="hi" disabled={!prompt.val.trim() || (prompt.kind === "remoteadd" && !(prompt.val2 || "").trim())} onClick={submitPrompt}>{t("确定")}</button>
             </div>
           </div>
         </div>, document.body)}
@@ -333,7 +375,7 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
             <div className="wtdiff-body">
               {!wtReady ? <div className="muted branches-empty">{t("加载中…")}</div>
                 : fileDiff!.error ? <div className="branches-diff-err">{t("无法读取:{{error}}", { error: fileDiff!.error })}</div>
-                : <DiffHtml patch={fileDiff!.patch} />}
+                : <DiffHtml patch={fileDiff!.patch} clipped={fileDiff!.clipped} />}
             </div>
           </div>
         </div>, document.body)}
@@ -357,10 +399,11 @@ const TAB_W = 118, TAB_GAP = 10;
 const SIDE_W = 46;
 const FORK_Y = 34, DROP_H = 40, FAN_H = FORK_Y + DROP_H; // 主干高 / 分叉后下落段高
 const TAIL = 26; // 传输光点的尾迹长度(px,svg 用户坐标)
-function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, dirty, picking, onChip, onFocus, onRepo, onRun, pushing, pushFlow, pullFlow, onPush, onNew, urlLine, onStem }:
+function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, dirty, picking, onChip, onFocus, onRepo, onRun, onRepoMenu, pushing, pushFlow, pullFlow, onPush, onNew, urlLine, onStem }:
   { local: GitBranch[]; remote: string[]; remoteSha?: Record<string, string>; remotes: string[]; current: string; focus: string; repo: string | null; dirty: boolean;
     picking: string | null; onChip: (ref: string, remote: boolean, e: React.MouseEvent) => void; onFocus: (name: string) => void; onRepo: (name: string) => void;
-    onRun: (cmd: string) => void; pushing: boolean; pushFlow: boolean; pullFlow: boolean; onPush: (cmd: string) => void;
+    onRun: (cmd: string) => void; onRepoMenu: (name: string, e: React.MouseEvent) => void;
+    pushing: boolean; pushFlow: boolean; pullFlow: boolean; onPush: (cmd: string) => void;
     onNew: (target: "local" | "remote") => void; urlLine: React.ReactNode; onStem: (dx: number) => void }) {
   const { t } = useTranslation();
   // 这次 push 点的是哪几个远端。只喂光束用,不进全局 —— 推完 pushFlow 一落就没人读了。
@@ -448,14 +491,16 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
             title={tagTitle(x)}
             // 一律 onMouseDown,不用 onClick:WKWebView 里输入框聚焦时,落在别处的第一次点击只用来切焦点、
             // 不派发 click —— 表现就是"要点两次才生效"(菜单项早前踩过同一个坑)。
-            // 左键=切到这条分支(顺手先聚焦,git switch 跑完前脊就已经指过去了),右键=原来那套操作菜单;
+            // 左键=切到这条分支(顺手先聚焦,git switch 跑完前脊就已经指过去了);
             // 对比拾取中左键也走 onChip,否则选不了对端。
             // ponytail: 工作区脏时 git 自己会拒绝并把原因打进时间线,这里不预判 —— 它的判断比我们准。
             onMouseDown={(e) => {
-              if (picking || e.button === 2) onChip(x.name, false, e);
+              if (picking) onChip(x.name, false, e);
               else if (e.button === 0) { onFocus(x.name); if (x.name !== current) onRun(`git switch ${q(x.name)}`); }
             }}
-            onContextMenu={(e) => e.preventDefault()}>
+            // 右键菜单挂 contextmenu 而不是 mousedown(button===2):触控板「辅助点按」/ 部分鼠标在
+            // WKWebView 里只派发 contextmenu,右键 mousedown 不到,表现就是"右键完全没反应"。
+            onContextMenu={(e) => { e.preventDefault(); onChip(x.name, false, e); }}>
             <span className="brz-tag-name">{x.name}</span>
             {x.name === current && dirty && <span className="cg-ref-dirty" title={t("有未提交改动")}>*</span>}
           </button>
@@ -526,20 +571,26 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
           标题跟着排走就会被裁掉。钉在容器左边才和「暂存区」「本地分支」对齐,也永远看得见。 */}
       <div className="brz-remote">
         <span className="sec-label brz-remote-h">{t("远程分支")}</span>
+        {/* 全局 fetch 钉在抽屉最右、和标题同一行:它作用于所有远端,不属于居中那排 tab 里的任何一个。
+            「新建远端」不在这里 —— 见本地分支右键菜单(那里一个远端都没有时也还在)。 */}
+        <button className="ghost brz-remote-op" title={t("拉取全部远端信息（git fetch --all --prune）")} onClick={() => onRun("git fetch --all --prune")}><RotateCw size={11} /></button>
         {!lanes.length ? <div className="muted brz-empty brz-remote-empty">{t("暂无远程仓库")}</div> : (
         <div className="brz-tabs" style={{ width: rowW, gap: TAB_GAP, "--side-w": `${SIDE_W}px` } as React.CSSProperties}>
           <div className="brz-tabrow" style={{ gap: TAB_GAP }}>
           {lanes.map((l) => (
             <button key={l.remote} className={`brz-tab ${l.remote === repo ? "sel" : ""} ${l.ref ? "" : "empty"} ${l.isUpstream ? "up" : ""}`}
-              style={{ width: TAB_W }} title={l.ref
+              style={{ width: TAB_W }} title={(l.ref
                 ? (l.isUpstream ? t("{{r}} · 上游,裸 git push 去这里", { r: l.ref }) : t("{{r}} · 同名远程分支,不是上游:裸 git push 不会推到这里", { r: l.ref }))
-                : t("{{remote}} 里还没有 {{name}} 分支", { remote: l.remote, name: focus })}
-              onMouseDown={() => onRepo(l.remote)}>
+                : t("{{remote}} 里还没有 {{name}} 分支", { remote: l.remote, name: focus })) + t(" · 右键管理远端")}
+              onMouseDown={() => onRepo(l.remote)}
+              onContextMenu={(e) => onRepoMenu(l.remote, e)}>
               <b className="brz-tab-remote">{l.remote}</b>
               <span className="brz-tab-ref" data-ref={l.ref || ""}
                 // 副标题那半是个能点的分支节点(有 ref 才有):走原来那套菜单(检出/对比/删远程)。
                 // stopPropagation 拦住外层的切仓库 —— 一次点击又切视图又弹菜单,读不出自己按了什么。
-                onMouseDown={(e) => { if (l.ref) { e.stopPropagation(); onChip(l.ref, true, e); } }}>
+                onMouseDown={(e) => { if (l.ref) { e.stopPropagation(); onChip(l.ref, true, e); } }}
+                // 右键落在副标题上要的是分支菜单,别让它冒到 tab 上被远端菜单顶掉
+                onContextMenu={(e) => { if (l.ref) { e.preventDefault(); e.stopPropagation(); onChip(l.ref, true, e); } }}>
                 <Cloud size={9} className="brz-tag-ico" />{l.ref ? l.ref.split("/").slice(1).join("/") : t("新建")}
               </span>
             </button>
@@ -652,7 +703,7 @@ function Graph({ log, repo, current, dirty, picking, onChip }: { log: GitLogData
 function fmtDate(d: string) { return new Date(d).toLocaleString(i18n.language === "zh" ? "zh-CN" : "en-US", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }); }
 
 // 对比视图:两 ref 各自独有提交数 + 文件级 +/− 统计;点文件名内联展开该文件 patch
-function DiffView({ current, other, diff, fileDiff, onBack, onRefresh, onFile }: { current: string; other: string; diff?: { from: string; to: string; ahead: number; behind: number; files: { file: string; add: number | null; del: number | null }[]; error?: string }; fileDiff?: { from: string; to: string; file: string; patch: string; error?: string }; onBack: () => void; onRefresh: () => void; onFile: (file: string) => void }) {
+function DiffView({ current, other, diff, fileDiff, onBack, onRefresh, onFile }: { current: string; other: string; diff?: { from: string; to: string; ahead: number; behind: number; files: { file: string; add: number | null; del: number | null }[]; error?: string }; fileDiff?: { from: string; to: string; file: string; patch: string; clipped?: boolean; error?: string }; onBack: () => void; onRefresh: () => void; onFile: (file: string) => void }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState<string | null>(null); // 当前展开看正文的文件
   const stale = !diff || diff.from !== current || diff.to !== other; // 结果还没回来/是上一次的
@@ -684,7 +735,7 @@ function DiffView({ current, other, diff, fileDiff, onBack, onRefresh, onFile }:
                       {bin ? <i className="muted">{t("二进制")}</i> : <><b className="add">+{f.add}</b> <b className="del">−{f.del}</b></>}
                     </span>
                   </div>
-                  {isOpen && <div className="branches-file-patch">{ready ? (fileDiff.error ? <span className="branches-diff-err">{t("无法读取:{{error}}", { error: fileDiff.error })}</span> : <DiffHtml patch={fileDiff.patch} />) : <span className="muted">{t("加载中…")}</span>}</div>}
+                  {isOpen && <div className="branches-file-patch">{ready ? (fileDiff.error ? <span className="branches-diff-err">{t("无法读取:{{error}}", { error: fileDiff.error })}</span> : <DiffHtml patch={fileDiff.patch} clipped={fileDiff.clipped} />) : <span className="muted">{t("加载中…")}</span>}</div>}
                 </div>;
               })
             : <div className="muted">{t("无文件差异")}</div>}

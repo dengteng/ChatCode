@@ -64,7 +64,7 @@ interface State {
   git: Record<string, GitInfo>;
   gitLog: Record<string, GitLogData>;   // 分支 Tab:提交拓扑图数据(按会话)
   gitDiff: Record<string, GitDiffData>; // 分支 Tab:最近一次两 ref 对比结果(按会话)
-  gitFileDiff: Record<string, { from: string; to: string; file: string; patch: string; error?: string }>; // 对比视图点开的单文件 patch
+  gitFileDiff: Record<string, { from: string; to: string; file: string; patch: string; clipped?: boolean; error?: string }>; // 对比视图点开的单文件 patch(clipped=文件太大,只给了改动附近的上下文)
   auth: AuthStatus | null;                          // 设置:账号登录状态
   sshHosts: SshHost[];                              // 设置:全局 SSH 主机预设
   sshTests: Record<string, { ok: boolean; detail: string }>; // 预设连通性测试结果(按 host id)

@@ -740,12 +740,28 @@ async function gitFileDiff(cwd, from, to, file) {
   const root = await execOut("git", ["rev-parse", "--show-toplevel"], cwd);
   if (!root.ok) return { from, to, file, patch: "", error: "非 git 仓库" };
   // -U999999 = 全文上下文:diff 里带上整份文件,而非只有改动的几行片段(用户要看完整文件)。
-  //   代价:超大文件(如 lock)patch 很长、前端渲染略慢,可接受;真遇到超巨文件再谈按需截断。
+  // 但 package-lock.json 这种上万行的文件,全文会让 diff2html 吐出上万行 DOM,弹窗直接卡死 ——
+  // 超过 CLIP_LINES 就重跑一次 git 默认的 3 行上下文,前端标注「已截断」。
+  //   实测 package-lock.json 一次 npm install:全文 8089 行 → -U3 844 行。
+  // ponytail: 上限是「改动本身就上万行」(整份生成文件被重写),-U3 也救不了,那时才谈虚拟滚动。
   // to === "WORKTREE":工作区未提交改动(HEAD vs 工作区),两点语义;否则两 ref 三点对比
-  const ctx = "-U999999";
-  const args = to === "WORKTREE" ? ["diff", ctx, from, "--", file] : ["diff", ctx, `${from}...${to}`, "--", file];
-  const r = await execOut("git", args, root.stdout.trim());
-  return { from, to, file, patch: r.stdout, error: r.ok ? undefined : r.stderr.trim().slice(0, 200) };
+  const CLIP_LINES = 2000;
+  const run = (ctx) => execOut("git", to === "WORKTREE"
+    ? ["diff", ctx, from, "--", file]
+    : ["diff", ctx, `${from}...${to}`, "--", file], root.stdout.trim());
+  let r = await run("-U999999");
+  let clipped = false;
+  if (r.ok && countLines(r.stdout) > CLIP_LINES) {
+    const narrow = await run("-U3");
+    if (narrow.ok) { r = narrow; clipped = true; }
+  }
+  return { from, to, file, patch: r.stdout, clipped, error: r.ok ? undefined : r.stderr.trim().slice(0, 200) };
+}
+// 只数换行,不 split —— 十几万行的 patch 切成数组光分配就够慢的。
+function countLines(s) {
+  let n = 0;
+  for (let i = s.indexOf("\n"); i !== -1; i = s.indexOf("\n", i + 1)) n++;
+  return n;
 }
 
 // 仓库根:会话 cwd 可能是子目录,按 cwd 前缀判断会漏掉同仓库另一个目录下的改动。非 git 仓库就用 cwd 兜底。
