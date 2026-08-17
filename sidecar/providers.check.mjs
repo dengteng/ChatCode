@@ -6,7 +6,7 @@
 //   2. 非 claude 会话注了「关掉非必要外网请求」那组 env(不注则国内每次起会话白等十几秒);
 //   3. claude 会话一个 env 都不注(它得照常走 Anthropic 自己那套)。
 import assert from "node:assert";
-import { envForModel, resolvedProvider, endpointsOf, variantsOf, PROVIDERS } from "./providers.mjs";
+import { envForModel, resolvedProvider, endpointsOf, variantsOf, isCnMachine, PROVIDERS } from "./providers.mjs";
 
 const keys = { providerKeys: { glm: "k", deepseek: "k" } };
 
@@ -94,5 +94,19 @@ console.log("✓ Claude 会话 env 不受影响");
 assert.strictEqual(PROVIDERS.deepseek.vision, false);
 assert.strictEqual(PROVIDERS.gemini.vision, undefined, "没声明 = 放行,别误拦");
 console.log("✓ vision 声明就位");
+
+// 5. 「优先国内节点」的出厂默认:按机器时区/语言判国内
+assert.strictEqual(isCnMachine("Asia/Shanghai", "en_US.UTF-8"), true, "时区在国内就算国内,语言不管");
+assert.strictEqual(isCnMachine("Asia/Urumqi", ""), true);
+assert.strictEqual(isCnMachine("America/Los_Angeles", "zh_CN.UTF-8"), true, "中文语言也算(海外华人常用国内站)");
+assert.strictEqual(isCnMachine("America/Los_Angeles", "zh-Hans"), true);
+assert.strictEqual(isCnMachine("America/Los_Angeles", "en_US.UTF-8"), false);
+// GUI 启动拿不到 LANG 时退回界面语言(settings.lang 只有 "zh" / "en" 两个值)
+assert.strictEqual(isCnMachine("", "zh"), true, "中文界面该算国内");
+assert.strictEqual(isCnMachine("", "en"), false);
+assert.strictEqual(isCnMachine("Asia/Taipei", "zh_TW.UTF-8"), false, "港澳台直连国际站没问题,别改判");
+assert.strictEqual(isCnMachine("Asia/Hong_Kong", "zh-Hant"), false);
+assert.strictEqual(isCnMachine("", ""), false, "探不到时区/语言就按国际站,不瞎猜");
+console.log("✓ 国内环境判定就位");
 
 console.log("all ok");

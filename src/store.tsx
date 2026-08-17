@@ -8,6 +8,7 @@ import { toast, dismissToast } from "./components/Toast";
 import i18n, { getLang } from "./i18n";
 import { PERMISSION_PRESETS, type PermissionMode } from "./permissions";
 import { COMMIT_HOLD_MS } from "./lib/gitcmd";
+import { pickAutoModel } from "./lib/automodel";
 
 // 把顶级会话 sessionId 移动到 groupId(null=移出分组),插到 beforeId 之前(null=该组末尾)。
 // 前端乐观更新与后端持久化用同一套语义,保证拖拽后立即到位、广播回来不跳动。
@@ -584,7 +585,7 @@ interface Api {
   cancelPending: (id: string, pid: string) => void;
   respondPermission: (id: string, requestId: string, behavior: "allow" | "deny", message?: string, remember?: RememberChoice) => void;
   interrupt: (id: string) => void;
-  setModel: (id: string, model: string) => void;
+  setModel: (id: string, model: string, label?: string) => void; // label:模型表还没到时(刚配好 key)由调用方给出显示名
   requestModels: (id: string) => void;
   clearContext: (id: string) => void;
   runTerminal: (id: string, command: string) => void;
@@ -692,7 +693,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             }
             break;
           case "usage": dispatch({ type: "set_usage", usage: m.usage, kimiUsage: m.kimiUsage }); break;
-          case "auth_status": dispatch({ type: "auth_status", status: m.status }); break;
+          case "auth_status": {
+            const prev = stateRef.current.auth;
+            dispatch({ type: "auth_status", status: m.status });
+            // 刚配好第一把第三方 key → 自动选中这家的模型(判断见 pickAutoModel)
+            const pick = pickAutoModel(prev, m.status, stateRef.current.homeModel);
+            if (pick) {
+              dispatch({ type: "set_home_model", model: pick.value }); // 新会话以此启动
+              send({ type: "get_models", sessionId: HOME_MODELS_ID }); // 首页选择器的列表补上这家
+              // 打开着的会话也顺手切过去(displayName 直接给:models 广播可能还没到,否则条子会显示原始 id)
+              const aid = stateRef.current.activeId;
+              if (aid) api.setModel(aid, pick.value, pick.displayName);
+            }
+            break;
+          }
           case "ssh_hosts": dispatch({ type: "ssh_hosts", hosts: m.hosts }); break;
           case "ssh_host_test":
             dismissToast(`ssh-test:${m.id}`); // 结果到了,收掉「正在测试…」
@@ -959,9 +973,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       send({ type: "interrupt", sessionId: id });
       dispatch({ type: "patch", id, patch: { bgWait: false, bgTasks: [] } });
     },
-    setModel(id, model) {
+    setModel(id, model, labelHint) {
       const sess = stateRef.current.sessions[id];
-      const label = sess?.models?.find((m) => m.value === model)?.displayName ?? model;
+      const label = labelHint ?? sess?.models?.find((m) => m.value === model)?.displayName ?? model;
       dispatch({ type: "append", id, item: { kind: "system", text: i18n.t("⚙ 模型已切换为 {{label}}", { label }), ts: Date.now() } });
       if (sess) dispatch({ type: "patch", id, patch: { info: { ...sess.info, model } } });
       send({ type: "set_model", sessionId: id, model });

@@ -249,3 +249,16 @@ export function extraModels(settings) {
 
 // provider 是否走本地代理(openai 传输)
 export function isProxied(providerId) { return PROVIDERS[providerId]?.transport === "openai"; }
+
+// 「优先国内节点」的出厂默认:机器本身在国内就默认开。国际站在国内要么慢要么连不上,
+// 让国内用户先试国内站更可能一次连通;真不认这把 key 时探针会改判(见 server.mjs 的 probeEndpoint),
+// 所以这个默认最坏只是多探一个域名,不会把人钉在 401 的端点上。
+// 判据只用时区 + 语言:这是本地信息,不用为了猜网络环境先联一次网(联不上的正是要照顾的那批人)。
+// ponytail: 时区改了国外、语言仍中文的会误判成国内 —— 上限就是首探多花几秒,用户取消勾选即永久生效。
+const CN_TZ = ["Asia/Shanghai", "Asia/Chongqing", "Asia/Chungking", "Asia/Harbin", "Asia/Urumqi", "PRC"];
+export function isCnMachine(tz, lang) {
+  if (CN_TZ.includes(tz)) return true;
+  // 语言形如 zh_CN.UTF-8 / zh-Hans / zh。港澳台(zh-TW/zh-HK/zh-Hant)与新加坡不算:
+  // 那边直连国际站没问题,且各家国内站未必受理当地账号。
+  return /^zh(-cn|-hans)?(\.|$)/.test(String(lang || "").replace(/_/g, "-").toLowerCase());
+}

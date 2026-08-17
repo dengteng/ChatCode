@@ -2,7 +2,7 @@
 // 前端(浏览器/Tauri webview)连 ws://127.0.0.1:8975,每个 session 独立跑一个 SDK query,天然支持并行任务。
 import { WebSocketServer } from "ws";
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { PROVIDERS, providerOf, modelArg, envForModel, extraModels, resolvedProvider, endpointsOf, variantsOf, setProxyPort } from "./providers.mjs";
+import { PROVIDERS, providerOf, modelArg, envForModel, extraModels, resolvedProvider, endpointsOf, variantsOf, setProxyPort, isCnMachine } from "./providers.mjs";
 import { accumulate, emptySpend, priceTable, ledgerAdd, ledgerStats } from "./spend.mjs";
 import { startProxy } from "./openai-proxy.mjs";
 import fs from "node:fs";
@@ -898,8 +898,17 @@ async function ghInfo(cwd) {
   const account = (raw.match(/account\s+([^\s]+)/i) || raw.match(/Logged in to .* account ([^\s]+)/i) || [])[1];
   return { installed: true, loggedIn: auth.ok, account, detail: raw.trim().slice(0, 300) };
 }
+// 「优先国内节点」没有显式设过时按机器所在地给默认(见 providers.mjs 的 isCnMachine)。
+// 只在 undefined 时补:用户手动勾/取消后 settings 里是显式 true/false,判断不再介入。
+// 已经探到端点的老用户不受影响 —— resolvedProvider 优先用探测记录,候选顺序只在没记录时说话。
+// 语言取 env,取不到就用 settings.lang(界面语言,前端一连上就 set_lang 落盘)——
+// GUI 启动的进程 macOS 不给 LANG(实测为空),只靠 env 会把中文界面的用户全判成海外。
+const SYS_TZ = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { return ""; } })();
 function loadSettings() {
-  try { return JSON.parse(fs.readFileSync(SETTINGS, "utf8")); } catch { return {}; }
+  let s;
+  try { s = JSON.parse(fs.readFileSync(SETTINGS, "utf8")); } catch { s = {}; }
+  if (s.cnEndpoint === undefined) s.cnEndpoint = isCnMachine(SYS_TZ, process.env.LC_ALL || process.env.LANG || s.lang || "");
+  return s;
 }
 // 0600:settings.json 存着第三方 provider 的 API Key 明文,默认 0644 等于同机任何进程都能读。
 // mode 只在**新建**时生效,已存在的文件得显式 chmod 一次(老用户的 0644 也就跟着收紧了)。
