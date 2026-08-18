@@ -163,7 +163,10 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 .empty-input-box textarea { flex: 1; min-width: 0; min-height: 3.6em; max-height: 40vh; resize: none; border: none; outline: none; background: transparent; color: var(--text); font: inherit; line-height: 1.5; padding: 4px 0; }
 .empty-input-box textarea::placeholder { color: var(--muted); }
 .empty-editor-wrap { position: relative; flex: 1; min-width: 0; }
-.empty-editor { min-height: 3.6em; max-height: 40vh; overflow-y: auto; outline: none; color: var(--text); font: inherit; line-height: 1.5; padding: 4px 0; white-space: pre-wrap; word-break: break-word; }
+/* overflow 必须两轴都写:只写 overflow-y 的话另一轴按规范自动变 auto,而 pre-wrap 悬挂的行尾空格
+   在 WebKit 里计进 scrollWidth,输入框底下就多一条永远没用的横向滚动条。
+   横轴锁死后长 URL 无处可滚,靠 overflow-wrap: anywhere 强行断行(和会话输入框 .editor 一致)。 */
+.empty-editor { min-height: 3.6em; max-height: 40vh; overflow: hidden auto; outline: none; color: var(--text); font: inherit; line-height: 1.5; padding: 4px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .empty-editor-ph { position: absolute; top: 4px; left: 0; color: var(--muted); pointer-events: none; }
 .empty-send { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; line-height: 0; border: none; border-radius: 8px; background: var(--accent); color: #fff; cursor: pointer; }
 .empty-send svg { display: block; }
