@@ -945,15 +945,22 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 /* 搜索行:搜索框吃掉剩余宽度、新建按钮定宽。align-items: stretch 让按钮高度自动等于搜索框 */
 .search-row { display: flex; align-items: stretch; gap: 8px; }
 .search-row .sidebar-search { flex: 1 1 auto; min-width: 0; margin: 0; }
-.sidebar-search { padding: 8px 10px; border-radius: 8px; height: 36px; align-items: center; }
+/* gap:justify-content: space-between 在挤满时不留任何间距,「搜索」被裁剩的半个字会直接贴上 ⌘K,
+   看着像两边没对齐。留 8px 硬间距,宁可标签早点被裁。 */
+.sidebar-search { padding: 8px 10px; border-radius: 8px; height: 36px; align-items: center; gap: 8px; }
 .sidebar-search:hover { border-color: var(--accent); color: var(--text); }
 /* 新建按钮:圆角矩形,圆角/高度跟搜索框一致(高度靠 stretch 自动对齐),只有宽度定死不随侧栏变 */
 /* 弱化的新建按钮:主色低透明度底 + 淡边 + 主色图标,不再实心抢眼;基于 --accent 变量,各主题自动适配 */
 /* 三元素统一:搜索框 + 新建分组 + 新建会话同一套中性视觉(同底/边/圆角/高度),hover 才提亮成主色 */
 .new-session { flex: 0 0 auto; width: 36px; height: 36px; display: grid; place-items: center; padding: 0; background: color-mix(in srgb, var(--text) 8%, transparent); border: 1px solid var(--border); color: var(--muted); border-radius: 8px; }
 .new-session:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: var(--accent); color: var(--accent); opacity: 1; }
-.search-l { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
-.sidebar-search kbd { display: inline-flex; align-items: center; gap: 1px; font-size: 11px; flex: 0 0 auto; }
+/* nowrap + overflow:侧栏拖到 150~190px 这段,「搜索」两个字被 ⌘K 挤得只剩一个字的宽度,
+   默认会竖着折成两行、把按钮撑高。宁可把字裁掉一半,也不换行(再窄就进图标模式了)。 */
+.search-l { display: inline-flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; overflow: hidden; }
+/* line-height: 1 把 K 的行盒按字号算,和 ⌘ 的盒子居中后字形中线才对得上(差 0.16px)。
+   top: 1px 是最后那点:盒子居中 ≠ 字形居中,Menlo 的 K 比 PingFang 的「搜索」少一截下沉,
+   量出来 kbd 整体比左边标签高 1.19px,压 1px 回去三者字形中线就都落在 0.2px 内。 */
+.sidebar-search kbd { display: inline-flex; align-items: center; gap: 1px; font-size: 11px; line-height: 1; flex: 0 0 auto; position: relative; top: 1px; }
 .kbd-cmd { font-size: 15px; line-height: 1; } /* ⌘ 图标本身太小,单独放大 */
 .session-list { padding: 6px 6px; }
 .session-item { gap: 8px; padding: 9px 8px; border-left: 0; border-radius: 7px; margin-bottom: 2px; }
