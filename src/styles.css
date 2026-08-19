@@ -431,6 +431,8 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 .compact-track { margin-top: 5px; height: 4px; max-width: 320px; background: color-mix(in srgb, var(--text) 14%, transparent); border-radius: 2px; overflow: hidden; }
 .compact-fill { height: 100%; width: 35%; border-radius: 2px; background: var(--accent); animation: indet 1.1s ease-in-out infinite; }
 @keyframes indet { 0% { transform: translateX(-100%); } 100% { transform: translateX(320%); } }
+/* 有百分比时改走定量条:宽度由 JSX 的 style 给,过渡时间盖住 1 秒一跳的刷新,看着是连续爬的 */
+.compact-fill.det { width: 0; animation: none; transition: width 1s linear; }
 
 /* 重开大会话前的恢复方式二选一(对齐 CLI --resume) */
 .resume-card { margin: 0 16px 12px; border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border)); border-radius: 10px; padding: 12px 14px; background: color-mix(in srgb, var(--accent) 5%, var(--panel)); outline: none; }
@@ -1377,6 +1379,8 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 .compact-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; padding: 5px 10px; border-radius: 8px;
   background: color-mix(in srgb, var(--accent) 14%, var(--panel)); color: var(--text); font-size: 12px; }
 .compact-bar .compact-track { flex: 1; margin-top: 0; max-width: none; }
+/* 定宽:12% → 100% 位数变化时右边的「取消」不能跟着抖 */
+.compact-pct { flex: none; min-width: 30px; text-align: right; font: 11px Menlo, monospace; color: var(--muted); }
 /* 常驻可见,不做 hover 才露:压缩卡死时这是唯一出口,藏起来等于没有 */
 .compact-cancel { flex: none; padding: 1px 9px; font-size: 11px; border-radius: 999px; cursor: pointer;
   border: 1px solid var(--border); background: transparent; color: var(--muted); transition: color .12s ease, border-color .12s ease; }

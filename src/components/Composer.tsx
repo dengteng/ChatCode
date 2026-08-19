@@ -327,7 +327,19 @@ export function Composer({ session }: { session: Session }) {
   const shellMode = imgCount === 0 && text.startsWith("!");
   // 正在压缩上下文:输入框照常可用,但发出去的消息进待发队列(压缩完自动依次发出) ——
   // 压缩期间 status 仍是 idle,不拦就会立刻打进去,SDK 把它当新一轮跑起来、压缩白做。
-  const compacting = session.timeline.some((t) => t.kind === "compact" && t.running);
+  const compactItem = session.timeline.find((t) => t.kind === "compact" && t.running);
+  const compacting = !!compactItem;
+
+  // 压缩进度百分比。SDK 全程只给"开始/结束"两个信号,没有真进度 —— CLI 那条也是纯时间估算,
+  // 照抄它的曲线(claude 2.1.235:pct = 1 - e^(-t/90s),封顶 95%,不满 8 格宽就不画条):
+  // 前 30 秒涨得快、之后放缓,压再久也不谎报 100%。纯 elapsed 的函数,天然单调,不用另存进度。
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (!compacting) return;
+    const h = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(h);
+  }, [compacting]);
+  const compactPct = compactItem ? Math.min(95, Math.round((1 - Math.exp(-Math.max(0, Date.now() - compactItem.ts) / 90_000)) * 100)) : 0;
 
   // 压缩超时兜底。压缩只有两个出口:SDK 的 compact_boundary(成功)或轮次末尾的 result(store 里 compact_settle 兜底)。
   // 两条都不来时(请求挂死、大上下文压缩卡住)running 就永远挂着,而 compacting 会把所有新消息塞进排队,
@@ -1172,7 +1184,8 @@ export function Composer({ session }: { session: Session }) {
       {compacting && (
         <div className="compact-bar">
           <span>{t("✻ 正在压缩上下文…可以继续输入，消息会排队等压缩完成")}</span>
-          <div className="compact-track"><div className="compact-fill" /></div>
+          <div className="compact-track"><div className="compact-fill det" style={{ width: `${compactPct}%` }} /></div>
+          <span className="compact-pct">{compactPct}%</span>
           {/* 手动出口:压缩期 status 是 idle,输入框右侧那个「停止」按钮不渲染,这里是唯一能断掉的地方。
               interrupt 让 SDK 停下,compact_finish 收掉 running —— 排队的消息随即自动发出。 */}
           <button className="compact-cancel" title={t("停止压缩，并放行排队的消息")}

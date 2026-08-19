@@ -1077,6 +1077,33 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [state.sessions]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // bgWait 闩锁兜底。闩锁只由「后台任务续跑的 result」清,可后台任务退出后 SDK 不一定再起一轮 ——
+  // 那条 result 永远不来,闩锁就把待发队列锁死:界面上 status 是 idle、后台任务条也没了(bgTasks 已被
+  // 空电平清空),用户看着完全空闲,发出去的每条消息却都进排队区,只能手点「不等了」才解得开。
+  // 空闲 + 无后台任务连续 20 秒就认定续跑不会来了,自己放闸(真有续跑时它的第一条 assistant 就把
+  // status 打回 running,计时器随即被下面的 else 撤掉)。
+  // 计时器按会话存在 ref 里,不用 effect 的 cleanup 重建:state.sessions 会被别的会话的流式刷新
+  // 带着变,cleanup 版每次刷新都重置计时,20 秒永远等不到。
+  const bgWaitTimers = useRef(new Map<string, number>());
+  useEffect(() => {
+    const timers = bgWaitTimers.current;
+    for (const s of Object.values(state.sessions)) {
+      const stuck = !!s.bgWait && s.status === "idle" && (s.bgTasks?.length ?? 0) === 0;
+      if (stuck && !timers.has(s.id)) {
+        timers.set(s.id, window.setTimeout(() => {
+          timers.delete(s.id);
+          const cur = stateRef.current.sessions[s.id];
+          if (cur?.bgWait && cur.status === "idle" && (cur.bgTasks?.length ?? 0) === 0)
+            dispatch({ type: "patch", id: s.id, patch: { bgWait: false } });
+        }, 20_000));
+      } else if (!stuck && timers.has(s.id)) {
+        clearTimeout(timers.get(s.id)); timers.delete(s.id);
+      }
+    }
+    for (const id of [...timers.keys()]) // 会话被删/关掉,计时器一起收
+      if (!state.sessions[id]) { clearTimeout(timers.get(id)); timers.delete(id); }
+  }, [state.sessions]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // 打开该目录已有的会话(而不是再建一条同名的)。空态输入框暂存的首条消息一并送进去。
   const openExisting = (id: string) => {
     setDupAsk(null);
