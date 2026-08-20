@@ -438,7 +438,10 @@ function handleSdkMessage(dispatch: (a: Action) => void, id: string, msg: any, l
       slash_commands: msg.slash_commands, skills: msg.skills,
     } });
     // 新的 CLI 进程:SDK 不会在启动时补发后台任务电平,必须重置为空,等下次 membership 变化再填充。
-    dispatch({ type: "patch", id, patch: { bgTasks: [], bgWait: false } });
+    // 但**不能**顺手清 bgWait:后台任务的续跑轮自己也会先发一条 init,清了就等于在续跑刚起步时开闸,
+    // 待发队列立刻放一条进去 → 撞进那一轮被当纯文本读掉(/compact 于是压根没执行)。
+    // 闩锁照旧由续跑的 result 清;进程真的换了、续跑不会来了,有下面 20 秒空闲兜底放闸。
+    dispatch({ type: "patch", id, patch: { bgTasks: [] } });
     // 实时 init = CLI 真的跑起来了,断连状态到此解除。少了这一步,重连成功后底部仍挂着
     // 「会话已断开 · 点此重连」(输入框根本不渲染),用户只能得出"点了没反应"的结论 ——
     // status 得等下一条 result 才会变,而没有输入框就永远发不出下一轮。
@@ -1073,6 +1076,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const next = s.pending[0];
         dispatch({ type: "remove_pending", id: s.id, pid: next.pid });
         api.sendMessage(s.id, next.blocks, { html: next.html, imgs: next.imgs });
+        // 排队发出的 /compact 也要起进度条:它同时是"这轮到底压没压成"的判据 —— 没有这条,
+        // result 上的 compact_settle 找不到进行中的压缩,既不报"被并入了正在跑的那一轮",也不会自动重发。
+        if (next.blocks.length === 1 && next.blocks[0]?.type === "text" && next.blocks[0].text === "/compact")
+          dispatch({ type: "compact_start", id: s.id });
       }
     }
   }, [state.sessions]); // eslint-disable-line react-hooks/exhaustive-deps
