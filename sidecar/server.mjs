@@ -494,6 +494,11 @@ setTimeout(() => {
   } catch {}
 }, 5000);
 
+// 老日志里可能已写进 SDK 回吐的图片占位("[Image: original …]" 纯文本),回放时丢掉,别再露出来。
+const isCaptionEcho = (msg) => msg?.type === "user" && Array.isArray(msg.message?.content)
+  && msg.message.content.some((b) => b.type === "text" && /^\[Image: original .*to original image/.test(b.text || ""))
+  && !msg.message.content.some((b) => b.type === "image" || b.type === "tool_result");
+
 async function buildMobileHistory(log, limit) {
   const bubbles = []; // { kind, msgs:[] }
   for (const m of log) {
@@ -2002,14 +2007,19 @@ wss.on("connection", (ws) => {
         if (s && !s.running) restartAgent(ws, s, m.sessionId);
         break;
       }
+      // 手机滑到顶要更早的消息:只重发一份更大的 history,不碰会话本身
+      // (reopen_session 会顺带起会话 / 弹恢复卡 / 回一串状态包,翻个历史不该有这些动静)。
+      case "more_history": {
+        const entry = loadIndex().find((e) => e.id === m.sessionId);
+        if (!entry) return;
+        const log = readLog(entry.id).filter((msg) => !isCaptionEcho(msg));
+        buildMobileHistory(log, m.limit || 20).then((messages) => send(ws, { type: "history", sessionId: entry.id, messages }));
+        break;
+      }
       case "reopen_session": {
         // f: 继承历史 —— 用 SDK 的 resume 接上原来的上下文
         const entry = loadIndex().find((e) => e.id === m.sessionId);
         if (!entry) return;
-        // 老日志里可能已写进 SDK 回吐的图片占位("[Image: original …]" 纯文本),回放时丢掉,别再露出来。
-        const isCaptionEcho = (msg) => msg?.type === "user" && Array.isArray(msg.message?.content)
-          && msg.message.content.some((b) => b.type === "text" && /^\[Image: original .*to original image/.test(b.text || ""))
-          && !msg.message.content.some((b) => b.type === "image" || b.type === "tool_result");
         const log = readLog(entry.id).filter((msg) => !isCaptionEcho(msg));
         // haveHistory: 前端已渲染过该会话就别再回 history,避免重新选中已打开会话时整段历史被再 append 一遍(重复消息)
         // limit(手机端传):按气泡取最近 N 个并剥重内容(见 buildMobileHistory)。
