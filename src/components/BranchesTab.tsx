@@ -41,6 +41,12 @@ function useMinHold(active: boolean, ms = 1400) {
   return held;
 }
 
+// 丢弃全部改动。reset --hard 只还原**已跟踪**文件 —— 未跟踪的(git status 里的 ??)HEAD 里压根没有对应版本,
+// 它一个都不碰,表现就是点了没反应、文件行原样还在。所以必须再跟一条 clean 把未跟踪的删掉:
+// -f 是 clean 的强制开关(不加它 git 直接拒绝执行),-d 连未跟踪的整个新目录一起收。
+// 绝不加 -x:那会连 .gitignore 忽略的 node_modules/.env/dist 一起删光,不是"丢弃改动"该干的事。
+const DISCARD_CMD = "git reset --hard HEAD && git clean -fd";
+
 // 「分支」Tab:以提交拓扑图为唯一主线。点分支标签(节点)弹出该分支状态下可做的操作,所有操作都在图里。
 //   - 本地分支节点:切换/合并/rebase/push/pull/覆盖/推送跟踪/设上游/新建/改名/删除/对比/(当前分支还有 commit/丢弃/查看改动)
 //   - 远程分支节点:检出/对比/删除远程
@@ -62,7 +68,7 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
   const [compareFrom, setCompareFrom] = useState<string | null>(null); // 已选对比左端,等点第二个节点选右端
   const [compareView, setCompareView] = useState<{ from: string; to: string } | null>(null);
   const [wtFile, setWtFile] = useState<string | null>(null); // 工作区单文件 diff 弹窗:正在查看的文件
-  const lastChanged = useRef<ReturnType<typeof parseStatus>>([]); // 暂存区折叠退场时还得渲染的最后一份文件列表
+  const lastChanged = useRef<ReturnType<typeof parseStatus>>([]); // 工作区折叠退场时还得渲染的最后一份文件列表
   const [pushing, setPushing] = useState(false); // 映射图上的 push 进行中:禁二次点击 + 菊花
   // 竖线①要对准当前分支 chip 的上边缘正中,而 chip 的中心不在容器中线上(宽度随名字变)。
   // 由竖脊量好偏移送上来,这里整条线平移过去。
@@ -206,7 +212,7 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
       <div className="bmenu-head">{ref}{isCur && <span className="muted"> {t("当前")}</span>}{up ? <span className="muted"> → {up}{ahead ? ` ↑${ahead}` : ""}{behind ? ` ↓${behind}` : ""}</span> : <span className="muted"> {t("未跟踪")}</span>}</div>
       {isCur && dirty && item(t("查看改动（{{count}}）", { count: changed.length }), () => run("git diff"))}
       {isCur && dirty && item("commit", () => { onCommit(); closeMenu(); })}
-      {isCur && dirty && dItem("discard", t("丢弃改动"), "git reset --hard HEAD")}
+      {isCur && dirty && dItem("discard", t("丢弃改动（含未跟踪文件）"), DISCARD_CMD)}
       {!isCur && item(t("切换到它"), () => run(`git switch ${q(ref)}`))}
       {!isCur && dItem(`merge:${ref}`, t("合并进 {{current}}", { current }), `git merge ${q(ref)}`)}
       {!isCur && dItem(`rebase:${ref}`, t("rebase 当前到它"), `git rebase ${q(ref)}`)}
@@ -240,13 +246,14 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
         </section>
       ) : (
         <>
-          {/* ① 暂存区:工作区改动 */}
+          {/* ① 工作区改动。别叫「暂存区」:git 的暂存区是 index(add 过的那些),这里列的是 git status --short
+              的全部工作区改动,含没 add 过的未跟踪文件 —— 两个词指两样东西,叫错会让人以为这些已经 add 了 */}
           <section className="sync-zone">
             <div className="sync-zone-h">
-              <span className="sec-label">{t("暂存区")}</span>
+              <span className="sec-label">{t("工作区")}</span>
               <span style={{ flex: 1 }} />
               {dirty && <span className="branches-changed-ops">
-                <button className="dangr" title={t("git reset --hard HEAD（丢弃全部改动,不可逆）")} onClick={() => danger(t("丢弃全部改动"), "git reset --hard HEAD")}>{t("丢弃改动")}</button>
+                <button className="dangr" title={`${DISCARD_CMD}${t("（丢弃全部改动,含未跟踪新文件,不可逆）")}`} onClick={() => danger(t("丢弃全部改动（含未跟踪文件）"), DISCARD_CMD)}>{t("丢弃改动")}</button>
               </span>}
             </div>
             {/* commit 完成 → 文件行清空 → 下方整块内容瞬间上移,是这一页最刺眼的跳变。
@@ -260,7 +267,7 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
             {!dirty && <div className="muted">{t("工作区干净")}</div>}
           </section>
 
-          {/* 竖线①(暂存区→本地分支):只有待提交改动时才画,线垂直对准左侧「本地分支」列中心
+          {/* 竖线①(工作区→本地分支):只有待提交改动时才画,线垂直对准左侧「本地分支」列中心
               —— 指明这些改动是 commit 到当前本地分支的。线上挂 commit 按钮。
               流光(flow-down)只在真的 commit 进行时点亮:平时一直流会让人以为有活在跑。 */}
           {/* commitFlow 也算"展开":commit 一成功 git 就刷新、dirty 立刻变 false,只看 dirty 的话
@@ -275,7 +282,7 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
                 <span className="sync-wire" />
                 {/* 提交进行中:按钮撤掉换成等高的线段 —— 它这时既点不动又正好挡住流光,留着只剩噪音 */}
                 {commitFlow ? <span className="sync-wire wire-gap" /> : <div className="sync-hub">
-                  {/* 只写 commit:改动条数上面暂存区那排文件已经逐条列着,按钮再报一遍只是把自己撑宽 */}
+                  {/* 只写 commit:改动条数上面工作区那排文件已经逐条列着,按钮再报一遍只是把自己撑宽 */}
                   <button className="sync-act commit" title={t("提交改动（{{count}} 处）", { count: exiting.length })} onClick={onCommit}>
                     <span>commit</span>
                   </button>
@@ -571,7 +578,7 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
       {/* 仓库 tab:扇出的落点 + 提交拓扑的切换器。副标题是这个仓库里对应聚焦分支的那条远程分支;
           还没有就是虚线的「新建」—— 占住位说明"这里本该有条分支",点一下(经 push 按钮)就建出来。
           外面这层撑满宽度,标题绝对定位钉在左边:tab 排是定宽居中的,远端一多就比抽屉宽、两头溢出,
-          标题跟着排走就会被裁掉。钉在容器左边才和「暂存区」「本地分支」对齐,也永远看得见。 */}
+          标题跟着排走就会被裁掉。钉在容器左边才和「工作区」「本地分支」对齐,也永远看得见。 */}
       <div className="brz-remote">
         <span className="sec-label brz-remote-h">{t("远程分支")}</span>
         {/* 全局 fetch 钉在抽屉最右、和标题同一行:它作用于所有远端,不属于居中那排 tab 里的任何一个。

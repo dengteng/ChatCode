@@ -1778,13 +1778,13 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
 /* "已提交"/"已推送"的绿色药丸已废弃,统一走全局 .toast(见本文件上方 + components/Toast.tsx) */
 /* 本地 ↔ 远程分支映射区:一横行一对(左=本地、右=远程),同行等高,连线永远水平。
    行 = [本地 tag][连线带][远程 tag] 三段 flex;tag 占满半宽,连线带固定宽、svg 垂直居中即与 tag 中线对齐 */
-/* 高度折叠:commit 后暂存区文件行清空,整块内容原本是"啪"一下上移。
+/* 高度折叠:commit 后工作区文件行清空,整块内容原本是"啪"一下上移。
    grid 0fr↔1fr 是唯一不用测高度就能过渡到 auto 的写法;内层必须 overflow:hidden 才收得住。 */
 .brz-collapse { display: grid; grid-template-rows: 0fr; opacity: 0;
   transition: grid-template-rows .26s cubic-bezier(0.23,1,0.32,1), opacity .16s ease; }
 .brz-collapse.open { grid-template-rows: 1fr; opacity: 1; }
 .brz-collapse-in { overflow: hidden; min-height: 0; }
-/* 竖脊:分支带 → 扇出 → 仓库 tab。整列左对齐 —— 三个标题(暂存区/本地分支/远程分支)钉在同一条左线上,
+/* 竖脊:分支带 → 扇出 → 仓库 tab。整列左对齐 —— 三个标题(工作区/本地分支/远程分支)钉在同一条左线上,
    chip 排和 tab 排从这条线往右依次排,主干对准聚焦 chip 的中线(不再是容器中线)。 */
 .brz-spine { position: relative; display: flex; flex-direction: column; align-items: stretch; gap: 0; margin-top: 4px; padding-top: 20px; }
 /* 标题绝对定位钉左边,和「远程分支」一个路子:它不占高度,chip 排的顶就是这 20px 标题带的下沿 ——
@@ -1807,7 +1807,7 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
    负 margin + 下面那 20px padding 是一对:把标题的落脚带塞进扇出图的最后 20px 里(那一段只有中间几条线,
    左边是空的),tab 排的 y 一点没动,标题却腾到了 tab 上方 —— 不然标题和最左那个 tab 会横向撞上。 */
 .brz-fan { position: relative; margin-bottom: -20px; }
-/* 远程分支段:撑满抽屉宽,标题绝对定位钉在左边(和「暂存区」「本地分支」同一条左线),
+/* 远程分支段:撑满抽屉宽,标题绝对定位钉在左边(和「工作区」「本地分支」同一条左线),
    里面的 tab 排照旧定宽居中。标题不占布局宽度是关键 —— 占了就得跟着居中的排走,排一溢出它就被裁。 */
 .brz-remote { position: relative; align-self: stretch; display: flex; flex-direction: column; align-items: flex-start; padding-top: 20px; }
 .brz-remote-h { position: absolute; left: 0; top: 0; }
@@ -1989,7 +1989,7 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
 /* 拓扑图那段没标题了,自己的上内边距 + 上一段的下内边距 + 列表 gap 叠出一大块空白,
    图看着像和上面的地址行断开。收掉自己那份,再吃掉 gap 的大半 */
 .brz-graph-zone { padding-top: 0; margin-top: -32px; }
-/* 暂存区 → 连线:同样是三层空白叠加(段落下内边距 + 列表 gap + 连线自己的上内边距),
+/* 工作区 → 连线:同样是三层空白叠加(段落下内边距 + 列表 gap + 连线自己的上内边距),
    线看着不是从文件列表里长出来的。吃掉 gap。
    margin-bottom 是延长段的配重:线要一路画到分支 chip 的上边缘,中间隔着 gap 10 + 段内边距 8 +
    竖脊 margin 4 + 标题带 20 = 42px,加上自己的 padding-bottom 2 —— 尾段 .sync-stem 高 44,
@@ -2105,7 +2105,7 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
 .branches-ops button:hover, .branches-new button:hover:not(:disabled) { border-color: var(--accent); }
 .branches-ops button.hi, .branches-track button.hi { background: var(--accent); color: #fff; border-color: transparent; font-weight: 600; }
 .branches-ops button.dangr { color: #e5484d; border-color: color-mix(in srgb, #e5484d 40%, var(--border)); }
-/* 分支 tab 顶部暂存区卡片的操作按钮(commit / 丢弃改动) */
+/* 分支 tab 顶部工作区卡片的操作按钮(commit / 丢弃改动) */
 .branches-changed-ops { margin-left: auto; display: inline-flex; gap: 5px; }
 .branches-changed-ops button { padding: 2px 9px; font-size: 11px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer; }
 .branches-changed-ops button.hi { background: var(--accent); color: #fff; border-color: transparent; }
