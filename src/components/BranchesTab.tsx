@@ -7,6 +7,7 @@ import "diff2html/bundles/css/diff2html.min.css";
 import type { Session, GitLogData, GitCommit, GitBranch } from "../types";
 import { useStore } from "../store";
 import { q, pushCmd, pushTargets, lanesFor, unpushedFor, COMMIT_HOLD_MS, type RepoLane } from "../lib/gitcmd";
+import { btnPress } from "../lib/utils";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { useTranslation } from "react-i18next";
 import i18n from "../i18n";
@@ -253,7 +254,7 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
               <span className="sec-label">{t("工作区")}</span>
               <span style={{ flex: 1 }} />
               {dirty && <span className="branches-changed-ops">
-                <button className="dangr" title={`${DISCARD_CMD}${t("（丢弃全部改动,含未跟踪新文件,不可逆）")}`} onClick={() => danger(t("丢弃全部改动（含未跟踪文件）"), DISCARD_CMD)}>{t("丢弃改动")}</button>
+                <button className="dangr" title={`${DISCARD_CMD}${t("（丢弃全部改动,含未跟踪新文件,不可逆）")}`} {...btnPress(() => danger(t("丢弃全部改动（含未跟踪文件）"), DISCARD_CMD))}>{t("丢弃改动")}</button>
               </span>}
             </div>
             {/* commit 完成 → 文件行清空 → 下方整块内容瞬间上移,是这一页最刺眼的跳变。
@@ -261,7 +262,7 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
             <div className={`brz-collapse ${dirty ? "open" : ""}`}>
               <div className="brz-collapse-in">
                 {exiting.map((f) => <div key={f.path} className="branches-file"><b className={`st st-${f.status[0]}`}>{f.status}</b><span title={f.path}>{f.path}</span>
-                  <button className="ghost" title={t("查看改动")} onClick={() => viewWorktree(f.path)}><FileDiff size={13} /></button></div>)}
+                  <button className="ghost" title={t("查看改动")} {...btnPress(() => viewWorktree(f.path))}><FileDiff size={13} /></button></div>)}
               </div>
             </div>
             {!dirty && <div className="muted">{t("工作区干净")}</div>}
@@ -283,7 +284,7 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
                 {/* 提交进行中:按钮撤掉换成等高的线段 —— 它这时既点不动又正好挡住流光,留着只剩噪音 */}
                 {commitFlow ? <span className="sync-wire wire-gap" /> : <div className="sync-hub">
                   {/* 只写 commit:改动条数上面工作区那排文件已经逐条列着,按钮再报一遍只是把自己撑宽 */}
-                  <button className="sync-act commit" title={t("提交改动（{{count}} 处）", { count: exiting.length })} onClick={onCommit}>
+                  <button className="sync-act commit" title={t("提交改动（{{count}} 处）", { count: exiting.length })} {...btnPress(onCommit)}>
                     <span>commit</span>
                   </button>
                 </div>}
@@ -309,7 +310,7 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
               // 地址行由外面给、在脊里渲染:它讲的是"上面选中的那个远端在哪",贴着 tab 才读得出这层关系。
               // 传节点而不是 4 个数据 prop —— 拼这行要 repoUrl/repoWeb/multiRemote/urlRemote,全塞进 BranchSpine 是给它塞它不管的事。
               urlLine={repoUrl ? <div className="brz-url-row">
-                <button className="branches-subline" title={repoWeb ? t("在浏览器打开远程仓库") : repoUrl} disabled={!repoWeb} onClick={() => repoWeb && openUrl(repoWeb)}>
+                <button className="branches-subline" title={repoWeb ? t("在浏览器打开远程仓库") : repoUrl} disabled={!repoWeb} {...btnPress(() => { if (repoWeb) openUrl(repoWeb); })}>
                   {multiRemote && <b className="branches-subline-remote">{urlRemote}</b>}{repoUrl}</button>
               </div> : null} />
           </section>
@@ -517,7 +518,7 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
         ))}
         {/* 建分支的入口从标题旁的小 + 挪到这里:和 chip 排在一起,读作"这一排的下一个",而不是标题的附属。
             本地这排是横的(+ 新建 并排):chip 只有 26px 高,竖排两行的框会比旁边高出一截,读作另一种东西 */}
-        <button className="brz-new inline" title={t("新建本地分支")} onClick={() => onNew("local")}>
+        <button className="brz-new inline" title={t("新建本地分支")} {...btnPress(() => onNew("local"))}>
           <Plus size={12} /><span>{t("新建")}</span>
         </button>
       </div>
@@ -559,7 +560,7 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
               title={pushLanes.length > 1
                 ? t("一次推到全部 {{n}} 个远端:{{list}}", { n: pushLanes.length, list: pushLanes.map((l) => l.remote).join("、") })
                 : t("推送到 {{r}}:{{cmd}}", { r: pushLanes[0].ref || pushLanes[0].remote, cmd: pushCmdFor(pushLanes[0]) })}
-              onClick={(e) => { e.stopPropagation(); setBeamTo(pushLanes.map((l) => l.remote)); onPush(pushLanes.map(pushCmdFor).join(" && ")); }}>
+              {...btnPress(() => { setBeamTo(pushLanes.map((l) => l.remote)); onPush(pushLanes.map(pushCmdFor).join(" && ")); })}>
               <span>push</span>
             </button>
           )}
@@ -568,7 +569,7 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
           {showPush && b && lanes.length > 1 && lanes.map((l, i) => canPush(l) && (
             <button key={l.remote} className="brz-push-one" style={{ left: tabX(i), top: FORK_Y + DROP_H / 2 }}
               title={t("只推到 {{r}}:{{cmd}}", { r: l.ref || l.remote, cmd: pushCmdFor(l) })}
-              onClick={(e) => { e.stopPropagation(); setBeamTo([l.remote]); onPush(pushCmdFor(l)); }}>
+              {...btnPress(() => { setBeamTo([l.remote]); onPush(pushCmdFor(l)); })}>
               {/* 箭头朝下:这张图是本地在上、远端在下,push 是往下走的 */}
               <ArrowDown size={11} />
             </button>
@@ -583,7 +584,7 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
         <span className="sec-label brz-remote-h">{t("远程分支")}</span>
         {/* 全局 fetch 钉在抽屉最右、和标题同一行:它作用于所有远端,不属于居中那排 tab 里的任何一个。
             「新建远端」不在这里 —— 见本地分支右键菜单(那里一个远端都没有时也还在)。 */}
-        <button className="ghost brz-remote-op" title={t("拉取全部远端信息（git fetch --all --prune）")} onClick={() => onRun("git fetch --all --prune")}><RotateCw size={11} /></button>
+        <button className="ghost brz-remote-op" title={t("拉取全部远端信息（git fetch --all --prune）")} {...btnPress(() => onRun("git fetch --all --prune"))}><RotateCw size={11} /></button>
         {!lanes.length ? <div className="muted brz-empty brz-remote-empty">{t("暂无远程仓库")}</div> : (
         <div className="brz-tabs" style={{ width: rowW, gap: TAB_GAP, "--side-w": `${SIDE_W}px` } as React.CSSProperties}>
           <div className="brz-tabrow" style={{ gap: TAB_GAP }}>
@@ -608,7 +609,7 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
           </div>
           {/* 右侧槽:建远程分支的入口。原来是 tab 下面一行灰字,和 tab 不在一个层级上,读起来像脚注;
               摆成同一排的虚线框才读得出"这里可以再多一个远端分支"。 */}
-          <button className="brz-new brz-side" title={t("新建远程分支")} onClick={() => onNew("remote")}>
+          <button className="brz-new brz-side" title={t("新建远程分支")} {...btnPress(() => onNew("remote"))}>
             <Plus size={12} /><span>{t("新建")}</span>
           </button>
         </div>
@@ -618,7 +619,7 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
       {/* 远程行缺本地端的老入口:同名本地分支已存在(只是没设上游)→ 设上游;否则检出并跟踪。
           现在挂在聚焦分支上:它有远程同名分支却没设上游时,提示一下就能补。 */}
       {b && !b.upstream && laneRefs.length > 0 && (
-        <button className="ghost brz-spine-tip" onClick={() => onRun(`git branch --set-upstream-to=${q(laneRefs[0])} ${q(focus)}`)}>
+        <button className="ghost brz-spine-tip" {...btnPress(() => onRun(`git branch --set-upstream-to=${q(laneRefs[0])} ${q(focus)}`))}>
           {t("{{name}} 还没有上游,设为 {{ref}}", { name: focus, ref: laneRefs[0] })}
         </button>
       )}
@@ -722,9 +723,9 @@ function DiffView({ current, other, diff, fileDiff, onBack, onRefresh, onFile }:
   return (
     <div className="branches-diff">
       <div className="branches-sec-h graph-h">
-        <button className="ghost" onClick={onBack} title={t("返回拓扑图")}><ArrowLeft size={13} /></button>
+        <button className="ghost" {...btnPress(onBack)} title={t("返回拓扑图")}><ArrowLeft size={13} /></button>
         {t("对比")} <b>{current}</b> ⇄ <b>{other}</b>
-        <button className="ghost" title={t("刷新")} onClick={onRefresh}><RotateCw size={13} /></button>
+        <button className="ghost" title={t("刷新")} {...btnPress(onRefresh)}><RotateCw size={13} /></button>
       </div>
       {stale ? <div className="muted branches-empty">{t("正在比较…")}</div>
         : diff.error ? <div className="branches-diff-err">{diff.error}</div>

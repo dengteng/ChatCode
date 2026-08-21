@@ -11,6 +11,7 @@ import { useStore, fetchBlob, type RememberChoice } from "../store";
 import { applyEdgeGlow } from "../lib/edgeGlow";
 import { pushCmd } from "../lib/gitcmd";
 import { cleanMemory, stripLineNums } from "../lib/memtext";
+import { btnPress } from "../lib/utils";
 import { defaultRuleContent, destinationLabel, suggestionLabel } from "../permissions";
 import { Composer } from "./Composer";
 import { CommitDialog } from "./CommitDialog";
@@ -1357,13 +1358,7 @@ const TODO_TOOLS = ["TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGe
 // 右栏活流:把本回合的正文 + 每个工具动作的完整内容(命令 + 输出、改了哪些代码的增删行)按时间顺序
 // 抹平成带样式的多行日志。最新活动从底部冒出、把旧行往上挤;尾部封顶防长会话 DOM 爆炸,max-height 再裁一层。
 type FeedLine = { t: string; c?: string }; // c: head/add/del/out/cmd → 上色
-// 顶栏分支行那排按钮:WKWebView 里窗口未聚焦时第一次 click 根本不派发(要点两次才有反应),
-// mousedown 不受影响 —— 全走 mousedown。click 仍留一手 stopPropagation,免得冒泡到 .branch-line
-// 把分支管理抽屉一起打开(mousedown 上的 stopPropagation 拦不住之后那个 click)。
-const btnPress = (fn: () => void) => ({
-  onMouseDown: (e: React.MouseEvent) => { if (e.button === 0) { e.preventDefault(); e.stopPropagation(); fn(); } },
-  onClick: (e: React.MouseEvent) => e.stopPropagation(),
-});
+// 顶栏分支行那排按钮走 btnPress(mousedown 语义,见 lib/utils):click 在 WKWebView 里会被吞掉第一次。
 const shortPath = (p?: string) => (p || "").replace(/^\/Users\/[^/]+/, "~");
 function workFeed(items: TimelineItem[]): FeedLine[] {
   const out: FeedLine[] = [];
