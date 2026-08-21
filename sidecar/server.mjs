@@ -2,7 +2,7 @@
 // 前端(浏览器/Tauri webview)连 ws://127.0.0.1:8975,每个 session 独立跑一个 SDK query,天然支持并行任务。
 import { WebSocketServer } from "ws";
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { PROVIDERS, providerOf, modelArg, envForModel, extraModels, resolvedProvider, endpointsOf, variantsOf, setProxyPort, isCnMachine } from "./providers.mjs";
+import { PROVIDERS, providerOf, modelArg, envForModel, extraModels, resolvedProvider, endpointsOf, variantsOf, setProxyPort, isCnMachine, sanitizeCatalogModels } from "./providers.mjs";
 import { accumulate, emptySpend, priceTable, ledgerAdd, ledgerStats } from "./spend.mjs";
 import { startProxy } from "./openai-proxy.mjs";
 import fs from "node:fs";
@@ -928,6 +928,51 @@ function saveSettings(s) {
   fs.writeFileSync(SETTINGS, JSON.stringify(s, null, 2), { mode: 0o600 });
   try { fs.chmodSync(SETTINGS, 0o600); } catch {}
 }
+
+// ---------- 远程模型清单 ----------
+// 目的只有一个:装了 dmg 的用户不重装也能用上新模型(各家上新比发版快)。
+// 清单是仓库里的一份静态 JSON,只带模型元数据 —— 拉下来 sanitize 后才用,**改不了 baseUrl**
+// (为什么这条是死线,见 providers.mjs 的「安全边界」)。
+//
+// 三条自我约束:
+//   · 不在启动路径上:延后 4 秒、异步、失败静默。内置表是地板,拉不到只是没有新模型,不是故障。
+//   · 一天最多一次:清单一周才动一回,每次启动都拉是纯浪费。
+//   · 不上报任何东西:只是 GET 一个公开文件,没有 body、没有 query、不带 key。
+// 两个源同时发、谁先成谁算(Promise.any):raw.githubusercontent 在国内经常被污染,jsDelivr 有时又慢,
+// 与其猜哪个通(那正是 baseUrlCN 那套要解决的问题),不如都发出去 —— 反正是同一个只读文件。
+const CATALOG_URLS = [
+  "https://raw.githubusercontent.com/dengteng/ChatCode/main/catalog/models.json",
+  "https://cdn.jsdelivr.net/gh/dengteng/ChatCode@main/catalog/models.json",
+];
+const CATALOG_TTL = 86400_000; // 一天
+
+async function refreshCatalog() {
+  const s = loadSettings();
+  if (Date.now() - (s.modelCatalogAt || 0) < CATALOG_TTL) return;
+  const get = async (url) => {
+    const ac = new AbortController();
+    const t = setTimeout(() => ac.abort(), 8000);
+    try {
+      const r = await fetch(url, { signal: ac.signal, headers: { accept: "application/json" } });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return await r.json();
+    } finally { clearTimeout(t); }
+  };
+  let j;
+  try { j = await Promise.any(CATALOG_URLS.map(get)); } catch { return; } // 两个源都不通:静默,下次再说
+  // 形状不对就整份丢掉,别把半份垃圾写进 settings —— 宁可没有清单,也不要一份烂的赖在那儿。
+  if (!j || typeof j.providers !== "object" || Array.isArray(j.providers)) return;
+  const catalog = {};
+  for (const [id, list] of Object.entries(j.providers)) {
+    if (!PROVIDERS[id] || id === "claude") continue; // 只认识的家;claude 的列表来自 SDK,不受清单管
+    const clean = sanitizeCatalogModels(id, list);
+    if (clean.length) catalog[id] = clean;
+  }
+  // 时间戳照记:清单是空的(比如全被 sanitize 掉了)也算这次拉过了,别每次启动重打。
+  saveSettings({ ...loadSettings(), modelCatalog: catalog, modelCatalogAt: Date.now() });
+}
+// 新清单不主动推给前端:reportModels 每次都现读 settings,用户下次打开模型菜单就是新的。
+setTimeout(() => { refreshCatalog().catch(() => {}); }, 4000);
 
 // ---------- 多语言:中文原文当键(与前端同一策略) ----------
 // zh 是默认语言,不建词典,tr() 直接回中文原文,零回归;en 命中 EN_DICT 才替换。

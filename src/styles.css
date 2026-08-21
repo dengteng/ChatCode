@@ -481,7 +481,15 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 .ask-opt.hi .ask-opt-n { border-color: var(--accent); color: var(--text); }
 .ask-opt-body { flex: 1; min-width: 0; font-size: 13px; }
 .ask-check { color: var(--green); font-weight: 700; }
-.ask-foot { display: flex; align-items: center; gap: 12px; margin-top: 12px; flex-wrap: wrap; }
+/* 提交/跳过必须一直看得见。卡片限高后是**整张卡**在滚(见 .ask-dock .ask-card),脚栏作为最后一个
+   子元素会被推到滚动内容的末尾 —— 选项一多就永远在折叠线以下。而回车是刻意禁用的(防输入法确认
+   候选词误提交,见 AskQuestionCard 的 onKey),按钮看不见就等于把用户彻底卡死,连键盘都没得兜底。
+   bottom 给 -12px 而不是 0:要连卡片自己那 12px 下内边距一起压住,否则那道缝里能看见选项从脚栏底下
+   滑过去。左右负 margin 同理,让它横贯到卡片边沿。
+   background: inherit —— 卡片有三套底色(5% accent / 停靠版 --panel / 自定义主题 --custom-dialog),
+   继承父元素算好的那个,就不用跟着复制三条规则(漏一条就是文字糊在选项上)。 */
+.ask-foot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  position: sticky; bottom: -12px; margin: 12px -14px -12px; padding: 8px 14px 12px; background: inherit; }
 .ask-submit { padding: 5px 16px; background: var(--accent); color: #fff; border: none; border-radius: 7px; font-weight: 600; cursor: pointer; }
 .ask-submit:disabled { background: color-mix(in srgb, var(--accent) 30%, var(--border)); color: var(--muted); cursor: default; }
 /* 跳过是次要动作:无底无框、只在 hover 时显形,不跟"提交"抢视线(一屏一个主 CTA) */

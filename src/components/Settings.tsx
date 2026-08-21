@@ -347,6 +347,9 @@ function ProviderEditPage({ id, mode, onDone }: { id: string; mode: "key" | "con
               分时价的家再挂 price.offPeak(peakHours 按**北京时间**判,见 spend.mjs 的 effPrice)。 */}
           <div className="provider-config-hint muted">{t("每项")}:{`{ "value": "${id}/模型id", "model": "模型id", "displayName": "显示名", "contextWindow": 200000, "vision": false, "price": { "in": 2, "out": 3, "cacheRead": 0.2, "currency": "¥" } }`}</div>
           <div className="provider-config-hint muted">{t("分时价再加")}:{`"offPeak": { "in": 1, "out": 1.5, "cacheRead": 0.1, "peakHours": [[9,12],[14,18]] }`} — {t("peakHours 按北京时间")}</div>
+          {/* 合并语义得写出来:这张表是**逐条覆盖**内置和自动更新的清单,不是整表替换。
+              删掉一行只是"不再覆盖它",模型还会回来 —— 想彻底不要那条,得显式写 hidden。 */}
+          <div className="provider-config-hint muted">{t("这张表按模型 id 逐条覆盖内置列表,没写到的模型照常自动更新;不想要某个模型,写")} {`{ "model": "模型id", "hidden": true }`}</div>
           {err && <div className="provider-config-err">{err}</div>}
           <div className="commit-modal-actions" style={{ marginTop: 12 }}>
             <button onClick={resetConfig}>{t("恢复默认")}</button>

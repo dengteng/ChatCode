@@ -229,6 +229,7 @@
   "每项": "Each entry",
   "分时价再加": "For time-of-day pricing, add",
   "peakHours 按北京时间": "peakHours are in Beijing time (UTC+8)",
+  "这张表按模型 id 逐条覆盖内置列表,没写到的模型照常自动更新;不想要某个模型,写": "This table overrides the built-in list per model id; models you don't list keep updating automatically. To drop a model, write",
   "恢复默认": "Restore defaults",
   "保存配置": "Save config",
   "未安装 gh CLI": "gh CLI not installed",

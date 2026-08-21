@@ -155,6 +155,59 @@ export const PROVIDERS = {
   },
 };
 
+// ---- 远程模型清单 ----
+// 为什么要:装了 dmg 的用户没法跟着改代码。各家上新模型的节奏比发版快得多,不给条路的话,
+// 用户要么等下一个包,要么自己去设置里手抄一份 JSON(还得自己翻价格页查单价和收不收图)。
+// 清单就是仓库里的一份 models.json(由 scripts/gen-catalog.mjs 从下面这张表生成,不另立真相),
+// sidecar 起来后异步拉一次落进 settings.modelCatalog。内置表永远是地板:拉不到就当没这回事。
+//
+// **安全边界:清单只带模型元数据,绝不带 baseUrl。**
+// baseUrl 决定 API Key 发到哪台机器。让远端 JSON 能改它,就等于谁劫持了那个文件(DNS 污染、
+// 仓库被黑、CDN 缓存投毒)谁就能把所有用户的 key 引到自己服务器上收走。
+// 所以这里按白名单逐字段挑,连 value 都强制重拼成 "<provider>/<model>" —— 清单改不了模型归谁管,
+// 也就改不了用哪个端点、注哪把 key。sanitize 放在**读取时**做,不是写入时:
+// 这样连被改过的 settings.json 也注不进 baseUrl。
+const CATALOG_FIELDS = ["model", "displayName", "description", "contextWindow", "vision", "price"];
+export function sanitizeCatalogModels(id, list) {
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  for (const m of list) {
+    const model = typeof m?.model === "string" ? m.model.trim() : "";
+    if (!model || !PROVIDERS[id]) continue;
+    const clean = { value: `${id}/${model}`, provider: id };
+    for (const k of CATALOG_FIELDS) if (m?.[k] !== undefined) clean[k] = m[k];
+    out.push(clean);
+  }
+  return out;
+}
+
+// 按 model id 把两张表叠起来:同名的合并(后来的字段压过先来的),没有的追加在后面,顺序按先来后到。
+// 合并而不是整表替换 —— 上层只写变化的字段时,底下那份的 description 之类不该被抹成 undefined。
+export function mergeModels(base, over) {
+  if (!over?.length) return base || [];
+  const by = new Map(over.map((m) => [m.model, m]));
+  const had = new Set((base || []).map((m) => m.model));
+  return [
+    ...(base || []).map((m) => (by.has(m.model) ? { ...m, ...by.get(m.model) } : m)),
+    ...over.filter((m) => !had.has(m.model)),
+  ];
+}
+
+// 三层叠完后收尾:
+//   · hidden 的模型摘掉。为什么需要它:改成按模型合并之后,"从手填表里删掉一条"不再等于
+//     "不要这个模型"了(下次清单会把它加回来)。得有个显式说不的写法 ——
+//     在模型表里写 { "model": "xxx", "hidden": true }。
+//   · 补齐 value/provider。手填表里新增一条时很容易只写 model 和 displayName,
+//     而 value 是模型菜单的选中键,缺了那条就选不动(providerOf 也认它来判归属)。
+const finalize = (id, list) => list
+  .filter((m) => !m.hidden)
+  .map((m) => (m.value ? m : { ...m, value: `${id}/${m.model}`, provider: m.provider || id }));
+
+// 内置 → 远程清单 → 用户手填,一层压一层(见 resolvedProvider 的优先级说明)。
+export function mergeCatalog(id, base, remote) {
+  return mergeModels(base, sanitizeCatalogModels(id, remote));
+}
+
 // 本地转译代理端口,server.mjs 启动时设。openai 传输的 provider baseUrl 由此拼出。
 let PROXY_PORT = 0;
 export function setProxyPort(p) { PROXY_PORT = p; }
@@ -206,7 +259,13 @@ export function endpointsOf(id, settings) {
 // 选哪个候选:探测命中的那个(settings.providerEndpoint,见 server.mjs 的 probeEndpoint);
 // 还没探到就用候选表的头一个 —— 而候选表已按「优先国内节点」排过序,等于沿用开关的意思。
 // 探测结果只在还是候选之一时才认 —— 出厂端点改版后旧记录自动作废,不会把用户钉在死地址上。
-// 用户手填的 baseUrl / smallFast / models 压过一切(models 是整表替换,便于增删改)。
+// 用户手填的 baseUrl / smallFast 压过一切。
+//
+// models 是**逐个模型**叠三层:内置 → 远程清单 → 用户手填,同名的按这个顺序覆盖字段。
+// 早先手填是整表替换(填了就只剩你这张表)。那样有个哑巴坑:动过一次模型表的那家会永久冻结在
+// 填表那一刻 —— 清单拉到了、也存进 settings 了,就是不生效,界面上还什么都不提示,
+// 用户只会觉得"更新坏了"。逐个合并之后,手填的那几条照旧压过远程,没填的那些照常跟着清单更新。
+// 代价是"从表里删掉一条"不再等于"不要这个模型",所以补了 hidden —— 见 dropHidden。
 export function resolvedProvider(id, settings) {
   const def = PROVIDERS[id];
   if (!def) return null;
@@ -218,7 +277,10 @@ export function resolvedProvider(id, settings) {
     ...def, ...v, // 候选自带的 models/price/subscriptionUsage/balanceApi 覆盖 provider 级默认
     baseUrl: cfg.baseUrl || v.baseUrl || def.baseUrl,
     smallFast: cfg.smallFast || v.smallFast || def.smallFast,
-    models: Array.isArray(cfg.models) && cfg.models.length ? cfg.models : (v.models || def.models),
+    models: finalize(id, mergeModels(
+      mergeCatalog(id, v.models || def.models, settings?.modelCatalog?.[id]),
+      Array.isArray(cfg.models) ? cfg.models : [],
+    )),
   };
 }
 

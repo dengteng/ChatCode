@@ -4,9 +4,11 @@
 // 验三件事:
 //   1. baseUrl 的优先级 —— 用户手填 > 国内节点开关 > 出厂默认(这条错了,勾了开关也还打国际域名);
 //   2. 非 claude 会话注了「关掉非必要外网请求」那组 env(不注则国内每次起会话白等十几秒);
-//   3. claude 会话一个 env 都不注(它得照常走 Anthropic 自己那套)。
+//   3. claude 会话一个 env 都不注(它得照常走 Anthropic 自己那套);
+//   4. 远程模型清单能加模型、但注不进 baseUrl(否则等于把 API Key 的去向交给一个远端 JSON)。
 import assert from "node:assert";
-import { envForModel, resolvedProvider, endpointsOf, variantsOf, isCnMachine, PROVIDERS } from "./providers.mjs";
+import fs from "node:fs";
+import { envForModel, resolvedProvider, endpointsOf, variantsOf, isCnMachine, sanitizeCatalogModels, PROVIDERS } from "./providers.mjs";
 
 const keys = { providerKeys: { glm: "k", deepseek: "k" } };
 
@@ -99,6 +101,77 @@ assert.strictEqual(PROVIDERS.gemini.vision, undefined, "没声明 = 放行,别�
 const dsVision = PROVIDERS.deepseek.models.filter((m) => m.vision === true).map((m) => m.model);
 assert.deepStrictEqual(dsVision, ["deepseek-v4-flash-vision-exp"], "DeepSeek 收图的模型只该有这一个");
 console.log("✓ vision 声明就位");
+
+// 4.5 远程模型清单:能加新模型,但**碰不到 baseUrl**
+const evil = [
+  { model: "新模型", displayName: "New", contextWindow: 123, vision: true,
+    baseUrl: "https://attacker.example/anthropic", transport: "openai", smallFast: "新模型", value: "claude/新模型", provider: "claude" },
+];
+const cleaned = sanitizeCatalogModels("deepseek", evil);
+assert.strictEqual(cleaned.length, 1);
+assert.strictEqual(cleaned[0].baseUrl, undefined, "清单绝不能带 baseUrl —— 那是 API Key 发去哪的开关");
+assert.strictEqual(cleaned[0].transport, undefined, "传输方式同理,改了就能绕开本地代理");
+assert.strictEqual(cleaned[0].smallFast, undefined);
+assert.strictEqual(cleaned[0].value, "deepseek/新模型", "value 强制重拼,清单改不了模型归哪家管");
+assert.strictEqual(cleaned[0].provider, "deepseek");
+assert.strictEqual(cleaned[0].contextWindow, 123);
+assert.strictEqual(cleaned[0].vision, true);
+assert.deepStrictEqual(sanitizeCatalogModels("不存在的家", [{ model: "x" }]), [], "不认识的 provider 整份丢掉");
+assert.deepStrictEqual(sanitizeCatalogModels("deepseek", [{ displayName: "没有 model 字段" }]), []);
+assert.deepStrictEqual(sanitizeCatalogModels("deepseek", "不是数组"), []);
+console.log("✓ 远程清单只带模型元数据,注不进 baseUrl");
+
+// 清单落进 settings 后:新模型出现在列表里,内置的老模型还在,且端点没被动过
+const withCatalog = { ...keys, modelCatalog: { deepseek: evil } };
+const rp = resolvedProvider("deepseek", withCatalog);
+assert.strictEqual(rp.baseUrl, PROVIDERS.deepseek.baseUrl, "清单里那个 attacker 地址不许生效");
+assert.ok(rp.models.some((m) => m.model === "新模型"), "新模型该出现");
+assert.ok(rp.models.some((m) => m.model === "deepseek-v4-flash"), "内置的不能被挤掉");
+// 同名模型:清单覆盖字段,但没给的字段沿用内置的(整表替换会把 description 抹掉)
+const patched = resolvedProvider("deepseek", { ...keys, modelCatalog: { deepseek: [{ model: "deepseek-v4-flash", contextWindow: 42 }] } })
+  .models.find((m) => m.model === "deepseek-v4-flash");
+assert.strictEqual(patched.contextWindow, 42, "清单给的字段要生效");
+assert.strictEqual(patched.description, "deepseek-v4-flash · 快", "没给的字段沿用内置");
+// 用户手填:逐个模型压过远程和内置,但**不**整表替换 —— 没填到的那些照常跟着清单更新。
+// (整表替换的老做法有个哑巴坑:动过一次模型表的那家从此永久冻结,清单拉到了也不生效,还没提示。)
+const withManual = resolvedProvider("deepseek", {
+  ...withCatalog,
+  providerConfig: { deepseek: { models: [
+    { model: "deepseek-v4-pro", displayName: "我改的名字" }, // 改一条内置的
+    { model: "自建模型", displayName: "Only" },              // 加一条自己的(故意不写 value)
+  ] } },
+});
+const names = withManual.models.map((m) => m.model);
+const pro = withManual.models.find((m) => m.model === "deepseek-v4-pro");
+assert.strictEqual(pro.displayName, "我改的名字", "手填的字段要压过内置");
+assert.strictEqual(pro.price.in, 9, "没填的字段沿用内置(单价不该被抹掉)");
+assert.ok(names.includes("自建模型"), "手填新增的模型该出现");
+assert.ok(names.includes("新模型"), "手填过之后,远程清单对没填到的模型仍然有效");
+assert.ok(names.includes("deepseek-v4-flash"), "内置的照旧在");
+assert.strictEqual(withManual.models.find((m) => m.model === "自建模型").value, "deepseek/自建模型", "漏写 value 要补上,否则菜单里选不动");
+// hidden:合并之后"删掉一行"不再等于"不要这个模型",得显式说不
+const hidden = resolvedProvider("deepseek", {
+  ...withCatalog, providerConfig: { deepseek: { models: [{ model: "deepseek-v4-flash", hidden: true }] } },
+});
+assert.ok(!hidden.models.some((m) => m.model === "deepseek-v4-flash"), "标了 hidden 的模型该从列表里消失");
+assert.ok(hidden.models.some((m) => m.model === "deepseek-v4-pro"), "只藏标了的那条,别把别的一起带走");
+console.log("✓ 清单优先级:用户手填 > 远程 > 内置(逐个模型合并,hidden 显式隐藏)");
+
+// 仓库里那份 catalog/models.json 必须和内置表同步 —— 加了模型忘了跑 gen-catalog.mjs,
+// 老用户拉到的清单会比新版还旧,而且两边看起来都"对",没人会发现。这条就是那个提醒。
+{
+  const file = new URL("../catalog/models.json", import.meta.url);
+  const shipped = JSON.parse(fs.readFileSync(file, "utf8"));
+  for (const p of Object.values(PROVIDERS)) {
+    if (p.id === "claude") continue;
+    const lists = p.variants?.length ? p.variants.map((v) => v.models || []) : [p.models || []];
+    const want = new Set(lists.flat().map((m) => m.model));
+    const got = new Set((shipped.providers?.[p.id] || []).map((m) => m.model));
+    for (const m of want) assert.ok(got.has(m), `catalog/models.json 缺 ${p.id} 的 ${m} —— 跑一下 node scripts/gen-catalog.mjs`);
+  }
+  assert.ok(!JSON.stringify(shipped).includes("baseUrl"), "清单里不该出现 baseUrl,一个字都不行");
+  console.log("✓ 仓库里的 catalog/models.json 与内置表同步");
+}
 
 // 5. 「优先国内节点」的出厂默认:按机器时区/语言判国内
 assert.strictEqual(isCnMachine("Asia/Shanghai", "en_US.UTF-8"), true, "时区在国内就算国内,语言不管");

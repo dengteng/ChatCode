@@ -1,0 +1,235 @@
+{
+  "version": 1,
+  "providers": {
+    "deepseek": [
+      {
+        "model": "deepseek-v4-flash",
+        "displayName": "DeepSeek V4 Flash",
+        "description": "deepseek-v4-flash · 快",
+        "contextWindow": 1000000,
+        "price": {
+          "in": 3,
+          "out": 9,
+          "cacheRead": 0.1,
+          "currency": "¥",
+          "offPeak": {
+            "in": 1.5,
+            "out": 4.5,
+            "cacheRead": 0.05,
+            "peakHours": [
+              [
+                9,
+                12
+              ],
+              [
+                14,
+                18
+              ]
+            ]
+          }
+        }
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "displayName": "DeepSeek V4 Pro",
+        "description": "deepseek-v4-pro · 最强",
+        "contextWindow": 1000000,
+        "price": {
+          "in": 9,
+          "out": 27,
+          "cacheRead": 0.3,
+          "currency": "¥",
+          "offPeak": {
+            "in": 4.5,
+            "out": 13.5,
+            "cacheRead": 0.15,
+            "peakHours": [
+              [
+                9,
+                12
+              ],
+              [
+                14,
+                18
+              ]
+            ]
+          }
+        }
+      },
+      {
+        "model": "deepseek-v4-flash-vision-exp",
+        "displayName": "DeepSeek V4 Flash Vision",
+        "description": "deepseek-v4-flash-vision-exp · 看图",
+        "contextWindow": 1000000,
+        "vision": true,
+        "price": {
+          "in": 3,
+          "out": 9,
+          "cacheRead": 0.1,
+          "currency": "¥",
+          "offPeak": {
+            "in": 1.5,
+            "out": 4.5,
+            "cacheRead": 0.05,
+            "peakHours": [
+              [
+                9,
+                12
+              ],
+              [
+                14,
+                18
+              ]
+            ]
+          }
+        }
+      }
+    ],
+    "kimi": [
+      {
+        "model": "k3",
+        "displayName": "Kimi K3",
+        "description": "k3 · 最强",
+        "contextWindow": 1000000
+      },
+      {
+        "model": "kimi-for-coding",
+        "displayName": "Kimi K2.7",
+        "description": "kimi-for-coding · 稳",
+        "contextWindow": 256000
+      },
+      {
+        "model": "kimi-for-coding-highspeed",
+        "displayName": "Kimi K2.7 Highspeed",
+        "description": "kimi-for-coding-highspeed · 快",
+        "contextWindow": 256000
+      },
+      {
+        "model": "kimi-k3",
+        "displayName": "Kimi K3",
+        "description": "kimi-k3 · 最强",
+        "contextWindow": 1048576,
+        "price": {
+          "in": 20,
+          "out": 100,
+          "cacheRead": 2,
+          "currency": "¥"
+        }
+      },
+      {
+        "model": "kimi-k2.7-code",
+        "displayName": "Kimi K2.7 Code",
+        "description": "kimi-k2.7-code · 编码",
+        "contextWindow": 262144,
+        "price": {
+          "in": 6.5,
+          "out": 27,
+          "cacheRead": 1.3,
+          "currency": "¥"
+        }
+      },
+      {
+        "model": "kimi-k2.7-code-highspeed",
+        "displayName": "Kimi K2.7 Code 高速",
+        "description": "kimi-k2.7-code-highspeed · 快",
+        "contextWindow": 262144,
+        "price": {
+          "in": 13,
+          "out": 54,
+          "cacheRead": 2.6,
+          "currency": "¥"
+        }
+      },
+      {
+        "model": "kimi-k2.6",
+        "displayName": "Kimi K2.6",
+        "description": "kimi-k2.6 · 通用",
+        "contextWindow": 262144,
+        "price": {
+          "in": 6.5,
+          "out": 27,
+          "cacheRead": 1.1,
+          "currency": "¥"
+        }
+      }
+    ],
+    "glm": [
+      {
+        "model": "glm-4.6",
+        "displayName": "GLM-4.6",
+        "description": "glm-4.6 · 最强",
+        "contextWindow": 200000
+      },
+      {
+        "model": "glm-4.5-air",
+        "displayName": "GLM-4.5 Air",
+        "description": "glm-4.5-air · 快",
+        "contextWindow": 128000
+      }
+    ],
+    "qwen": [
+      {
+        "model": "qwen3-coder-plus",
+        "displayName": "Qwen3 Coder Plus",
+        "description": "qwen3-coder-plus · 最强",
+        "contextWindow": 1000000
+      },
+      {
+        "model": "qwen3-coder-flash",
+        "displayName": "Qwen3 Coder Flash",
+        "description": "qwen3-coder-flash · 快",
+        "contextWindow": 1000000
+      }
+    ],
+    "minimax": [
+      {
+        "model": "MiniMax-M2",
+        "displayName": "MiniMax M2",
+        "description": "MiniMax-M2 · 编码",
+        "contextWindow": 200000
+      }
+    ],
+    "grok": [
+      {
+        "model": "grok-code-fast-1",
+        "displayName": "Grok Code Fast",
+        "description": "grok-code-fast-1 · 编码",
+        "contextWindow": 256000
+      },
+      {
+        "model": "grok-4",
+        "displayName": "Grok 4",
+        "description": "grok-4 · 最强",
+        "contextWindow": 256000
+      }
+    ],
+    "openai": [
+      {
+        "model": "gpt-5-codex",
+        "displayName": "GPT-5 Codex",
+        "description": "gpt-5-codex · 编码",
+        "contextWindow": 400000
+      },
+      {
+        "model": "gpt-5",
+        "displayName": "GPT-5",
+        "description": "gpt-5 · 通用",
+        "contextWindow": 400000
+      }
+    ],
+    "gemini": [
+      {
+        "model": "gemini-2.5-pro",
+        "displayName": "Gemini 2.5 Pro",
+        "description": "gemini-2.5-pro · 最强",
+        "contextWindow": 1000000
+      },
+      {
+        "model": "gemini-2.5-flash",
+        "displayName": "Gemini 2.5 Flash",
+        "description": "gemini-2.5-flash · 快",
+        "contextWindow": 1000000
+      }
+    ]
+  }
+}

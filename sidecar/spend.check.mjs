@@ -16,7 +16,11 @@ const settings = {
   },
 };
 const table = priceTable(settings);
-assert.strictEqual(table.size, 2);
+// 手填表是**逐条覆盖**不是整表替换,所以内置那几个 DeepSeek 模型也还在表里(见 resolvedProvider)。
+// 这里只关心手填的两条查得到、单价是手填的那份。
+assert.strictEqual(table.get("pro").in, 2);
+assert.strictEqual(table.get("flash").in, 0.2);
+assert.ok(table.has("deepseek-v4-flash"), "没被手填覆盖的内置模型照旧带着单价");
 
 // 1. 按模型分别计价:主模型 100 万输入 + 100 万输出,小模型 100 万输入
 const s = accumulate(emptySpend(), {
