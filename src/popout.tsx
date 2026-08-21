@@ -70,10 +70,30 @@ export function Popout({ kind, params }: { kind: "editor" | "image"; params: URL
   // 主题跟主窗口走(同源共享 localStorage);独立窗口有原生标题栏,不留 overlay 的顶部内边距
   const theme = localStorage.getItem("ChatCode-theme") === "light" ? "light" : "dark";
   // 关窗前把焦点还给主窗口:否则 macOS 下主窗口失焦,回去点图片标签的第一下只会激活窗口、被吞掉(看着像没反应)。
+  // close() 只是发起关闭,真正的销毁绕道下面的 onCloseRequested(先 hide 再关)。
   const close = () => {
     WebviewWindow.getByLabel("main").then((w) => w?.setFocus()).catch(() => {});
     getCurrentWindow().close();
   };
+  // 关窗改成两步:先 hide,隔一小会儿再真销毁。
+  // 起因是一次 SIGSEGV:关掉图片浮窗后几秒,主进程崩在 WebKit::DisplayLink::notifyObserversDisplayDidRefresh()
+  // (空指针 +0x10,栈里一帧我们的代码都没有)。那个刷新观察者挂在页面上,窗口一销毁页面就没了,而 CVDisplayLink
+  // 线程还在遍历观察者链表 —— 拆链表和读链表撞同一帧。先 hide 会让 WebPageProxy 把可见状态打成 0 并摘掉观察者,
+  // 等它摘干净了再 close,两件事就不在同一帧了。
+  // 这是绕开系统框架里的竞态,不是根治(根在 WebKit,我们打不了补丁)。走 onCloseRequested 而不是只改 close():
+  // 标题栏那个红点不经过我们的 close(),不拦在这里就等于只修了 Esc 那一半。
+  useEffect(() => {
+    const w = getCurrentWindow();
+    let leaving = false;
+    const un = w.onCloseRequested((e) => {
+      if (leaving) return;          // 第二次是下面 setTimeout 里自己调的 close(),放行
+      e.preventDefault();
+      leaving = true;
+      w.hide().catch(() => {});
+      setTimeout(() => w.close().catch(() => {}), 120);
+    });
+    return () => { un.then((f) => f()).catch(() => {}); };
+  }, []);
   useEffect(() => {
     // Esc 关窗只给图片预览用。编辑器窗口不绑:编辑代码时很容易误点 Esc 把整个窗口关掉、丢失现场。
     if (kind !== "image") return;
