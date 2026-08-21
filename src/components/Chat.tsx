@@ -958,10 +958,17 @@ function TurnChoice({ answer }: { answer?: string }) {
   );
 }
 
+// 鉴权失败是少数「用户点一下就能自救」的报错,但正文只有一句英文(Failed to authenticate: OAuth session
+// expired and could not be refreshed),用户得自己想到去设置页登录 —— 就地挂个按钮,走和设置页同一条
+// authAction(拉起系统终端跑真实 OAuth,webview 里做不了交互式授权)。
+// 只认 Claude CLI 自己的这几句:第三方 provider 的 key 失效是另一回事(该去设置改 key),别把人往 OAuth 上引。
+const AUTH_FAIL = /failed to authenticate|oauth (session|token) (has )?expired|please run\s*\/login|not logged in/i;
+
 // 一个 agent 回合折叠成一张卡片:标题随状态变化,点开进右侧看详情(流式)。
 // 执行中无待办 → "Agent 正在工作…";执行中有授权请求 → "Agent 正在工作,请求执行 xxx";已结束 → "Claude 的回复"。
 function AgentTurnCard({ items, running, showFull, cwd, liveInput, settle, bgWait, onClick, onPermission, agentLabel }: { items: TimelineItem[]; running: boolean; showFull?: boolean; cwd: string; liveInput?: number; settle?: (TimelineItem & { kind: "result" }) | null; bgWait?: BgTask[]; onClick: () => void; onPermission: OnPermission; agentLabel?: string }) {
   const { t } = useTranslation();
+  const { authAction } = useStore();
   // 待授权请求就地放在卡片内部,不另起一张卡。AskUserQuestion 改在输入框处强制作答,不塞进卡片。
   const pendingPerms = items.filter((it): it is Extract<TimelineItem, { kind: "permission" }> => it.kind === "permission" && !it.decision && it.toolName !== "AskUserQuestion");
   const now = useNow(running);
@@ -1016,6 +1023,12 @@ function AgentTurnCard({ items, running, showFull, cwd, liveInput, settle, bgWai
       {pendingPerms.map((item) => <Item key={item.requestId} item={item} cwd={cwd} onAgentClick={onClick} onPermission={onPermission} agentLabel={agentLabel} />)}
       {settle && !settle.aborted && failedEdits(items).allFailed && (
         <div className="bubble-warn">{t("⚠ 本轮 {{n}} 处文件编辑全部失败,改动可能未落地", { n: failedEdits(items).failed })}</div>
+      )}
+      {settle?.isError && items.some((it) => it.kind === "agent_text" && AUTH_FAIL.test(it.text)) && (
+        <div className="bubble-warn auth-fail">
+          <span>{t("Claude 登录已失效。重新授权后再发一次这条消息。")}</span>
+          <button className="primary" onClick={() => authAction("claude", "login")}>{t("去登录")}</button>
+        </div>
       )}
       {!!bgWait?.length && <BgTasksBar tasks={bgWait} />}
       {settle && <RoundMeta r={settle} doneTs={!running ? doneTs : undefined} />}

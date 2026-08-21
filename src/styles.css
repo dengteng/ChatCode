@@ -1216,6 +1216,9 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 /* 落空提示:本轮编辑全失败,改动没落地 —— 醒目红条,别被"完成"绿标盖过 */
 .bubble-warn { margin-top: 6px; padding: 5px 9px; border-radius: 6px; font-size: 12px; line-height: 1.4;
   color: #b3261e; background: color-mix(in srgb, #b3261e 10%, transparent); border: 1px solid color-mix(in srgb, #b3261e 30%, transparent); }
+/* 鉴权失败那条:文案 + 「去登录」按钮同一行,按钮靠右不被长文案挤走 */
+.bubble-warn.auth-fail { display: flex; align-items: center; gap: 8px; }
+.bubble-warn.auth-fail button { flex: none; margin-left: auto; padding: 3px 10px; font-size: 12px; }
 /* 后台任务提示:本轮结算了但还挂着后台任务(见 Chat.tsx pendingBgTasks),这条消息还会有下文。
    用呼吸的点 + 弱色条,别做成 .bubble-warn 那种红色告警,它不是错误。 */
 /* 整条可点(开后台任务弹窗),所以是 button:显式清掉按钮默认样式,宽度撑满与原来的 div 一致 */
