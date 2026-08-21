@@ -358,6 +358,7 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
   const [showGitMap, setShowGitMap] = useState(false); // 顶栏 关联 Git 仓库弹窗(本地非 git 目录时)
   const [sshPick, setSshPick] = useState(false); // 目录栏 ▾:本地 / SSH 主机切换菜单
   const [pushing, setPushing] = useState(false); // 顶栏 push/pull 进行中:禁二次点击 + 菊花
+  const [committing, setCommitting] = useState(false); // 顶栏 commit 进行中:同上,和 push 一套观感
   const [showJump, setShowJump] = useState(false); // 往上滚一定距离后,右下角显示"回到底部"
   // 长会话滚动卡顿:整条历史全渲染时 DOM 上万节点,WKWebView 每帧重排扛不住。
   // 只渲染最近 N 个回合,顶部"加载更早消息"按需往前翻。
@@ -397,7 +398,8 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
     setFocusTs(null);
   }, [focusTs, session.timeline.length, histCap]);
   // 命令跑完(terminal_result)会自动刷新 git_info:push 成功则 ahead 归 0、按钮消失;失败则复位可再点。
-  useEffect(() => { setPushing(false); }, [state.git[session.id]]);
+  // commit 同理(成功后工作区干净、按钮消失),所以两个菊花共用这一处停表,不各自计时。
+  useEffect(() => { setPushing(false); setCommitting(false); }, [state.git[session.id]]);
   // 手动往上滑 = 想看历史,松开跟随;滑回底部附近(80px 内)再恢复跟随。
   // 只在真正的滚动事件里判定 —— 自动滚到底也会触发一次,算出来仍是"贴底",不影响。
   const onTimelineScroll = () => {
@@ -470,6 +472,15 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
   const branch = git?.local?.find((b) => b.name === git.current);
   // 工作区有未提交内容(含未跟踪文件)。unborn 分支和正常分支两条渲染路径共用同一个判据。
   const dirty = !!git?.status && git.status.trim().length > 0;
+  // 顶栏那颗 commit:unborn 分支和正常分支两条路径各画一次,忙碌态又要和右边 push 完全一致 ——
+  // 写成一份共用,免得改一处漏一处。菊花从「提交」弹窗按下开始转,到 git_info 刷新为止(同 push)。
+  const commitBtn = (
+    <button className={`branch-inline-btn hi ${committing ? "is-busy" : ""}`} disabled={committing}
+      {...btnPress(() => { if (!committing) setShowCommit(true); })}>
+      <span>commit</span>
+      {committing && <span className="btn-busy"><Loader2 size={12} className="ico-spin" /></span>}
+    </button>
+  );
   // SSH 模式 = 这个会话配了远端(连上/连接中/失败都算)。此时目录栏显示远端路径,中间不显示 git 分支 —— 分支读的是本地仓库,和远端无关。
   const sshOn = !!session.ssh;
   const sshState = session.ssh?.status;
@@ -559,7 +570,7 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
             return <div className="branch-line">
               <span className="branch-grp">{t("本地 {{branch}}", { branch: git.current })} <span className="muted">{t("·无提交")}</span>
               {/* 零提交的仓库同样要能提交 —— 首次提交恰恰是这个状态下最该做的事(之前只有正常分支路径给了按钮) */}
-              {dirty && <button className="branch-inline-btn hi" {...btnPress(() => setShowCommit(true))}>commit</button>}</span>
+              {dirty && commitBtn}</span>
               <span className="branch-sep">-</span>
               {rm
                 ? <span className="branch-grp">{t("远程 {{name}}", { name: rm })}
@@ -577,7 +588,7 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
             return <div className={`branch-line clickable ${ahead || behind ? "changed" : ""}`} role="button" tabIndex={0}
               title={t("点击打开分支管理")} onClick={() => onToggleInfo("branches")}>
               <span className="branch-grp">{seg(t("本地"), git.current || "detached HEAD", ahead)}
-              {dirty && <button className="branch-inline-btn hi" {...btnPress(() => setShowCommit(true))}>commit</button>}</span>
+              {dirty && commitBtn}</span>
               <span className="branch-sep">-</span>
               <span className="branch-grp">{seg(t("远程"), branch?.upstream || t("未跟踪"), behind)}
               {btn2 && <button className={`branch-inline-btn hi ${pushing ? "is-busy" : ""}`} disabled={pushing}
@@ -590,7 +601,7 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
         {/* 弹窗必须挂在 .branch-line 外面:Radix Portal 只是把 DOM 节点挪到了 body,
             React 的事件冒泡走的仍是组件树 —— 挂在里面的话,点弹窗的「提交」/「取消」/遮罩,
             事件都会冒泡到 .branch-line 的 onClick,把项目详情抽屉一起打开 */}
-        {showCommit && <CommitDialog scope={session.cwd} sessionId={session.id} onSubmit={(message) => { runTerminal(session.id, `git add -A && git commit -m '${message.replace(/'/g, "'\\''")}'`); setShowCommit(false); }} onCancel={() => setShowCommit(false)} />}
+        {showCommit && <CommitDialog scope={session.cwd} sessionId={session.id} onSubmit={(message) => { setCommitting(true); runTerminal(session.id, `git add -A && git commit -m '${message.replace(/'/g, "'\\''")}'`); setShowCommit(false); }} onCancel={() => setShowCommit(false)} />}
         {/* 关联已有远程仓库(不动工作区文件)。关键:光 init+remote add+fetch 不会建立"分支跟踪(upstream)" ——
             git init 造出的本地分支和远程无血缘,之后 rebase/checkout/fetch 都补不上跟踪。所以这里 fetch 后:
               1) set-head 探测远程默认分支名(main/master),取不到则默认 main;

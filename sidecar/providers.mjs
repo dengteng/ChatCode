@@ -14,13 +14,25 @@
 //
 // baseUrlCN: 该家在国内另有一套域名(国际站在国内要么慢要么连不上)。设置里勾「使用国内节点」后生效,
 //            仍低于用户手填的 baseUrl 覆盖。没有 CN 域名的(DeepSeek/Kimi 本身就在国内)不写。
-// vision:    该端点收不收 image 块。false 的会在输入框直接拦下图片并说明,而不是让用户粘完挨一个 400。
+// vision:    该端点收不收 image 块。false 的会在输入框直接拦下图片并说明。
 //            按各家「编程端点」的常见配置给保守默认;单个模型可在设置的模型表里加 "vision": true 覆盖。
+//            这道前端拦截是**唯一**防线,别当成锦上添花:实测 DeepSeek 的 anthropic 兼容层收到不支持图片的
+//            模型 + image 块时,不回 400,而是**静默丢掉图片照常作答**(deepseek-v4-flash 只多算 5 个壳子
+//            token,答案是编的)。放行等于让用户拿到一本正经的错答案,连个报错都没有。
+//            反过来,vision 模型认 Anthropic 原生块 {type:"image",source:{type:"base64",…}},
+//            不用转 image_url —— vision-exp 同一句话带图多算 117 token 且答对了颜色(2026-08 实测)。
 // subscriptionUsage: 这家是订阅制(有 5h/周额度窗口)还是按 token 计费。用量条据此二选一:
 //            订阅制显示两个额度窗口,按量计费显示本会话累计花费/token(见 spend.mjs)。
 // price:     每 100 万 token 的单价 { in, out, cacheRead, cacheWrite, currency }。in = 缓存未命中价,
 //            cacheWrite 不填则按 in 算。只写有官方价格页可查的出厂价,查不到就不写 ——
 //            没价只显示 token 数,绝不按猜的价格显示金额。用户可在设置的模型表里覆盖。
+//            分时定价的家再挂一个 price.offPeak = { in, out, cacheRead, peakHours: [[9,12],[14,18]] }:
+//            落在 peakHours 里按外层价,其余时段按 offPeak(见 spend.mjs 的 effPrice)。
+//            **peakHours 一律按北京时间(UTC+8)判**,不看用户本机时区 —— 官方是拿北京时间划的窗口,
+//            按本机时区算等于给时差用户报错价(纽约的用户会在 21:00-24:00 被当成高峰)。
+// DeepSeek 的高峰时段(北京时间),三个模型共用。半开区间 [起, 止)。
+const DS_PEAK = [[9, 12], [14, 18]];
+
 export const PROVIDERS = {
   claude: {
     id: "claude", label: "Claude", subscriptionUsage: true,
@@ -35,11 +47,16 @@ export const PROVIDERS = {
     // 有账户余额接口(Bearer = 同一把 key)。path 从 baseUrl 剥掉 /anthropic 后拼,各家形状不一样,
     // 所以取值交给 pick。官方只给余额不给消费明细 —— 今日/本月由本地账本算(spend.mjs 的 ledger)。
     balanceApi: { path: "/user/balance", pick: (j) => ({ balance: Number(j?.balance_infos?.[0]?.total_balance), currency: j?.balance_infos?.[0]?.currency }) },
-    // 出厂价来自官方价格页 api-docs.deepseek.com/zh-cn/quick_start/pricing/(2026-08 抄录)。
-    // 注:官方公告 2026-08-17 起改峰谷定价,到时价格会漂 —— 设置的模型表里改 price 即可,不用改代码。
+    // 出厂价来自官方价格页 api-docs.deepseek.com/zh-cn/quick_start/pricing/(2026-08-22 重抄)。
+    // 2026-08-17 起峰谷两套价:外层是高峰价,offPeak 是空闲价(五折)。原句「高峰时段为北京时间
+    // 9:00 - 12:00、14:00 - 18:00(其余为空闲时段)」—— 一天里只有 7 小时是高峰,别只记高峰价,
+    // 那会把大多数时段的花费翻倍报。三个模型共用同一个高峰窗口。
     models: [
-      { value: "deepseek/deepseek-v4-flash", model: "deepseek-v4-flash", displayName: "DeepSeek V4 Flash", description: "deepseek-v4-flash · 快", provider: "deepseek", contextWindow: 1_000_000, price: { in: 1, out: 2, cacheRead: 0.02, currency: "¥" } },
-      { value: "deepseek/deepseek-v4-pro",   model: "deepseek-v4-pro",   displayName: "DeepSeek V4 Pro",   description: "deepseek-v4-pro · 最强", provider: "deepseek", contextWindow: 1_000_000, price: { in: 3, out: 6, cacheRead: 0.025, currency: "¥" } },
+      { value: "deepseek/deepseek-v4-flash", model: "deepseek-v4-flash", displayName: "DeepSeek V4 Flash", description: "deepseek-v4-flash · 快", provider: "deepseek", contextWindow: 1_000_000, price: { in: 3, out: 9, cacheRead: 0.1, currency: "¥", offPeak: { in: 1.5, out: 4.5, cacheRead: 0.05, peakHours: DS_PEAK } } },
+      { value: "deepseek/deepseek-v4-pro",   model: "deepseek-v4-pro",   displayName: "DeepSeek V4 Pro",   description: "deepseek-v4-pro · 最强", provider: "deepseek", contextWindow: 1_000_000, price: { in: 9, out: 27, cacheRead: 0.3, currency: "¥", offPeak: { in: 4.5, out: 13.5, cacheRead: 0.15, peakHours: DS_PEAK } } },
+      // 唯一收图片的 DeepSeek 模型,价格与 flash 同档。vision 必须写在模型这级 —— provider 那级是 false,
+      // 不写就会被输入框拦掉图片(见顶部 vision 说明)。图片按尺寸折算成 token,和文本一起计费。
+      { value: "deepseek/deepseek-v4-flash-vision-exp", model: "deepseek-v4-flash-vision-exp", displayName: "DeepSeek V4 Flash Vision", description: "deepseek-v4-flash-vision-exp · 看图", provider: "deepseek", contextWindow: 1_000_000, vision: true, price: { in: 3, out: 9, cacheRead: 0.1, currency: "¥", offPeak: { in: 1.5, out: 4.5, cacheRead: 0.05, peakHours: DS_PEAK } } },
     ],
   },
   kimi: {

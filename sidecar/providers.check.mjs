@@ -93,6 +93,11 @@ console.log("✓ Claude 会话 env 不受影响");
 // 4. 能不能发图的声明(前端 canSendImage 据此拦图片)
 assert.strictEqual(PROVIDERS.deepseek.vision, false);
 assert.strictEqual(PROVIDERS.gemini.vision, undefined, "没声明 = 放行,别误拦");
+// 模型级 vision 盖 provider 级:DeepSeek 只有 vision-exp 收图,provider 那级仍是 false。
+// 丢了这个 true,输入框会把图片拦在外面(canSendImage 先读模型级);而 provider 那级若被改成 true,
+// 另外两个模型收到图片会静默丢弃、照样编答案(实测不回 400) —— 两边都得钉住。
+const dsVision = PROVIDERS.deepseek.models.filter((m) => m.vision === true).map((m) => m.model);
+assert.deepStrictEqual(dsVision, ["deepseek-v4-flash-vision-exp"], "DeepSeek 收图的模型只该有这一个");
 console.log("✓ vision 声明就位");
 
 // 5. 「优先国内节点」的出厂默认:按机器时区/语言判国内

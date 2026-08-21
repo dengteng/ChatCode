@@ -343,8 +343,10 @@ function ProviderEditPage({ id, mode, onDone }: { id: string; mode: "key" | "con
           <label className="provider-config-field"><span>{t("模型表 (JSON)")}</span>
             <textarea className="provider-config-models" spellCheck={false} value={modelsText} onChange={(e) => setModelsText(e.target.value)} /></label>
           {/* price 是选填的:填了用量条显示金额,不填只显示 token 数。单价按每 100 万 token 计,
-              各家调价频繁又分币种,所以放这里让用户自己填,代码不写死。vision 同理,填了覆盖出厂判断。 */}
+              各家调价频繁又分币种,所以放这里让用户自己填,代码不写死。vision 同理,填了覆盖出厂判断。
+              分时价的家再挂 price.offPeak(peakHours 按**北京时间**判,见 spend.mjs 的 effPrice)。 */}
           <div className="provider-config-hint muted">{t("每项")}:{`{ "value": "${id}/模型id", "model": "模型id", "displayName": "显示名", "contextWindow": 200000, "vision": false, "price": { "in": 2, "out": 3, "cacheRead": 0.2, "currency": "¥" } }`}</div>
+          <div className="provider-config-hint muted">{t("分时价再加")}:{`"offPeak": { "in": 1, "out": 1.5, "cacheRead": 0.1, "peakHours": [[9,12],[14,18]] }`} — {t("peakHours 按北京时间")}</div>
           {err && <div className="provider-config-err">{err}</div>}
           <div className="commit-modal-actions" style={{ marginTop: 12 }}>
             <button onClick={resetConfig}>{t("恢复默认")}</button>

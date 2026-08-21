@@ -227,6 +227,8 @@
   "保存": "Save",
   "模型表 (JSON)": "Model table (JSON)",
   "每项": "Each entry",
+  "分时价再加": "For time-of-day pricing, add",
+  "peakHours 按北京时间": "peakHours are in Beijing time (UTC+8)",
   "恢复默认": "Restore defaults",
   "保存配置": "Save config",
   "未安装 gh CLI": "gh CLI not installed",

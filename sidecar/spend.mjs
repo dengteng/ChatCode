@@ -24,6 +24,22 @@ export function priceTable(settings) {
   return t;
 }
 
+// 分时定价:price.offPeak = { in, out, cacheRead, peakHours: [[9,12],[14,18]] }。
+// 落在 peakHours 里用外层(高峰)价,其余时段用 offPeak 覆盖后的价。没有 offPeak 的家原样返回。
+//
+// 时区**钉死北京时间**,不用本机时区:官方(DeepSeek)是拿北京时间划的窗口,和用户在哪儿无关。
+// 按 getHours() 算的话,同一笔请求在纽约的机器上会被判成完全相反的时段 —— 差价一倍,还查不出来。
+// 所以从 UTC 现推:本机时区设置错了也不影响(getUTCHours 不受它影响)。
+const PEAK_TZ_MIN = 8 * 60; // 北京 = UTC+8,无夏令时
+export function effPrice(p, now = Date.now()) {
+  const o = p?.offPeak;
+  if (!o?.peakHours?.length) return p;
+  const d = new Date(now);
+  const min = (d.getUTCHours() * 60 + d.getUTCMinutes() + PEAK_TZ_MIN) % 1440; // 北京时间的"当天第几分钟"
+  const peak = o.peakHours.some(([a, b]) => min >= a * 60 && min < b * 60);    // 半开区间:12:00 已经算空闲
+  return peak ? p : { ...p, ...o };
+}
+
 // SDK 的 usage 有两套键名:result.usage 是下划线,modelUsage 里是驼峰。两套都认。
 // input_tokens 不含缓存读写,三者分开计价(缓存命中通常便宜一个数量级)。
 const norm = (u) => ({
@@ -37,14 +53,16 @@ const norm = (u) => ({
 // 优先用 modelUsage 的按模型细分:主模型和背景小模型(ANTHROPIC_SMALL_FAST_MODEL)价差常有一个数量级,
 // 混在一起按主模型价算会高估。没有细分才退回 result.usage + 会话当前模型。
 // fallbackModel = 去掉 provider 前缀的真实模型 id。
-export function accumulate(spend, msg, table, fallbackModel = "") {
+// now: 用哪个时刻去判峰谷(见 effPrice)。按累加时刻算,不按会话开始时刻 —— 跨过 18:00 的长会话,
+// 之前那些轮本来就是按高峰价扣的,回头统一改判成空闲价反而更不准。
+export function accumulate(spend, msg, table, fallbackModel = "", now = Date.now()) {
   const mu = msg?.modelUsage;
   const parts = mu && Object.keys(mu).length
     ? Object.entries(mu).map(([model, u]) => [model, norm(u)])
     : [[fallbackModel, norm(msg?.usage)]];
   for (const [model, u] of parts) {
     spend.in += u.in; spend.out += u.out; spend.cacheRead += u.cacheRead; spend.cacheWrite += u.cacheWrite;
-    const p = table.get(model);
+    const p = effPrice(table.get(model), now);
     if (!p) {
       // 这批 token 算不出钱。标记出来,前端据此改说"含未计价部分",别让人把半截数字当全额。
       if (u.in || u.out || u.cacheRead || u.cacheWrite) spend.unpriced = true;
