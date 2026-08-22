@@ -289,7 +289,9 @@ export function Sidebar({ onSearch, onOpenSettings, update, onShowUpdate }:
           <button className="new-session" onClick={() => dispatch({ type: "go_home" })} title={t("新建会话")} aria-label={t("新建会话")}><Plus size={16} /></button>
         </div>
       </div>
-      <div className="session-list">
+      {/* 列表本身也带一份:.sidebar 那份只在直接命中它时生效,而列表 flex:1 撑满,
+          最后一个会话下面那片空白归 .session-list —— 不挂就点不到窗口拖拽。会话行是子节点,照常点。 */}
+      <div className="session-list" data-tauri-drag-region>
         {/* 顶级会话按母子树渲染;拖拽手柄可重排、移入分组 */}
         {(() => {
           const renderTree = (e: IndexEntry) => {

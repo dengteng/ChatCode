@@ -776,6 +776,9 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 /* 新建按钮:深绿底上主色太闷,改浅色描边保证可点认知 */
 .app[data-palette="forest"] .new-session { color: var(--text); background: color-mix(in srgb, #fff 10%, transparent); border-color: color-mix(in srgb, #fff 22%, transparent); }
 .app[data-palette="forest"] .new-session:hover { background: color-mix(in srgb, #fff 18%, transparent); border-color: color-mix(in srgb, #fff 34%, transparent); }
+/* 上面那条把加号提亮成 --text,搜索框没跟上,并排两个图标一亮一暗(窄侧栏只剩图标时最明显)。
+   只提亮放大镜,不动"搜索"二字和 ⌘K —— 那两个是提示文案,本来就该比图标弱。 */
+.app[data-palette="forest"] .sidebar-search .search-l svg { color: var(--text); }
 /* ========== custom:用户自定义背景图主题(智能布局) ==========
    不再让用户选深/浅/原图。上传时 64px 缩略图分析:平均亮度 + 左/右局部亮度 + 复杂度,App 据此注入:
    - data-custom-shell(dark|light):主区保护层明暗,按主区一侧(右)的图亮度自动定;
