@@ -471,6 +471,8 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 .ask-tab { font-size: 12px; padding: 2px 9px; border-radius: 999px; background: var(--panel); border: 1px solid var(--border); cursor: pointer; color: var(--muted); }
 .ask-tab.cur { border-color: var(--accent); color: var(--text); }
 .ask-tab.done { color: var(--green); }
+/* 当前这题又已答完时,文字跟胶囊边框同色(accent)—— 绿字配橙框两种色是花的;已答的信号靠里面那个 ✓ 就够 */
+.ask-tab.cur.done { color: var(--accent); }
 .ask-q { font-size: 14px; margin-bottom: 10px; line-height: 1.5; }
 .ask-q-tag { display: inline-block; font-size: 11px; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); padding: 1px 7px; border-radius: 5px; margin-right: 8px; }
 .ask-opts { display: flex; flex-direction: column; gap: 6px; }
@@ -479,6 +481,9 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 .ask-opt.on { background: rgba(88,200,120,.1); border-color: var(--green); }
 .ask-opt-n { flex-shrink: 0; width: 18px; height: 18px; border-radius: 5px; background: var(--panel); border: 1px solid var(--border); font-size: 11px; display: flex; align-items: center; justify-content: center; color: var(--muted); }
 .ask-opt.hi .ask-opt-n { border-color: var(--accent); color: var(--text); }
+/* 选中项:序号框跟着外框走(green)。选中项通常同时带 .hi,不写这条序号框会是 accent 橙、外框绿,一格里两种色。
+   放在 .hi 那条之后 —— 同特异度,后来者胜。 */
+.ask-opt.on .ask-opt-n { border-color: var(--green); color: var(--text); }
 .ask-opt-body { flex: 1; min-width: 0; font-size: 13px; }
 .ask-check { color: var(--green); font-weight: 700; }
 /* 提交/跳过必须一直看得见。卡片限高后是**整张卡**在滚(见 .ask-dock .ask-card),脚栏作为最后一个

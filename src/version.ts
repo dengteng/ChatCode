@@ -4,6 +4,8 @@
 import { fetch } from "@tauri-apps/plugin-http";
 import pkg from "../package.json";
 import { version as TAURI_VERSION } from "../src-tauri/tauri.conf.json";
+// 走相对路径而不是包名:SDK 的 exports 字段没开 "./package.json" 这条子路径,按包名 import 解析不到。
+import { version as SDK_VERSION } from "../node_modules/@anthropic-ai/claude-agent-sdk/package.json";
 
 // 版本号只有一个真源:src-tauri/tauri.conf.json 的 version —— 那份才是 tauri 真正打进 app 的。
 // 具名 import,Vite 只内联这一个字符串(不像 SDK_VERSION 那样把整份 json 拖进 bundle)。
@@ -12,9 +14,10 @@ export const APP_VERSION = TAURI_VERSION;
 // 漏改一处 = 界面版本号与实际包不符,更新判断跟着错。开发期吵一声,构建产物里不会留。
 if (import.meta.env.DEV && pkg.version !== TAURI_VERSION)
   console.warn(`[version] package.json ${pkg.version} ≠ tauri.conf.json ${TAURI_VERSION},发版时忘了同步`);
-// 直接从 package.json 取,不再手写一份 —— 手写的那份升过 SDK 就忘了改,界面显示的版本长期落后于实际打进包的版本。
-// 构建期常量(Vite 把 json import 内联),运行时不读文件。
-export const SDK_VERSION = pkg.dependencies["@anthropic-ai/claude-agent-sdk"].replace(/^[\^~]/, "");
+// 取**真正装上的**那份 SDK 的 version(node_modules 里的 package.json),不是我们 package.json 里的依赖范围。
+// 范围是 ^0.3.x:换台机器 npm i 一次就可能装到更新的小版本,界面照着范围显示就会长期报个旧号。
+// 具名 import,构建期常量(Vite 把这一个字符串内联),运行时不读文件。
+export { SDK_VERSION };
 export const PROJECT_ID = "chat-code"; // 项目 identifier(?project=)
 export const PLATFORM = "macos";
 
