@@ -9,7 +9,7 @@ import remarkGfm from "remark-gfm";
 import { useStore } from "../store";
 import { toast } from "./Toast";
 import { THEMES, type SshHost, type ThemeId, type CustomArt } from "../types";
-import { loadExtensions, loadMarketplace, marketplaceNames, installPlugin, uninstallPlugin, enablePlugin, disablePlugin, addMarketplace, removeMarketplace, installSkillGit, setSkillOn, removeSkill, setMcpOn, removeMcp, SEED_MARKETPLACES, type Exts, type MarketPlugin } from "../extensions";
+import { loadExtensions, loadMarketplace, marketplaceNames, installPlugin, uninstallPlugin, enablePlugin, disablePlugin, addMarketplace, removeMarketplace, installSkillGit, setSkillOn, removeSkill, setMcpOn, removeMcp, loadExtNotes, saveExtNote, SEED_MARKETPLACES, type Exts, type MarketPlugin } from "../extensions";
 import { EXT_NOTE_ZH } from "../extNotesZh";
 import { openEditorWindow } from "../popout";
 import { copyText } from "./Chat";
@@ -498,14 +498,7 @@ const shortProject = (s: string) => (s.length > 10 ? s.slice(0, 10) + "…" : s)
 
 // 插件 / MCP / Skills 各一组,一项一行:状态点在名字左侧。
 // 点击:Skills/插件的 md 文件用内置代码编辑器打开;MCP 直接用浏览器打开远端 url。
-// 用户给每个 插件/MCP/Skill 加的备注,按名字存本地(仅本机,不进仓库)
-const EXT_NOTES_KEY = "cc-ext-notes";
-const loadExtNotes = (): Record<string, string> => { try { return JSON.parse(localStorage.getItem(EXT_NOTES_KEY) || "{}"); } catch { return {}; } };
-function saveExtNote(name: string, note: string) {
-  const all = loadExtNotes();
-  if (note.trim()) all[name] = note.trim(); else delete all[name];
-  try { localStorage.setItem(EXT_NOTES_KEY, JSON.stringify(all)); } catch { /* 隐私模式写不了,忽略 */ }
-}
+// 备注的读写在 extensions.ts(输入框的 # 菜单也要用同一份)
 
 // on === undefined 的行没有开关/删除按钮(内置技能、claude.ai 云端连接器这类本地没有文件、管不了的)。
 // naTag = 给这类行打的小标签,说明"为什么这行没按钮"(不传就不打)。

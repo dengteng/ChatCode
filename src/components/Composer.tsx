@@ -9,6 +9,7 @@ import { openImageWindow } from "../popout";
 import { onEdgeGlow } from "../lib/edgeGlow";
 import { unwrapSoftBreaks, htmlHasBlocks } from "../lib/unwrap";
 import { toast } from "./Toast";
+import { extNote, skillDescs } from "../extensions";
 import { useTranslation } from "react-i18next";
 
 interface Img { media_type: string; data: string }
@@ -285,6 +286,10 @@ export function Composer({ session }: { session: Session }) {
   // # 唤起 skill 选择:列当前会话已加载的 skill(init 上报的那份,选了才真能用)。
   // 选中只插一个简洁的 #name 标记,发送时再翻译成显式调用指令(见 expandSkillTags)。
   const sQuery = skillTok?.query ?? "";
+  // 说明:光有名字分不清 design / design-system / taste-skill 这类,菜单里每行跟一句备注。
+  // 和设置页同一份来源(自己写的备注 > 内置中文表 > SKILL.md 的 description),开菜单时才去读盘。
+  const [sDesc, setSDesc] = useState<Record<string, string>>({});
+  useEffect(() => { if (skillTok) skillDescs(session.cwd).then(setSDesc); }, [!!skillTok, session.cwd]); // eslint-disable-line react-hooks/exhaustive-deps
   const sItems = useMemo(() => {
     const all = session.info.skills ?? [];
     if (!sQuery) return all;
@@ -1034,6 +1039,11 @@ export function Composer({ session }: { session: Session }) {
       const maxId = Math.max(-1, ...[...imgData.current.keys()].map(Number).filter((n) => !isNaN(n)));
       idc.current = maxId + 1;
       syncText(); setPreview(null); setSuggestion("");
+      // 候选菜单只属于唤起它的那个会话。Chat 没给 Composer 加 key,切会话复用同一个实例,
+      // 而 @ / # 的 token 是从当时那个编辑器的选区算出来的 —— 编辑器已经换成新会话的草稿,
+      // 菜单再挂着就是个跟谁都对不上的空列表(还会替换错文本)。连同浏览目录一起收掉。
+      setMention(null); setSkillTok(null); setMDir("");
+      mDismiss.current = false; sDismiss.current = false;
     }
     return () => {
       const ed2 = edRef.current; if (!ed2) return;
@@ -1170,6 +1180,7 @@ export function Composer({ session }: { session: Session }) {
                 onMouseDown={(ev) => { ev.preventDefault(); pickSkill(n); }}>
                 <span className="mention-ico"><Sparkles size={14} /></span>
                 <b>{n}</b>
+                {extNote(n, sDesc[n]) && <span className="muted skill-desc" title={extNote(n, sDesc[n])}>{extNote(n, sDesc[n])}</span>}
               </div>
             ))}
             {!sItems.length && <div className="palette-item muted">{(session.info.skills ?? []).length ? t("没有匹配的 skill") : t("会话还没上报 skill 列表")}</div>}

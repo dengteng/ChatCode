@@ -645,6 +645,8 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 .mention-item b { flex-shrink: 0; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mention-ico { flex-shrink: 0; width: 14px; }
 .mention-dir { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; direction: rtl; text-align: left; }
+/* # skill 菜单那行说明:一行截断(完整的在 title 里),不跟 .mention-dir 共用 —— 它是 rtl 的,说明得正着读 */
+.skill-desc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 /* 内联 chip 家族(图片 .img-tag / 引用 .snip-tag / 能力引用 .ref-tag):
    骨架只有下面这一份 —— 尺寸、圆角、内距、图标、×、hover、按压全一致,
    变体只改 --chip-tint 一个变量。写成选择器并列而不是加一个公共 class:

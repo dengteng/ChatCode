@@ -5,6 +5,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { homeDir } from "@tauri-apps/api/path";
 import i18n from "./i18n";
+import { EXT_NOTE_ZH } from "./extNotesZh";
 
 export type McpScope = "user" | "local" | "project";
 export interface Ext { name: string; desc: string; path?: string; marketplace?: string; on?: boolean }
@@ -123,7 +124,31 @@ export async function loadExtensions(cwd: string | string[]): Promise<Exts> {
 
   // 磁盘扫描到的全部名字(不只带说明的),供设置页在无会话时也能列出 Skills / MCP
   const skillNames = [...new Set(skills.map((s) => s.name))];
+  // 顺手刷新 # 菜单那份缓存:设置页装完新 skill 不用重启就有说明
+  for (const c of cwds) descCache.set(c, Promise.resolve(skillDescMap));
   return { plugins, skills: skillNames, mcp: Object.keys(mcpMeta), skillDesc: skillDescMap, skillPath: skillPathMap, skillOn: skillOnMap, skillProject, mcpDesc: mcpDescMap, mcpUrl: mcpUrlMap, mcpMeta };
+}
+
+// ---- 备注 ----
+// 用户给每个 插件/MCP/Skill 加的备注,按名字存本地(仅本机,不进仓库)
+const EXT_NOTES_KEY = "cc-ext-notes";
+export const loadExtNotes = (): Record<string, string> => { try { return JSON.parse(localStorage.getItem(EXT_NOTES_KEY) || "{}"); } catch { return {}; } };
+export function saveExtNote(name: string, note: string) {
+  const all = loadExtNotes();
+  if (note.trim()) all[name] = note.trim(); else delete all[name];
+  try { localStorage.setItem(EXT_NOTES_KEY, JSON.stringify(all)); } catch { /* 隐私模式写不了,忽略 */ }
+}
+// 一行说明的三级兜底:自己写的 > 内置中文表 > 磁盘上 SKILL.md / plugin.json 的英文 description
+export const extNote = (name: string, desc = "") => loadExtNotes()[name] || EXT_NOTE_ZH[name] || desc;
+
+// 输入框 # 菜单也要给每个 skill 配说明。整套扫描要读几十个文件,菜单每开一次扫一遍会卡,
+// 所以按 cwd 存一份缓存(项目级 skill 只在自己项目里扫得到,不能一份缓存走天下);
+// 设置页重扫时会顺带刷新它(见 loadExtensions 结尾)。
+export const descCache = new Map<string, Promise<Record<string, string>>>();
+export function skillDescs(cwd: string): Promise<Record<string, string>> {
+  let p = descCache.get(cwd);
+  if (!p) descCache.set(cwd, (p = loadExtensions(cwd).then((e) => e.skillDesc).catch(() => ({}))));
+  return p;
 }
 
 // ---- 插件市场 ----
