@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, isValidElement, type ReactNode } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, isValidElement, type ReactNode } from "react";
 import { GitFork, GitBranch, ChevronRight, ChevronDown, Folder, Server, Puzzle, Plug, ArrowDown, Wrench, Check, Copy, X, CircleHelp, Lock, Image as ImageIcon, MessageSquare, Ban, Pin, Pencil, TriangleAlert, Loader2, Brain, RotateCcw, CornerDownRight, Paperclip } from "lucide-react";
 import { createPortal } from "react-dom";
 import Markdown from "react-markdown";
@@ -1378,8 +1378,14 @@ type FeedLine = { t: string; c?: string }; // c: head/add/del/out/cmd → 上色
 const shortPath = (p?: string) => (p || "").replace(/^\/Users\/[^/]+/, "~");
 function workFeed(items: TimelineItem[]): FeedLine[] {
   const out: FeedLine[] = [];
-  const body = (s: any): string[] => // 单块正文按行拆,不截断;超长由尾部 slice(-200) 丢弃更早的行
-    String(s ?? "").replace(/\s+$/, "").split("\n");
+  // 单块正文按行拆。先按尾部截一刀再拆:整份 out 最后也只留 slice(-200),
+  // 而浏览器测试的一条 take_snapshot 结果能有 5 万字符,整份拆成行等于每次都白造上千个字符串再扔掉。
+  const body = (s: any): string[] => {
+    const str = String(s ?? "").replace(/\s+$/, "");
+    // 多截一点(200 行 × 保守 200 字符)再按行切,切完丢掉可能被拦腰截断的首行
+    const cut = str.length > 40_000 ? str.slice(-40_000).split("\n").slice(1) : str.split("\n");
+    return cut.length > 200 ? cut.slice(-200) : cut;
+  };
   for (const it of items) {
     if (it.kind === "agent_text" && it.text?.trim()) {
       for (const l of it.text.trim().split("\n")) { if (!SUMMARY_LINE_RE.test(l)) out.push({ t: l }); }
@@ -1440,14 +1446,31 @@ function latestTodos(items: TimelineItem[], t: (key: string) => string): TodoRow
   return todos;
 }
 
+// 活流:多行日志(读写文件/命令/正文),底部对齐。气泡高度随行数从 min 长到 max 后封顶,
+// 之后最新一行从底部冒出、把旧行往上挤出视口,顶部 mask 渐隐 —— 快速刷屏,像 agent 在飞速干活。
+// memo 起来:耗时那行每 200ms 变一次,不隔开的话这 200 个 div 跟着每秒重建 5 次,纯白干。
+const WorkStream = memo(function WorkStream({ feed }: { feed: FeedLine[] }) {
+  const { t } = useTranslation();
+  return (
+    <div className={`work-stream ${feed.length > 10 ? "tall" : ""}`}>
+      {feed.length
+        ? feed.map((ln, i) => <div key={i} className={`ws-line ${ln.c ? "ws-" + ln.c : ""} ${i === feed.length - 1 ? "cur" : ""}`} title={ln.t}>{ln.t}</div>)
+        : <div className="ws-line cur">{t("正在思考…")}</div>}
+    </div>
+  );
+});
+
 // 运行中气泡主体:头部(状态 + todo 进度条)/ 双栏(左 1/4=阶段清单,右 3/4=红框活流)/ 耗时。
 // 拆分了步骤(有 todo)→ 左栏步骤 + 右栏活流;没拆步骤 → 单栏,整栏只显红框活流。
 function WorkBody({ items, elapsed, liveInput }: { items: TimelineItem[]; elapsed: number; liveInput?: number }) {
   const { t } = useTranslation();
-  const todos = latestTodos(items, t);
+  // 这两个必须 memo:上面 useNow(running) 每 200ms 就 setState 一次(为了让"本轮耗时"实时走),
+  // 不 memo 的话每秒 5 次把本回合所有工具结果重新扫一遍 —— 浏览器测试那种单回合近 10 万字符的结果,
+  // 光 workFeed 一次就接近 1ms,还全是转手就扔的字符串。items 只在时间线真变了才换身份,正好当依赖。
+  const todos = useMemo(() => latestTodos(items, t), [items, t]);
   const done = todos.filter((t) => t.status === "completed").length;
   const pct = todos.length ? Math.round((done / todos.length) * 100) : 0;
-  const feed = workFeed(items); // 红框活流:正文行 + 读写/命令动作,按序抹平成日志行
+  const feed = useMemo(() => workFeed(items), [items]); // 红框活流:正文行 + 读写/命令动作,按序抹平成日志行
   const hasSteps = todos.length > 0;
   return (
     <>
@@ -1467,13 +1490,7 @@ function WorkBody({ items, elapsed, liveInput }: { items: TimelineItem[]; elapse
           </div>
         )}
         <div className="work-right">
-          {/* 活流:多行日志(读写文件/命令/正文),底部对齐。气泡高度随行数从 min 长到 max 后封顶,
-              之后最新一行从底部冒出、把旧行往上挤出视口,顶部 mask 渐隐 —— 快速刷屏,像 agent 在飞速干活。 */}
-          <div className={`work-stream ${feed.length > 10 ? "tall" : ""}`}>
-            {feed.length
-              ? feed.map((ln, i) => <div key={i} className={`ws-line ${ln.c ? "ws-" + ln.c : ""} ${i === feed.length - 1 ? "cur" : ""}`} title={ln.t}>{ln.t}</div>)
-              : <div className="ws-line cur">{t("正在思考…")}</div>}
-          </div>
+          <WorkStream feed={feed} />
         </div>
       </div>
       <small className="work-meta">{t("本轮耗时 {{d}} · 输入 {{n}} tokens", { d: fmtDurationSec(elapsed), n: fmtTok(liveInput) })}</small>
