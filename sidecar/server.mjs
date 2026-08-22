@@ -1595,6 +1595,7 @@ function startSession(ws, { id, cwd, resume, compactFirst }) {
     generation: 0,      // query 代数,重启时 +1,旧循环据此判断是否已被取代
     hadUserTurn: !!resume, // 是否已有对话历史(有历史则不能迁移 cwd:SDK 按目录存 transcript)
     running: false,         // 本轮是否还在跑(收到 result 即结束)
+    msgQueue: [],           // agent 忙时压在这儿的用户消息,本轮跑完依次送进去(见 enqueueMsg / drainMsgQueue)
     freshDone: false,       // 本次启动后完成过一轮(非中断)→ 列表绿✅
 
     userInterrupted: false, // 用户按了停止:本轮 result 标记为"用户终止"而非"出错"
@@ -1762,6 +1763,7 @@ function spawnAgent(ws, sess, { id, resume }) {
           bumpSpend(id, msg); // 花费账本(按量计费的 provider 靠它显示用量);内含 saveIndex
           broadcastIndex(); // 列表图标转「完成/空闲」
           refreshSubscriptionUsage();
+          drainMsgQueue(id, sess); // 本轮跑完 → 放出排队的下一条(手机在不在线都照跑)
         }
         // SDK 会把我们发的这轮输入原样回吐一条 user 消息,且大图会被降级成
         // "[Image: original …]" 文本占位。真实输入我们已在 user_message 分支落盘+广播过,
@@ -1803,6 +1805,126 @@ function endTurn(id, sess) {
   sess.userInterrupted = false;
   broadcastIndex();
   broadcast({ type: "turn_ended", sessionId: id });
+  drainMsgQueue(id, sess);
+}
+
+// ---------- 待发队列(agent 忙时压在 sidecar 这边) ----------
+// 队列必须在这台一直开着的机器上,不能在手机 App 的内存里:手机息屏就收不到"本轮跑完了",
+// 消息会一直躺到用户下次打开 App。上限 3,与两端 UI 一致。
+const MSG_QUEUE_MAX = 3;
+const queueText = (content) => (Array.isArray(content) ? content : [])
+  .filter((b) => b.type === "text").map((b) => b.text).join(" ").trim()
+  || ((Array.isArray(content) && content.some((b) => b.type === "image")) ? "[图片]" : "");
+
+function broadcastMsgQueue(id, sess) {
+  broadcast({ type: "msg_queue", sessionId: id, items: sess.msgQueue.map((x) => ({ pid: x.pid, text: x.text })) });
+}
+
+function enqueueMsg(ws, sess, m) {
+  if (sess.msgQueue.length >= MSG_QUEUE_MAX) {
+    send(ws, { type: "system_note", sessionId: m.sessionId, text: tr("待发已满(最多 {{n}} 条)", { n: MSG_QUEUE_MAX }) });
+    return;
+  }
+  // pid 由 sidecar 发,两端都拿这个来取消 —— 手机自己编的 id 换台设备就对不上了
+  sess.msgQueue.push({ pid: `${Date.now()}-${sess.msgQueue.length}`, text: queueText(m.content), ws, m });
+  broadcastMsgQueue(m.sessionId, sess);
+}
+
+function drainMsgQueue(id, sess) {
+  const next = sess.msgQueue.shift();
+  if (!next) return;
+  broadcastMsgQueue(id, sess);
+  // 不带发送方 ws:排队期间发送方没有乐观渲染过这条(它当时只画了「排队中」那一行),
+  // 广播给所有端才看得到气泡;当初那条连接多半也已经断了(手机息屏)。
+  deliverUserMessage(null, next.m);
+}
+
+// 把一条用户消息真正送进 agent(落盘 + 回显 + 注入动态上下文 + pushTurn)。
+// 单独抽出来是因为 agent 忙的时候这条消息要先躺进 sess.msgQueue,等本轮跑完再原样走一遍这里。
+function deliverUserMessage(ws, m) {
+  let sess = sessions.get(m.sessionId);
+  if (!sess) {
+    // 会话不在内存里(最常见:sidecar 重启 / 换过进程,前端仍以为会话是活的)—— 别再静默丢消息。
+    // 用落盘的 index 记录自动 resume 起会话(sdkSessionId 恢复上下文;失效时 spawnAgent 会兜底开新上下文),
+    // 再把这条消息送进去;连记录都没有(会话已删)才回错误让前端提示重连。
+    const entry = loadIndex().find((e) => e.id === m.sessionId);
+    if (!entry) { send(ws, { type: "session_error", sessionId: m.sessionId, error: tr("会话不存在或已被删除,请新建会话重试") }); return; }
+    startSession(ws, { id: m.sessionId, cwd: entry.cwd, resume: entry.sdkSessionId ?? undefined });
+    sess = sessions.get(m.sessionId);
+    if (!sess) { send(ws, { type: "session_error", sessionId: m.sessionId, error: tr("会话重建失败,请重开该会话") }); return; }
+  }
+  sess.running = true; // 同步置位:重建 agent 期间(下面的 await)点停止也要算数
+  sess.turnStart = Date.now(); // 打包产物上传的时间水位:只收本轮之后新出的文件
+  const userMsg = {
+    type: "user",
+    message: { role: "user", content: m.content }, // content: [{type:'text'...},{type:'image'...}]
+    parent_tool_use_id: null,
+    session_id: sess.sdkSessionId ?? "",
+  };
+  // 每轮随消息注入的动态上下文(只进模型输入,不落盘/不回显)。
+  // 为什么不塞 systemPrompt:那是 prompt 缓存的最前缀,SSH 断连/git 提交一变就把整段缓存冲掉;
+  // per-message 注入只影响当前这条新消息,之前的历史前缀照样命中。
+  // 斜杠命令(/compact、/code-review high …)整条会被 CLI 当命令行解析,命令名之后的内容就是参数 ——
+  // 给 /compact 尾巴上挂一段 git 状态,就变成"照这段状态去压缩上下文"。这类消息一律原样发,不注入任何东西。
+  // 用 (\s|$) 收尾:绝对路径开头的普通消息("/Users/tou/x 这个文件…")不会被误判成命令。
+  const body = Array.isArray(m.content) ? m.content : [{ type: "text", text: String(m.content ?? "") }];
+  const isSlashCmd = body.length === 1 && body[0]?.type === "text"
+    && /^\/[a-zA-Z][\w-]*(\s|$)/.test(String(body[0].text || "").trim());
+  const notes = [];
+  if (!isSlashCmd) {
+    const s = sess.ssh?.status === "connected" ? sess.ssh : null;
+    const prefix = s && `ssh -o ControlPath=${sshSock(m.sessionId)}`
+      + (s.port ? ` -p ${s.port}` : "")
+      + (s.keyPath ? ` -i ${s.keyPath} -o IdentitiesOnly=yes` : "")
+      + ` ${s.target}`;
+    // 连上/换机器时发全文;一直连着就不重发(全文还躺在历史里);断开要主动说一声 ——
+    // 原先断开是"什么都不发",agent 只会继续以为远端还连着。
+    const note = noteOnChange(sess, "ssh", s ? `${s.target}|${s.port || ""}|${s.cwd || ""}` : "off",
+      s ? `[系统提示·SSH] 本会话已连接远端服务器 ${s.target}${s.cwd ? `(远端当前目录 ${s.cwd})` : ""}。`
+          + `你的工具默认在本机执行;要在该远端跑命令,用下面这个复用已建连接(master 已就绪,无需再认证)的前缀:\n`
+          + `${prefix} '<remote command>'\n`
+          + `例:${prefix} 'cat /path/to/.env'。不要再假设不知道主机名/路径。`
+        : "[系统提示·SSH] 远端连接已断开,后续命令一律在本机执行,不要再用之前那个 ssh 前缀。",
+      null);
+    if (note) notes.push(note);
+  }
+  appendLog(m.sessionId, userMsg);
+  // 会话列表副标题要"始终显示最新用户消息"(重启后内存无 timeline,得靠 index 落盘)。把这条文本存进 index 并广播。
+  {
+    const txt = (Array.isArray(m.content) ? m.content : [])
+      .filter((b) => b.type === "text").map((b) => b.text).join(" ").trim()
+      || ((Array.isArray(m.content) && m.content.some((b) => b.type === "image")) ? "[图片]" : "");
+    if (txt) {
+      const idx = loadIndex();
+      const entry = idx.find((e) => e.id === m.sessionId);
+      if (entry && entry.lastUser !== txt) { entry.lastUser = txt; saveIndex(idx); broadcastIndex(); }
+    }
+  }
+  // 把这条用户消息回显给**除发送方外**的所有客户端，否则另一端(如手机发、电脑看)永远看不到对方发的字。
+  // 发送方自己已乐观渲染，排除它避免重复。
+  broadcastExcept(ws, { type: "sdk", sessionId: m.sessionId, message: userMsg });
+  // 若终端里 !cd 过:把 agent 重建到该目录。总是迁移(不管有没有历史)——
+  // agent 的 cwd 只能通过重启 query 真正改变。代价:Claude Code 按目录存 transcript,
+  // 无法跨目录接续,所以有历史时是在新目录重开上下文(前端 timeline 仍保留,便于回看)。
+  (async () => {
+    if (sess.pendingCwd && sess.pendingCwd !== sess.agentCwd) {
+      const target = sess.pendingCwd;
+      const hadHistory = sess.hadUserTurn;
+      sess.pendingCwd = null;
+      await restartAgentCwd(ws, sess, m.sessionId, target, true); // 下面马上 pushTurn,本轮不算结束
+      send(ws, { type: "system_note", sessionId: m.sessionId, text: hadHistory
+        ? tr("📁 已将 agent 工作目录切到 {{target}}(在该目录重开上下文,之前的对话记忆不带过来)", { target })
+        : tr("📁 已将 agent 工作目录设为 {{target}}", { target }) });
+    }
+    sess.hadUserTurn = true;
+    // git 现状放在**用户文本之后**:它可能有几十行,搁最前面会把用户真正问的那句挤到很远;
+    // 且这是"事实校正",紧贴问题后面近因更强。取 cwd 必须在上面的 pendingCwd 迁移之后。
+    const brief = isSlashCmd ? null : await gitBrief(sess.agentCwd || resolveCwd(m.sessionId), sess);
+    const content = [...notes.map((text) => ({ type: "text", text })), ...body,
+      ...(brief ? [{ type: "text", text: brief }] : [])];
+    // 送给 agent 的带注入;日志/回显仍用干净的 userMsg
+    pushTurn(sess, content.length === body.length ? userMsg : { ...userMsg, message: { role: "user", content } });
+  })();
 }
 
 // 用新 cwd 重建 agent —— 打通终端 !cd 与 agent。
@@ -1840,7 +1962,8 @@ async function restartAgent(ws, sess, id) {
 }
 
 function send(ws, obj) {
-  if (ws.readyState === 1) ws.send(JSON.stringify(obj));
+  // ws 可能是 null:待发队列里的消息重放时,当初那条连接早断了(手机息屏),这时只走 broadcast
+  if (ws?.readyState === 1) ws.send(JSON.stringify(obj));
 }
 
 // 会话级输出（agent 流式回复、系统提示、报错、关闭、权限卡片）要发给**所有**连接的客户端，
@@ -2095,6 +2218,7 @@ wss.on("connection", (ws) => {
         const s = sessions.get(entry.id);
         // 回显当前"自动同意"开关(内存优先,未启动则读持久化的 index),让重连端同步显示
         send(ws, { type: "auto_approve", sessionId: entry.id, on: s ? !!s.autoApprove : !!entry.autoApprove });
+        send(ws, { type: "msg_queue", sessionId: entry.id, items: (s?.msgQueue || []).map((x) => ({ pid: x.pid, text: x.text })) }); // 重连要看到还压着的待发
         send(ws, { type: "perm_mode", sessionId: entry.id, mode: s?.permMode || entry.permMode || "default" });
         if (entry.spend) send(ws, { type: "spend", sessionId: entry.id, spend: entry.spend }); // 花费是落盘累计,重开要接上
         if (s?.ssh) send(ws, { type: "ssh_status", sessionId: entry.id, ssh: pubSsh(s.ssh) }); // 恢复 SSH 显示
@@ -2110,89 +2234,19 @@ wss.on("connection", (ws) => {
         break;
       }
       case "user_message": {
-        let sess = sessions.get(m.sessionId);
-        if (!sess) {
-          // 会话不在内存里(最常见:sidecar 重启 / 换过进程,前端仍以为会话是活的)—— 别再静默丢消息。
-          // 用落盘的 index 记录自动 resume 起会话(sdkSessionId 恢复上下文;失效时 spawnAgent 会兜底开新上下文),
-          // 再把这条消息送进去;连记录都没有(会话已删)才回错误让前端提示重连。
-          const entry = loadIndex().find((e) => e.id === m.sessionId);
-          if (!entry) { send(ws, { type: "session_error", sessionId: m.sessionId, error: tr("会话不存在或已被删除,请新建会话重试") }); return; }
-          startSession(ws, { id: m.sessionId, cwd: entry.cwd, resume: entry.sdkSessionId ?? undefined });
-          sess = sessions.get(m.sessionId);
-          if (!sess) { send(ws, { type: "session_error", sessionId: m.sessionId, error: tr("会话重建失败,请重开该会话") }); return; }
-        }
-        sess.running = true; // 同步置位:重建 agent 期间(下面的 await)点停止也要算数
-        sess.turnStart = Date.now(); // 打包产物上传的时间水位:只收本轮之后新出的文件
-        const userMsg = {
-          type: "user",
-          message: { role: "user", content: m.content }, // content: [{type:'text'...},{type:'image'...}]
-          parent_tool_use_id: null,
-          session_id: sess.sdkSessionId ?? "",
-        };
-        // 每轮随消息注入的动态上下文(只进模型输入,不落盘/不回显)。
-        // 为什么不塞 systemPrompt:那是 prompt 缓存的最前缀,SSH 断连/git 提交一变就把整段缓存冲掉;
-        // per-message 注入只影响当前这条新消息,之前的历史前缀照样命中。
-        // 斜杠命令(/compact、/code-review high …)整条会被 CLI 当命令行解析,命令名之后的内容就是参数 ——
-        // 给 /compact 尾巴上挂一段 git 状态,就变成"照这段状态去压缩上下文"。这类消息一律原样发,不注入任何东西。
-        // 用 (\s|$) 收尾:绝对路径开头的普通消息("/Users/tou/x 这个文件…")不会被误判成命令。
-        const body = Array.isArray(m.content) ? m.content : [{ type: "text", text: String(m.content ?? "") }];
-        const isSlashCmd = body.length === 1 && body[0]?.type === "text"
-          && /^\/[a-zA-Z][\w-]*(\s|$)/.test(String(body[0].text || "").trim());
-        const notes = [];
-        if (!isSlashCmd) {
-          const s = sess.ssh?.status === "connected" ? sess.ssh : null;
-          const prefix = s && `ssh -o ControlPath=${sshSock(m.sessionId)}`
-            + (s.port ? ` -p ${s.port}` : "")
-            + (s.keyPath ? ` -i ${s.keyPath} -o IdentitiesOnly=yes` : "")
-            + ` ${s.target}`;
-          // 连上/换机器时发全文;一直连着就不重发(全文还躺在历史里);断开要主动说一声 ——
-          // 原先断开是"什么都不发",agent 只会继续以为远端还连着。
-          const note = noteOnChange(sess, "ssh", s ? `${s.target}|${s.port || ""}|${s.cwd || ""}` : "off",
-            s ? `[系统提示·SSH] 本会话已连接远端服务器 ${s.target}${s.cwd ? `(远端当前目录 ${s.cwd})` : ""}。`
-                + `你的工具默认在本机执行;要在该远端跑命令,用下面这个复用已建连接(master 已就绪,无需再认证)的前缀:\n`
-                + `${prefix} '<remote command>'\n`
-                + `例:${prefix} 'cat /path/to/.env'。不要再假设不知道主机名/路径。`
-              : "[系统提示·SSH] 远端连接已断开,后续命令一律在本机执行,不要再用之前那个 ssh 前缀。",
-            null);
-          if (note) notes.push(note);
-        }
-        appendLog(m.sessionId, userMsg);
-        // 会话列表副标题要"始终显示最新用户消息"(重启后内存无 timeline,得靠 index 落盘)。把这条文本存进 index 并广播。
-        {
-          const txt = (Array.isArray(m.content) ? m.content : [])
-            .filter((b) => b.type === "text").map((b) => b.text).join(" ").trim()
-            || ((Array.isArray(m.content) && m.content.some((b) => b.type === "image")) ? "[图片]" : "");
-          if (txt) {
-            const idx = loadIndex();
-            const entry = idx.find((e) => e.id === m.sessionId);
-            if (entry && entry.lastUser !== txt) { entry.lastUser = txt; saveIndex(idx); broadcastIndex(); }
-          }
-        }
-        // 把这条用户消息回显给**除发送方外**的所有客户端，否则另一端(如手机发、电脑看)永远看不到对方发的字。
-        // 发送方自己已乐观渲染，排除它避免重复。
-        broadcastExcept(ws, { type: "sdk", sessionId: m.sessionId, message: userMsg });
-        // 若终端里 !cd 过:把 agent 重建到该目录。总是迁移(不管有没有历史)——
-        // agent 的 cwd 只能通过重启 query 真正改变。代价:Claude Code 按目录存 transcript,
-        // 无法跨目录接续,所以有历史时是在新目录重开上下文(前端 timeline 仍保留,便于回看)。
-        (async () => {
-          if (sess.pendingCwd && sess.pendingCwd !== sess.agentCwd) {
-            const target = sess.pendingCwd;
-            const hadHistory = sess.hadUserTurn;
-            sess.pendingCwd = null;
-            await restartAgentCwd(ws, sess, m.sessionId, target, true); // 下面马上 pushTurn,本轮不算结束
-            send(ws, { type: "system_note", sessionId: m.sessionId, text: hadHistory
-              ? tr("📁 已将 agent 工作目录切到 {{target}}(在该目录重开上下文,之前的对话记忆不带过来)", { target })
-              : tr("📁 已将 agent 工作目录设为 {{target}}", { target }) });
-          }
-          sess.hadUserTurn = true;
-          // git 现状放在**用户文本之后**:它可能有几十行,搁最前面会把用户真正问的那句挤到很远;
-          // 且这是"事实校正",紧贴问题后面近因更强。取 cwd 必须在上面的 pendingCwd 迁移之后。
-          const brief = isSlashCmd ? null : await gitBrief(sess.agentCwd || resolveCwd(m.sessionId), sess);
-          const content = [...notes.map((text) => ({ type: "text", text })), ...body,
-            ...(brief ? [{ type: "text", text: brief }] : [])];
-          // 送给 agent 的带注入;日志/回显仍用干净的 userMsg
-          pushTurn(sess, content.length === body.length ? userMsg : { ...userMsg, message: { role: "user", content } });
-        })();
+        // agent 正忙:消息压在 sidecar 这边排队,本轮跑完自动送进去。
+        // 以前排队是压在手机 App 的内存里 —— 手机一息屏/切后台就没人盯着"跑完了没",
+        // 晚上发的消息能一直躺到第二天早上重新打开 App 才发出去。
+        const q = sessions.get(m.sessionId);
+        if (q?.running) { enqueueMsg(ws, q, m); break; }
+        deliverUserMessage(ws, m);
+        break;
+      }
+      case "cancel_queued": {
+        const sess = sessions.get(m.sessionId);
+        if (!sess) return;
+        sess.msgQueue = sess.msgQueue.filter((x) => x.pid !== m.pid);
+        broadcastMsgQueue(m.sessionId, sess);
         break;
       }
       case "permission_response": {
