@@ -937,13 +937,14 @@ function saveSettings(s) {
 // 三条自我约束:
 //   · 不在启动路径上:延后 4 秒、异步、失败静默。内置表是地板,拉不到只是没有新模型,不是故障。
 //   · 一天最多一次:清单一周才动一回,每次启动都拉是纯浪费。
-//   · 不上报任何东西:只是 GET 一个公开文件,没有 body、没有 query、不带 key。
-// 两个源同时发、谁先成谁算(Promise.any):raw.githubusercontent 在国内经常被污染,jsDelivr 有时又慢,
-// 与其猜哪个通(那正是 baseUrlCN 那套要解决的问题),不如都发出去 —— 反正是同一个只读文件。
-const CATALOG_URLS = [
-  "https://raw.githubusercontent.com/dengteng/ChatCode/main/catalog/models.json",
-  "https://cdn.jsdelivr.net/gh/dengteng/ChatCode@main/catalog/models.json",
-];
+//   · 不上报任何东西:GET 一个公开只读接口,没有 body、不带 key、不带任何设备或用户标识。
+//     query 只有 ?project=chat-code(服务端要它选回源地址)。服务端能看到 IP 和时间,和
+//     src/version.ts 那个每次启动都发的更新检查是同一台机器、同一份日志,没有新增暴露面。
+// 只认自己的服务(api.dengteng.xyz,与 src/version.ts 的更新检查同一个后端),它回源到本仓库的
+// catalog/models.json 并缓存一小时。原先是 raw.githubusercontent + jsDelivr 双源直连,换掉的理由:
+// raw 在国内常被污染,jsDelivr 又多一方能看到用户请求;收拢到自己域名后可达性和信任面都更干净。
+// 单点故障是明知的取舍:服务挂了只是拉不到新清单,本地那份原样能用(见下面两处 return)。
+const CATALOG_URL = "https://api.dengteng.xyz/api/public/model-catalog?project=chat-code";
 const CATALOG_TTL = 86400_000; // 一天
 
 async function refreshCatalog() {
@@ -959,7 +960,7 @@ async function refreshCatalog() {
     } finally { clearTimeout(t); }
   };
   let j;
-  try { j = await Promise.any(CATALOG_URLS.map(get)); } catch { return; } // 两个源都不通:静默,下次再说
+  try { j = await get(CATALOG_URL); } catch { return; } // 拉不通:静默,下次再说
   // 形状不对就整份丢掉,别把半份垃圾写进 settings —— 宁可没有清单,也不要一份烂的赖在那儿。
   if (!j || typeof j.providers !== "object" || Array.isArray(j.providers)) return;
   const catalog = {};

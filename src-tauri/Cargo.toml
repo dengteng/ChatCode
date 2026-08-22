@@ -14,6 +14,7 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["devtools"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-http = "=2.2.0"
+base64 = "0.22"        # html 预览把本地图片内联成 data: URL(read_file_b64)
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

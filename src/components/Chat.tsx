@@ -347,6 +347,17 @@ function makeMdComponents(cwd: string) {
 // 菜单项:只认左键,且 preventDefault 掉默认的焦点转移(见 SSH 菜单处的注释)
 const pick = (fn: () => void) => (e: React.MouseEvent) => { if (e.button !== 0) return; e.preventDefault(); fn(); };
 
+// WKWebView 复用 .timeline 这个滚动层,"编程式"改 scrollTop 常常不触发重绘 —— 内容其实已经在、
+// 滚动条也到位了,却停在一片空白,要手动滚一下(产生真实滚动事件)才上色。
+// 下一帧真实滚 1px 再钉回目标位,等价于替用户滚了一下,逼它立刻重绘。到顶时改成往下滚,保证真有位移。
+// 凡是编程式跳转滚动位置的地方都得跟一脚 —— 漏掉哪条路径,哪条路径就白屏(切会话、往前翻历史都踩过)。
+const pokeRepaint = (el: HTMLElement, top: () => number, ok: () => boolean = () => true) =>
+  requestAnimationFrame(() => {
+    if (!ok()) return;
+    el.scrollTop += el.scrollTop > 0 ? -1 : 1;
+    el.scrollTop = top();
+  });
+
 export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { session: Session; onToggleInfo: (tab?: "project" | "branches" | "files") => void; onShowTurn: (anchor: number) => void; onOpenSettings: () => void }) {
   const { t } = useTranslation();
   const { state, respondPermission, sshReconnect, sshClose, configureSsh, chooseResume, requestGitInfo, runTerminal, listSshHosts, sendMessage, enqueuePending } = useStore();
@@ -369,7 +380,13 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
   const histRestore = useRef<{ h: number; top: number } | null>(null);
   useLayoutEffect(() => {
     const el = timelineRef.current, p = histRestore.current;
-    if (el && p) { el.scrollTop = el.scrollHeight - p.h + p.top; histRestore.current = null; }
+    if (el && p) {
+      const target = el.scrollHeight - p.h + p.top;
+      el.scrollTop = target;
+      histRestore.current = null;
+      // 少了这一脚就是"点了加载更早,聊天区整片空白":内容和滚动条都对,WKWebView 就是不上色
+      pokeRepaint(el, () => target);
+    }
   }, [histCap]);
   // 搜索面板点结果:切到会话后要滚到那条消息。ts 由搜索结果给(ISO → 毫秒),命中的可能是
   // 工具调用这种没有独立行的条目,所以取"不晚于它的最后一行"——落到所在回合的卡片上。
@@ -420,15 +437,9 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
     const el = timelineRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-    // WKWebView 复用 .timeline 滚动层,切会话后"编程式"定位到底部常不触发重绘 ——
-    // 内容其实已经在、滚动条也到底了,却停在白屏,要手动往上滚一下(产生真实滚动事件)才上色。
-    // 这里下一帧复现一次真实的 1px 上滚再钉回底部,等价于替用户滚了一下,逼它立刻重绘,免去手动操作。
-    const raf = requestAnimationFrame(() => {
-      const e2 = timelineRef.current;
-      if (!e2 || !stick.current) return;      // 期间用户已手动往上翻:别硬拽回底部
-      if (e2.scrollTop > 0) e2.scrollTop -= 1; // 真实上滚 1px(肉眼不可见),触发 WKWebView 重绘
-      e2.scrollTop = e2.scrollHeight;          // 再精确钉回底部
-    });
+    // 编程式定位到底部同样不触发重绘,补一脚(见 pokeRepaint)。
+    // ok 守卫:期间用户已手动往上翻(stick=false)就别硬拽回底部。
+    const raf = pokeRepaint(el, () => el.scrollHeight, () => stick.current);
     return () => cancelAnimationFrame(raf);
   }, [session.id]);
   useEffect(() => {

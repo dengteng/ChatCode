@@ -6,6 +6,7 @@ version = 4
 name = "ChatCode"
 version = "1.0.0"
 dependencies = [
+ "base64 0.22.1",
  "objc2",
  "objc2-foundation",
  "tauri",

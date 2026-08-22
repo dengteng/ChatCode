@@ -466,6 +466,16 @@ fn read_file(path: String) -> Result<String, String> {
     fs::read_to_string(&path).map_err(|e| e.to_string())
 }
 
+/// 读二进制文件转 base64。html 预览把 <img src="相对路径"> 内联成 data: URL 用 ——
+/// iframe 是 srcDoc,没有真实 URL 基准,图片只能连内容一起塞进文档。
+#[tauri::command]
+fn read_file_b64(path: String) -> Result<String, String> {
+    use base64::Engine;
+    fs::read(&path)
+        .map(|b| base64::engine::general_purpose::STANDARD.encode(b))
+        .map_err(|e| e.to_string())
+}
+
 /// 写文本文件内容(app 内保存用)。
 #[tauri::command]
 fn write_file(path: String, content: String) -> Result<(), String> {
@@ -772,8 +782,32 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_http::init())
-        .invoke_handler(tauri::generate_handler![open_url, open_path, reveal_path, resolve_path_cmd, kill_pid, kill_port, spawn_proc, run_claude, choose_directory, set_app_theme, list_dir, walk_project, read_file, write_file, read_dir_meta, probe_ports, bounce_dock, check_deps, probe_registry, install_claude, install_skill_git, remove_path, rename_path, sidecar_token])
+        .invoke_handler(tauri::generate_handler![open_url, open_path, reveal_path, resolve_path_cmd, kill_pid, kill_port, spawn_proc, run_claude, choose_directory, set_app_theme, list_dir, walk_project, read_file, read_file_b64, write_file, read_dir_meta, probe_ports, bounce_dock, check_deps, probe_registry, install_claude, install_skill_git, remove_path, rename_path, sidecar_token])
         .manage(Sidecar(Mutex::new(None)))
+        // 浮窗(大图 / 代码编辑器)关闭:先 hide,隔一小会儿再销毁。
+        // 起因是一次 SIGSEGV:关掉图片浮窗后几秒,主进程崩在 WebKit::DisplayLink::notifyObserversDisplayDidRefresh()。
+        // 那个刷新观察者挂在页面上,窗口一销毁页面就没了,而 CVDisplayLink 线程还在遍历观察者链表 ——
+        // 拆链表和读链表撞同一帧。先 hide 会让 WebPageProxy 把可见状态打成 0 并摘掉观察者,等它摘干净了再销毁。
+        //
+        // 这段**必须放在 Rust**,不能像原先那样写在浮窗页面的 onCloseRequested 里:Tauri v2 的 JS
+        // onCloseRequested 一旦注册,Rust 侧就不再自己关窗,改成等页面调 destroy()(见 @tauri-apps/api
+        // window.js 的实现)。于是浮窗 webview 一卡死或崩掉,红点 / Esc / ⌘W 全部失效,窗口再也关不掉 ——
+        // 兜底代码正好躺在死掉的那个进程里。放这儿就与页面死活无关。
+        // destroy() 不再发 CloseRequested(见 tauri Window::destroy 文档),所以不会递归回到这里。
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    return; // 主窗关闭 = 退出 App,照常走
+                }
+                api.prevent_close();
+                let _ = window.hide();
+                let w = window.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(120));
+                    let _ = w.destroy();
+                });
+            }
+        })
         .setup(|app| {
             // 开发时 npm run dev 已经起了一个 sidecar,别再起第二个
             if cfg!(debug_assertions) {

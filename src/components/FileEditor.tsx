@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { invoke, convertFileSrc } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import CodeMirror from "@uiw/react-codemirror";
@@ -18,6 +18,20 @@ import { useTranslation } from "react-i18next";
 // app 内可编辑的文本类型;md 额外支持实时渲染预览。CodeMirror 6 对无对应语言包的类型也能纯文本编辑,
 // 所以这里放开到常见代码/文本文件,统一走同一套编辑体验。
 const EDITABLE = new Set(["html", "css", "py", "json", "md", "js", "jsx", "ts", "tsx", "txt", "yml", "yaml", "toml", "sh"]);
+
+// html 预览:同目录的样式表 / 脚本 / 图片全部读盘内联(见下面 htmlDoc 处的原因)。
+// 三条正则各管一类;script 连闭合标签一起吃掉,否则替换完会剩个孤零零的 </script>。
+const LINK_RE = /<link\b[^>]*>/gi;
+const SCRIPT_RE = /<script\b[^>]*\bsrc\s*=\s*["'][^"']+["'][^>]*>\s*<\/script>/gi;
+const IMG_RE = /<img\b[^>]*>/gi;
+// 标签里取相对路径。远程 / data: / 绝对路径的返回 null —— 那些 iframe 自己能取,不碰。
+// 顺手去掉 ?v=1 这类 query:磁盘上没有那个文件名。
+const localRef = (tag: string, attr: "href" | "src"): string | null => {
+  const u = tag.match(new RegExp(`\\b${attr}\\s*=\\s*["']([^"']+)["']`, "i"))?.[1];
+  return u && !/^(https?:|\/\/|data:|asset:|#|\/)/i.test(u) ? u.split(/[?#]/)[0] : null;
+};
+const isImg = (u: string) => /\.(png|jpe?g|gif|webp|svg|avif|ico|bmp)$/i.test(u);
+const MIME: Record<string, string> = { svg: "image/svg+xml", jpg: "image/jpeg", ico: "image/x-icon" };
 export const ext = (name: string) => name.split(".").pop()?.toLowerCase() || "";
 export const isEditable = (name: string) => EDITABLE.has(ext(name));
 
@@ -71,13 +85,64 @@ export function FileEditor({ path, name, onClose, windowed }: { path: string; na
   // lineWrapping:软换行,和右侧预览的百分比同步滚动配合(源码不横向溢出,scrollTop 才有可比性)
   const extensions = useMemo(() => [EditorView.lineWrapping, ...(lang ? [lang] : [])], [lang]);
 
-  // html 预览:iframe srcDoc 直接渲染当前缓冲区(实时,不必先保存)。注入 <base> 指向文件所在目录,
-  // 让相对路径的 css/img/js 从磁盘加载得到。sandbox 仅 allow-scripts:脚本能跑,但处于独立源,碰不到宿主。
+  // html 预览:iframe srcDoc 直接渲染当前缓冲区(实时,不必先保存)。
+  // 同目录的样式表 / 脚本 / 图片全部读盘,内联进文档。原先是注入 <base href=convertFileSrc(目录)>
+  // 让 iframe 自己去取,那条路是死的,两处都不通:① tauri.conf.json 的 security 里没开 assetProtocol,
+  // asset:// 根本不响应;② convertFileSrc 把整个绝对路径百分号编码成**单个** path segment,相对路径
+  // 按 <base> 解析出来是 asset://localhost/style.css,目录整段被当最后一段替换掉了。
+  // 脚本也必须内联,不只是为了交互:现在的站点常在 <head> 里给 <html> 打个 js-anim 之类的标记,
+  // 让入场元素先 opacity:0,再由外部脚本滚动时点亮 —— 脚本取不到,正文就永远停在透明,
+  // 表现是"预览只剩背景"。sandbox 仅 allow-scripts:脚本能跑,但处于独立源,碰不到宿主。
+  const dir = useMemo(() => path.replace(/[^/\\]*$/, ""), [path]);
+  // 预览用 deferred 值:图片是 base64 内联的,一份文档可能上兆,每敲一个键重建 + iframe 整页重载会卡。
+  // useDeferredValue 让打字优先,空下来再刷预览。
+  const previewText = useDeferredValue(text);
+  const refs = useMemo(() => {
+    if (!isHtml || !previewText) return [] as string[];
+    const out = [
+      ...(previewText.match(LINK_RE) || []).filter((t) => /rel\s*=\s*["']?stylesheet/i.test(t)).map((t) => localRef(t, "href")),
+      ...(previewText.match(SCRIPT_RE) || []).map((t) => localRef(t, "src")),
+      ...(previewText.match(IMG_RE) || []).map((t) => localRef(t, "src")),
+    ];
+    return [...new Set(out.filter(Boolean) as string[])];
+  }, [isHtml, previewText]);
+  const [assets, setAssets] = useState<Record<string, string>>({});
+  // 依赖用 join 出来的字符串而不是 refs 本身:数组每次正文变化都是新引用,直接当依赖会变成每敲一键读一次盘。
+  const refKey = refs.join("|");
+  useEffect(() => {
+    let alive = true;
+    for (const r of refs) {
+      invoke<string>(isImg(r) ? "read_file_b64" : "read_file", { path: dir + r })
+        .then((c) => alive && setAssets((a) => (a[r] === c ? a : { ...a, [r]: c })))
+        .catch(() => {}); // 资源缺失不算错:预览退化成没样式/没图,别弹错误条挡住编辑
+    }
+    return () => { alive = false; };
+  }, [refKey, dir]);
+
   const htmlDoc = useMemo(() => {
-    if (!isHtml || text === null) return "";
-    const base = `<base href="${convertFileSrc(path.replace(/[^/\\]*$/, ""))}">`;
-    return /<head[^>]*>/i.test(text) ? text.replace(/<head[^>]*>/i, (m) => m + base) : base + text;
-  }, [isHtml, text, path]);
+    if (!isHtml || previewText === null) return "";
+    const got = (tag: string, attr: "href" | "src") => {
+      const r = localRef(tag, attr);
+      return r && assets[r] !== undefined ? { r, data: assets[r] } : null;
+    };
+    return previewText
+      .replace(LINK_RE, (tag) => {
+        if (!/rel\s*=\s*["']?stylesheet/i.test(tag)) return tag;
+        const hit = got(tag, "href");
+        return hit ? `<style>\n${hit.data}\n</style>` : tag;
+      })
+      // 内联脚本里出现字符串 "</script>" 会提前闭合整个标签,转义掉
+      .replace(SCRIPT_RE, (tag) => {
+        const hit = got(tag, "src");
+        return hit ? `<script>\n${hit.data.replace(/<\/script/gi, "<\\/script")}\n</script>` : tag;
+      })
+      .replace(IMG_RE, (tag) => {
+        const hit = got(tag, "src");
+        if (!hit) return tag;
+        const e = ext(hit.r);
+        return tag.replace(/(\bsrc\s*=\s*["'])[^"']*(["'])/i, `$1data:${MIME[e] || `image/${e}`};base64,${hit.data}$2`);
+      });
+  }, [isHtml, previewText, assets]);
 
   // 浮窗位置(初始居中);宽高交给 CSS resize 拖角缩放,不受控免打架
   const [pos, setPos] = useState(() => ({ x: Math.max(20, (window.innerWidth - 1100) / 2), y: Math.max(20, (window.innerHeight - 760) / 2) }));
