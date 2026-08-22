@@ -1747,7 +1747,7 @@ button.footer-row:focus-visible { box-shadow: none; }
    align-items: stretch —— 右栏活流撑到和左栏等高,不再右下留大片空白。 */
 .work-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 3fr); gap: 2px 14px; margin-top: 6px; align-items: stretch; }
 .work-cols.single { grid-template-columns: minmax(0, 1fr); }
-.work-left { align-self: start; }
+.work-left { align-self: start; min-width: 0; }
 .todo-row { display: flex; align-items: baseline; gap: 6px; font-size: 12px; line-height: 20px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .todo-row.completed { color: var(--muted); }
 .todo-row.completed .todo-ico { color: #2e9c58; }
@@ -1758,7 +1758,9 @@ button.footer-row:focus-visible { box-shadow: none; }
 .todo-row.in_progress .todo-ico::before { content: "◉"; animation: pulse 1.2s ease-in-out infinite; display: inline-block; }
 /* 右栏活流:多行日志(.ws-line),撑满整栏(min-height 兜底 + 随左栏拉伸),底部对齐、最新行在最底。
    内容涨了往上顶出视口,顶部 mask 渐隐,像持续刷屏的日志。max-height 封顶,防长正文把气泡撑太高。 */
-.work-right { display: flex; flex-direction: column; min-height: 0; }
+/* min-width:0 少不得:栅格项默认 min-width:auto = 按内容算最小宽,活流那些 white-space:pre 的长 diff 行
+   会把这一栏顶得比 3fr 轨道还宽,行尾直接糊出卡片外(ellipsis 也就永远不生效)。 */
+.work-right { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 /* 活流:高度随内容从 min 长到 max(内容少就矮、多了到 max 封顶),底部对齐,超出顶部裁掉 + mask 渐隐。 */
 .work-stream { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; gap: 1px; }
 /* 行数多到封顶才裁顶 + 顶部渐隐;行少时高度随内容,不加 mask(否则单行也被渐隐掉) */

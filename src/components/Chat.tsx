@@ -927,29 +927,11 @@ function permWaitMs(items: TimelineItem[], now: number): number {
   return w;
 }
 
-// 流式气泡宽度棘轮:running 时用 ResizeObserver 盯宽度,只记录见过的最大值并钉成 minWidth,
-// 活流行长忽长忽短时靠它撑住不回缩(撑到 .msg-col 的 max-width 70% 自然封顶)。
-// running 结束清掉,让完成态卡片按最终正文自由排版。box-sizing 全局 border-box,offsetWidth 与 minWidth 同基准。
-//
-// 高度**不**上棘轮。曾经一起钉过 minHeight,但棘轮只增不减:活流一缩短(行被挤出视口、
-// 或行数跌回 10 以下丢掉 .work-stream.tall)卡片仍撑在历史峰值,底部空出一大片。
-// 它本来要防的"每个 token 改高度触发整列 timeline 重排",.work-stream.tall 的 max-height:200px
-// 加底部对齐已经封住了 —— feed 只会涨到封顶为止,不会把卡片越推越高。真要再兜,
-// 该给 .work-stream 一个 min-height,而不是把整张卡片钉死在历史最高点。
-function useWidthRatchet(active: boolean) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    if (!active) { el.style.minWidth = ""; return; }
-    const ro = new ResizeObserver(() => {
-      if (el.offsetWidth > (parseFloat(el.style.minWidth) || 0)) el.style.minWidth = `${el.offsetWidth}px`;
-    });
-    ro.observe(el);
-    return () => { ro.disconnect(); el.style.minWidth = ""; };
-  }, [active]);
-  return ref;
-}
+// 曾经这里有个"宽度棘轮":running 时把见过的最大 offsetWidth 钉成 minWidth,防活流行长忽长忽短时卡片回缩。
+// 已删。.msg-row-agent > .msg-col 现在是 flex: 0 0 70%,气泡本来就恒宽,棘轮无事可做;
+// 反倒是它钉下的是**像素**值,窗口变窄 / 侧栏展开后那个死数还在,min-width 又压得过 max-width:70%,
+// 卡片就横着捅出聊天区(用户报的"消息卡片宽度超了")。
+// 高度同样不做棘轮:.work-stream.tall 的 max-height 已经封住了活流把卡片越推越高。
 
 // 用户发出消息后,agent 气泡不立刻出现:先在名字下方顶约 1.4s 的"思考中"小动画,再展开正在工作的气泡。
 // 只用于当前活跃回合;定时器随该回合的行挂载启动,回合切换(新 gi)自然重新计时。
@@ -996,7 +978,6 @@ function AgentTurnCard({ items, running, showFull, cwd, liveInput, settle, bgWai
   const now = useNow(running);
   const startTs = items[0]?.ts; // 本轮起点=组内首个动作
   const elapsed = startTs ? Math.max(0, now - startTs - permWaitMs(items, now)) : 0; // 扣掉等用户选择的时间
-  const cardRef = useWidthRatchet(running); // 流式时气泡宽度只增不减,撑到 max(70%)就锁住,不再随 ticker 行长回缩
   // 气泡右上角时间 = 本轮回复完成时刻(优先结算行 ts,回退到最后一个动作);运行中还没完成则不显示
   const doneTs = settle?.ts ?? items[items.length - 1]?.ts;
   const { skills, mcps, activeSkills, activeMcps } = usedSkillsMcp(items);
@@ -1027,7 +1008,7 @@ function AgentTurnCard({ items, running, showFull, cwd, liveInput, settle, bgWai
   }, [items, showFull]);
   const hasBody = segments.length > 0;
   return (
-    <div ref={cardRef} className={`agent-turn-card bubble ${running ? "running" : ""} ${bgWait?.length ? "bg-wait" : ""}`}>
+    <div className={`agent-turn-card bubble ${running ? "running" : ""} ${bgWait?.length ? "bg-wait" : ""}`}>
       <div className="agent-turn-body">
         {running
           ? <WorkBody items={items} elapsed={elapsed} liveInput={liveInput} />
