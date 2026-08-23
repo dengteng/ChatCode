@@ -1,5 +1,7 @@
 // 版本更新检测 + 几个全局版本常量。
-// 只有一个出口请求:匿名 GET 一份公开版本号,不带 token、不带 body、不上传任何本地数据。
+// 只有一个出口请求:匿名 GET 一份公开版本号,不带 token、不带 body。
+// query 里带四个统计参数(install/v/platform/tz):一个本机随机 UUID、版本号、平台、
+// 系统时区。没有账号、没有 IP 记录、不碰工作区里任何内容。
 // fetch 用 tauri-plugin-http:走 Rust 原生发请求,绕开 webview CORS(接口未配 CORS 头,window.fetch 会 "Load failed")。
 import { fetch } from "@tauri-apps/plugin-http";
 import pkg from "../package.json";
@@ -21,7 +23,18 @@ export { SDK_VERSION };
 export const PROJECT_ID = "chat-code"; // 项目 identifier(?project=)
 export const PLATFORM = "macos";
 
-const LS = { lastVerCheck: "cc-last-ver-skip" };
+const LS = { lastVerCheck: "cc-last-ver-skip", installId: "ChatCode-install-id" };
+
+// 这台安装的稳定 UUID,只用于服务端把「同一台机器的多次版本检查」算成一台,
+// 不含任何身份信息、不随请求上传别的东西。清掉 localStorage 就等于换一台新机器。
+function installId(): string {
+  let id = localStorage.getItem(LS.installId);
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem(LS.installId, id);
+  }
+  return id;
+}
 
 export class ApiError extends Error {
   status: number;
@@ -46,7 +59,16 @@ export const markUpdatePrompted = () => localStorage.setItem(LS.lastVerCheck, St
 
 const UPDATE_API_BASE = "https://api.dengteng.xyz";
 export async function checkVersion(): Promise<VersionCheck> {
-  const res = await fetch(`${UPDATE_API_BASE}/api/public/version?project=${encodeURIComponent(PROJECT_ID)}`, {
+  // install/v/platform/tz 是服务端的使用量统计参数(这个接口兼做心跳):
+  // install 只是本机 UUID,tz 用来推大致国家 —— 服务端不采集 IP、不做定位。
+  const q = new URLSearchParams({
+    project: PROJECT_ID,
+    install: installId(),
+    v: APP_VERSION,
+    platform: PLATFORM,
+    tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  });
+  const res = await fetch(`${UPDATE_API_BASE}/api/public/version?${q}`, {
     method: "GET", headers: { "Content-Type": "application/json" },
   });
   const text = await res.text();
