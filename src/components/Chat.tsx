@@ -410,6 +410,10 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
     }
     stick.current = false;                                      // 别让"跟随底部"把视图又拽回去
     hit.scrollIntoView({ block: "center" });
+    // scrollIntoView 同样是编程式跳转,同样不保证重绘。落点得先读出来再传给 pokeRepaint ——
+    // 它是在下一帧、"先滚 1px"之后才求值 top(),那时 el.scrollTop 已经被自己挪过了。
+    const landed = el.scrollTop;
+    pokeRepaint(el, () => landed);
     hit.classList.add("msg-focus");
     setTimeout(() => hit?.classList.remove("msg-focus"), 2200);
     setFocusTs(null);
@@ -426,7 +430,14 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
     stick.current = dist < 80;      // 贴底(80px 内)恢复跟随
     setShowJump(dist > 300);        // 离底 300px 以上,显示回到底部按钮
   };
-  const jumpBottom = () => { const el = timelineRef.current; if (el) el.scrollTop = el.scrollHeight; stick.current = true; setShowJump(false); };
+  // 回到底部也是"编程式跳转",同样要补 pokeRepaint —— 少了它就是点完一片空白、滚动条还在,
+  // 得发条消息触发重渲染才上色(切会话、往前翻历史踩过同一个坑,见 pokeRepaint 注释)。
+  const jumpBottom = () => {
+    const el = timelineRef.current;
+    if (el) { el.scrollTop = el.scrollHeight; pokeRepaint(el, () => el.scrollHeight); }
+    stick.current = true;
+    setShowJump(false);
+  };
   // 切会话:同步(paint 前)把滚动条钉到底。
   // 之前用 useEffect + sentinel.scrollIntoView 有两个毛病:① useEffect 在 paint 之后跑,
   // 浏览器已经先把 .timeline 这个复用 DOM 的 scrollTop 恢复到一个略偏的位置、闪一下;
