@@ -156,6 +156,14 @@ export function FileEditor({ path, name, onClose, windowed }: { path: string; na
       });
   }, [isHtml, previewText, assets]);
 
+  // 预览分栏方向。窄窗口写代码时左右挤,宽屏读长文时上下挤 —— 交给用户自己按内容切。
+  // 记进 localStorage:同一个人的习惯基本不变,每开一个文件都要重切一次很烦。
+  const [vert, setVert] = useState(() => localStorage.getItem("ChatCode-feditor-vert") === "1");
+  const toggleLayout = () => setVert((v) => {
+    localStorage.setItem("ChatCode-feditor-vert", v ? "0" : "1");
+    return !v;
+  });
+
   // 浮窗位置(初始居中);宽高交给 CSS resize 拖角缩放,不受控免打架
   const [pos, setPos] = useState(() => ({ x: Math.max(20, (window.innerWidth - 1100) / 2), y: Math.max(20, (window.innerHeight - 760) / 2) }));
   const onDragHead = (e: React.MouseEvent) => {
@@ -230,6 +238,18 @@ export function FileEditor({ path, name, onClose, windowed }: { path: string; na
           <span className="feditor-path" title={path}>{path}</span>
           <div className="feditor-actions">
             {status && <span className="muted">{status}</span>}
+            {/* 分栏方向切换。图标画的是切过去之后的样子(两块并排 / 两块上下),不是当前状态 ——
+                按钮上画"你会得到什么"比画"你现在是什么"少一层脑内转换。 */}
+            {preview && (
+              <button className="ghost feditor-layout" title={vert ? t("切换为左右并列") : t("切换为上下并列")}
+                onMouseDown={(e) => { if (e.button !== 0) return; e.preventDefault(); e.stopPropagation(); toggleLayout(); }}>
+                <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4">
+                  {vert
+                    ? <><rect x="1" y="1" width="5" height="12" rx="1" /><rect x="8" y="1" width="5" height="12" rx="1" /></>
+                    : <><rect x="1" y="1" width="12" height="5" rx="1" /><rect x="1" y="8" width="12" height="5" rx="1" /></>}
+                </svg>
+              </button>
+            )}
             {/* onMouseDown 而非 onClick:按下先让 CodeMirror blur,状态行("已保存")随之增删把按钮挤走,
                 click(mouseup)落在移位后的位置就丢了 → 要点两次。stopPropagation 是别把按下当成拖窗。 */}
             <button className="hi" disabled={!dirty} onMouseDown={(e) => { if (e.button !== 0) return; e.preventDefault(); e.stopPropagation(); save(); }}>{t("保存")}</button>
@@ -240,7 +260,7 @@ export function FileEditor({ path, name, onClose, windowed }: { path: string; na
         {text === null && !err ? (
           <div className="feditor-body"><div className="muted" style={{ padding: 16 }}>{t("加载中…")}</div></div>
         ) : text !== null && (
-          <div className={`feditor-body ${preview ? "split" : ""}`}>
+          <div className={`feditor-body ${preview ? "split" : ""} ${preview && vert ? "vert" : ""}`}>
             <div className="feditor-input-wrap">
               <CodeMirror
                 value={text}
