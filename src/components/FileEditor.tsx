@@ -24,11 +24,16 @@ const EDITABLE = new Set(["html", "css", "py", "json", "md", "js", "jsx", "ts", 
 const LINK_RE = /<link\b[^>]*>/gi;
 const SCRIPT_RE = /<script\b[^>]*\bsrc\s*=\s*["'][^"']+["'][^>]*>\s*<\/script>/gi;
 const IMG_RE = /<img\b[^>]*>/gi;
-// 标签里取相对路径。远程 / data: / 绝对路径的返回 null —— 那些 iframe 自己能取,不碰。
+// 标签里取本地路径。远程 / data: / 锚点返回 null —— 那些 iframe 自己能取,不碰。
 // 顺手去掉 ?v=1 这类 query:磁盘上没有那个文件名。
+// "/assets/x.js" 这种根绝对路径也要读盘:srcDoc + sandbox(无 allow-same-origin)的 iframe
+// 处于不透明源,"/" 无处可指,交给它取等于取不到 —— Vite 打出来的站正文全靠那支 JS,
+// 拿不到就只剩一片白。这里按「html 自己所在目录 = 站点根」解析。
+// ponytail: 没做真站点根探测(往上找 index.html 之类)。猜错了读盘失败,预览退化成没样式,和修之前一样,不会更糟。
 const localRef = (tag: string, attr: "href" | "src"): string | null => {
   const u = tag.match(new RegExp(`\\b${attr}\\s*=\\s*["']([^"']+)["']`, "i"))?.[1];
-  return u && !/^(https?:|\/\/|data:|asset:|#|\/)/i.test(u) ? u.split(/[?#]/)[0] : null;
+  if (!u || /^(https?:|\/\/|data:|asset:|#)/i.test(u)) return null;
+  return u.split(/[?#]/)[0].replace(/^\/+/, "");
 };
 const isImg = (u: string) => /\.(png|jpe?g|gif|webp|svg|avif|ico|bmp)$/i.test(u);
 const MIME: Record<string, string> = { svg: "image/svg+xml", jpg: "image/jpeg", ico: "image/x-icon" };
@@ -134,7 +139,14 @@ export function FileEditor({ path, name, onClose, windowed }: { path: string; na
       // 内联脚本里出现字符串 "</script>" 会提前闭合整个标签,转义掉
       .replace(SCRIPT_RE, (tag) => {
         const hit = got(tag, "src");
-        return hit ? `<script>\n${hit.data.replace(/<\/script/gi, "<\\/script")}\n</script>` : tag;
+        if (!hit) return tag;
+        // 原属性留着,尤其 type="module" —— module 天生 defer,丢掉它内联成经典脚本,
+        // <head> 里的入口就会在 <body> 之前跑,React 拿不到 #root,预览照样一片白。
+        // src / crossorigin 是取远端才用的,内联后必须摘掉。
+        const open = tag.match(/<script\b[^>]*>/i)![0]
+          .replace(/\s+\bsrc\s*=\s*["'][^"']*["']/i, "")
+          .replace(/\s+\bcrossorigin(\s*=\s*["'][^"']*["'])?/i, "");
+        return `${open}\n${hit.data.replace(/<\/script/gi, "<\\/script")}\n</script>`;
       })
       .replace(IMG_RE, (tag) => {
         const hit = got(tag, "src");
