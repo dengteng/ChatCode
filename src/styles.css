@@ -1242,9 +1242,14 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 /* 后台任务提示:本轮结算了但还挂着后台任务(见 Chat.tsx pendingBgTasks),这条消息还会有下文。
    用呼吸的点 + 弱色条,别做成 .bubble-warn 那种红色告警,它不是错误。 */
 /* 整条可点(开后台任务弹窗),所以是 button:显式清掉按钮默认样式,宽度撑满与原来的 div 一致 */
-.bubble-bg-wait { display: flex; align-items: center; gap: 7px; width: 100%; margin-top: 6px; padding: 4px 9px; border-radius: 6px; font-size: 11.5px; line-height: 1.4; text-align: left; cursor: pointer;
+/* 两行:第一行状态+计时,第二行进度摘要(只在有输出时出现)。原来是单行 flex,改成纵向堆叠 */
+.bubble-bg-wait { display: flex; flex-direction: column; align-items: stretch; gap: 3px; width: 100%; margin-top: 6px; padding: 4px 9px; border-radius: 6px; font-size: 11.5px; line-height: 1.4; text-align: left; cursor: pointer;
   color: color-mix(in srgb, var(--accent) 70%, var(--text)); background: color-mix(in srgb, var(--accent) 8%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent); transition: background .12s ease; }
 .bubble-bg-wait:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.bg-wait-l1 { display: flex; align-items: center; gap: 7px; min-width: 0; }
+/* 进度摘要:等宽(数字每 2s 跳一次,比例字体下整行会左右抖)、单行截断(命令输出可能很长) */
+.bg-wait-l2 { min-width: 0; padding-left: 13px; font: 10.5px/1.45 Menlo, monospace; opacity: .72;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bgt-chevron { margin-left: auto; flex: none; opacity: .7; }
 /* 计时每秒变,比例字体下数字宽度不一,整句会左右抖 —— 只把时长切成等宽 */
 .bgt-dur { font: 11px/1 Menlo, monospace; }

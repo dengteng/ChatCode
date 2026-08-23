@@ -388,6 +388,8 @@
   "关闭": "Close",
   "加载中…": "Loading…",
   "HTML 预览": "HTML Preview",
+  "镜像 {{a}}/{{b}}": "images {{a}}/{{b}}",
+  "层 {{a}}/{{b}}": "layers {{a}}/{{b}}",
   "切换为左右并列": "Switch to side-by-side",
   "切换为上下并列": "Switch to stacked",
   "刚刚": "Just now",

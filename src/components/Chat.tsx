@@ -1097,21 +1097,59 @@ function pendingBgTasks(items: TimelineItem[], t: (key: string) => string): BgTa
   return found.filter((t) => !done.has(t.id));
 }
 
+// 后台任务的输出文件边跑边追加,2s 拉一次。折叠着的 bar 和展开的弹窗都要读,抽出来共用。
+function useTailFile(path?: string) {
+  const [out, setOut] = useState<string | null>(null);
+  useEffect(() => {
+    if (!path) { setOut(null); return; }
+    let alive = true;
+    const pull = () => invoke<string>("read_file", { path })
+      .then((c) => { if (alive) setOut(c); }).catch(() => { if (alive) setOut(null); });
+    pull();
+    const timer = window.setInterval(pull, 2000);
+    return () => { alive = false; window.clearInterval(timer); };
+  }, [path]);
+  return out;
+}
+
+// docker 拉镜像的进度。后台任务的 stdout 不是 TTY,docker 这时不画进度条,改成一行一条状态:
+//   docker pull          "<层id> Pulling fs layer" / "<层id> Pull complete"      —— 只有层状态,没有字节数
+//   docker compose pull  上面这些之外,还多 "<层id> Downloading 12.3MB"(累计值,会往上涨)
+//                        和镜像级的 "Image redis:7 Pulling" / "Image redis:7 Pulled"
+// 所以裸 docker pull 只能给出层进度,compose 才能连已下载字节一起给。两者都拿不到「总大小」——
+// docker 压根没打印过分母,所以只报已下载多少,不报百分比(编不出来的数就别编)。
+const BYTE_UNIT: Record<string, number> = { B: 1, kB: 1e3, KB: 1e3, MB: 1e6, GB: 1e9 };
+type DockerStat = { layers: number; layersDone: number; imgs: number; imgsDone: number; bytes: number };
+function dockerStat(out: string): DockerStat | null {
+  const layers = new Set<string>(), done = new Set<string>();
+  const bytes = new Map<string, number>();
+  let imgs = 0, imgsDone = 0;
+  for (const ln of out.split("\n")) {
+    let m;
+    // 冒号是可选的:裸 docker pull 写 "58dee6a49ef1: Pulling fs layer",compose 写 " 58dee6a49ef1 Pulling fs layer 0B"
+    if ((m = ln.match(/^\s*([0-9a-f]{8,}):?\s+Pulling fs layer/))) layers.add(m[1]);
+    else if ((m = ln.match(/^\s*([0-9a-f]{8,}):?\s+Pull complete/))) { layers.add(m[1]); done.add(m[1]); }
+    else if ((m = ln.match(/^\s*([0-9a-f]{8,}):?\s+Downloading\s+([\d.]+)\s*([kKMG]?B)\b/))) {
+      layers.add(m[1]);
+      // 每层报的是该层已下载的累计量,层下完后会跳回 "Download complete 0B" —— 取见过的最大值,别被那个 0 抹掉
+      bytes.set(m[1], Math.max(bytes.get(m[1]) ?? 0, parseFloat(m[2]) * (BYTE_UNIT[m[3]] ?? 1)));
+    }
+    else if (/^\s*Image\s.*\sPulling\s*$/.test(ln)) imgs++;
+    else if (/^\s*Image\s.*\sPulled\s*$/.test(ln)) imgsDone++;
+  }
+  if (!layers.size && !imgs) return null;   // 不是 docker 的输出,交给"显示最后一行"那条路
+  let total = 0;
+  for (const v of bytes.values()) total += v;
+  return { layers: layers.size, layersDone: done.size, imgs, imgsDone, bytes: total };
+}
+const fmtBytes = (n: number) => n >= 1e9 ? `${(n / 1e9).toFixed(1)}GB` : n >= 1e6 ? `${(n / 1e6).toFixed(1)}MB` : `${Math.round(n / 1e3)}kB`;
+
 // 弹窗里的一条后台任务。shell 任务的输出文件边跑边追加,2s 拉一次当进度看;
 // 子 agent 的产物不落在这个路径下(只能拿到 agentId),只展示它领到的任务描述。
 function BgTaskItem({ task }: { task: BgTask }) {
   const { t } = useTranslation();
-  const [out, setOut] = useState<string | null>(null);
+  const out = useTailFile(task.out);
   const preRef = useRef<HTMLPreElement>(null);
-  useEffect(() => {
-    if (!task.out) return;
-    let alive = true;
-    const pull = () => invoke<string>("read_file", { path: task.out })
-      .then((t) => { if (alive) setOut(t); }).catch(() => { if (alive) setOut(null); });
-    pull();
-    const timer = window.setInterval(pull, 2000);
-    return () => { alive = false; window.clearInterval(timer); };
-  }, [task.out]);
   useEffect(() => { const el = preRef.current; if (el) el.scrollTop = el.scrollHeight; }, [out]); // 贴着最新一行,和终端一样
   const lines = out ? out.replace(/\s+$/, "").split("\n") : [];
   return <div className="bgt-item">
@@ -1135,10 +1173,41 @@ function BgTasksBar({ tasks }: { tasks: BgTask[] }) {
   // 一个几分钟的构建看着就像卡死了 —— 其实电平一清(SDK 的 background_tasks_changed)0.2s 内就续跑。
   const now = useNow(true);
   const since = Math.min(...tasks.map((t) => t.ts ?? now));
+  // 折叠着也读输出,把进度顶到 bar 上 —— 拉几个 G 的镜像时,只有一个"已跑 3min"跟卡死没区别。
+  // ponytail: 只跟第一个有输出文件的 shell 任务。同时跑两条命令时另一条的进度得点开看,
+  //           合并多路进度要嘛串味要嘛占两行,不值当。
+  const lead = tasks.find((k) => k.out);
+  const out = useTailFile(lead?.out);
+  const stat = useMemo(() => (out ? dockerStat(out) : null), [out]);
+  // 速度靠两次轮询之间的字节差。docker 不给总大小,所以只有速率没有百分比。
+  const prev = useRef<{ b: number; ms: number } | null>(null);
+  const [speed, setSpeed] = useState(0);
+  useEffect(() => {
+    if (!stat) { prev.current = null; setSpeed(0); return; }
+    const ms = Date.now(), p = prev.current;
+    if (p && ms > p.ms) setSpeed(Math.max(0, ((stat.bytes - p.b) / (ms - p.ms)) * 1000));
+    prev.current = { b: stat.bytes, ms };
+  }, [stat]);
+  const summary = useMemo(() => {
+    if (stat) {
+      const parts: string[] = [];
+      if (stat.imgs) parts.push(t("镜像 {{a}}/{{b}}", { a: stat.imgsDone, b: stat.imgs }));
+      if (stat.layers) parts.push(t("层 {{a}}/{{b}}", { a: stat.layersDone, b: stat.layers }));
+      if (stat.bytes) parts.push(fmtBytes(stat.bytes));
+      if (speed > 1e3) parts.push(`${fmtBytes(speed)}/s`);
+      return parts.join(" · ");
+    }
+    // 不是 docker 就退回最后一行非空输出:不用写解析器,任何命令都有效
+    const last = out?.replace(/\s+$/, "").split("\n").filter((l) => l.trim()).pop();
+    return last ? last.slice(-120) : "";
+  }, [stat, speed, out, t]);
   return <>
     <button className="bubble-bg-wait" onClick={() => { setOpen(true); setActive(0); }} title={t("查看后台任务内容与实时输出")}>
-      <i className="bg-wait-dot" />{t("后台任务运行中")}{tasks.length > 1 ? t(" · {{n}} 个", { n: tasks.length }) : ""}{t(" · 已跑 ")}<span className="bgt-dur">{fmtDurationSec(now - since)}</span>{t("，完成后会自动继续")}
-      <ChevronRight size={13} className="bgt-chevron" />
+      <span className="bg-wait-l1">
+        <i className="bg-wait-dot" />{t("后台任务运行中")}{tasks.length > 1 ? t(" · {{n}} 个", { n: tasks.length }) : ""}{t(" · 已跑 ")}<span className="bgt-dur">{fmtDurationSec(now - since)}</span>{t("，完成后会自动继续")}
+        <ChevronRight size={13} className="bgt-chevron" />
+      </span>
+      {summary && <span className="bg-wait-l2" title={summary}>{summary}</span>}
     </button>
     {open && cur && createPortal(
       <div className="commit-modal-overlay" onMouseDown={() => setOpen(false)}>
