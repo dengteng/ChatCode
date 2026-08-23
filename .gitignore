@@ -29,3 +29,6 @@ src-tauri/resources/
 
 # 发布产物(dmg)。不放 dist/ —— vite build 会清空那个目录
 release/
+
+# 文档与宣传素材:本地留着,不入库
+docs/
