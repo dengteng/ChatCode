@@ -52,15 +52,10 @@ export function InfoPanel({ session, initialTab, memoryTarget, onClose }: { sess
   const { t } = useTranslation();
   const { state, requestGitInfo, runTerminal, stopTask } = useStore();
   const [tab, setTab] = useState<Tab>(initialTab);
-  const [copied, setCopied] = useState(false);
   const git = state.git[session.id];
   useEffect(() => { setTab(initialTab); }, [initialTab, session.id]);
   useEffect(() => { requestGitInfo(session.id); }, [session.id, session.termCwd]);
 
-  const openPath = () => runTerminal(session.id, `open ${quote(session.termCwd || session.cwd)}`);
-  const copyPath = async () => {
-    try { await navigator.clipboard.writeText(session.termCwd || session.cwd); setCopied(true); window.setTimeout(() => setCopied(false), 1600); } catch { runTerminal(session.id, `printf %s ${quote(session.termCwd || session.cwd)} | pbcopy`); }
-  };
   const gitAction = (command: string) => { runTerminal(session.id, command); }; // 输出在消息列表的终端条目里看
   // 会话相关端口(cwd 过滤抓不到的:ssh -L 隧道等):从时间线抽启动口/提及口,再交后端反查是否在 LISTEN
   const { startedPorts, mentionedPorts } = useMemo(() => extractSessionPorts(session.timeline), [session.timeline]);
@@ -110,7 +105,7 @@ export function InfoPanel({ session, initialTab, memoryTarget, onClose }: { sess
       </div>
     </div>
     {tab === "project" && <div className="info-scroll">
-      <InfoSection title={t("工作目录")}><code className="path-value">{session.termCwd || session.cwd}</code><div className="info-actions"><button onClick={copyPath}>{copied ? t("已复制") : t("复制路径")}</button><button onClick={openPath}>{t("在 Finder 中打开")}</button></div></InfoSection>
+      {/* 工作目录一栏去掉:聊天页顶栏常驻显示同一个路径,抽屉里再列一遍是重复。首页面板那份留着 —— 那里没有顶栏。 */}
       <InfoSection title={t("会话进程（{{num}}）", { num: procs.length })}
         action={procs.length > 0 && <button className="proc-stop stop-all" title={t("停止列出的全部进程")} onClick={() => setConfirmKill("proc")}><Square size={11} /> {t("停止全部")}</button>}>
         {procs.length ? procs.map((process) => <div className="process-row" key={process.pid}><span title={process.name}>{process.name}</span><span className="muted">{process.elapsed}</span><button className="proc-stop" title={process.task ? t("停止该后台任务") : t("结束进程")} onClick={() => Promise.resolve(stopProc(process)).catch(() => {}).finally(() => refreshRuntime())}><Square size={11} /> {t("停止")}</button></div>) : <div className="muted">{t("未检测到属于此工作目录的活动进程")}</div>}
