@@ -202,6 +202,7 @@ export function Composer({ session }: { session: Session }) {
   const [palIdx, setPalIdx] = useState(0);
   const [modelMenu, setModelMenu] = useState(false); // /model 选择器打开中
   const modelMenuRef = useRef<HTMLDivElement>(null);
+  const modelBtnRef = useRef<HTMLButtonElement>(null);
   const [text, setText] = useState("");     // 纯文本镜像(驱动命令面板/占位符,不回写编辑器)
   const [imgCount, setImgCount] = useState(0);
   const [preview, setPreview] = useState<{ src: string; left: number; top: number } | null>(null); // 悬浮预览
@@ -512,17 +513,23 @@ export function Composer({ session }: { session: Session }) {
     setText(""); setImgCount(0); setPalIdx(0); setPreview(null); setSuggestion("");
   }
 
-  // 模型菜单开着时:点菜单和输入框以外的任何位置都收起(点输入框保留,方便直接打字)
+  // 模型菜单开着时:点菜单和输入框以外的任何位置都收起(点输入框保留,方便直接打字)。
+  // esc 也挂在 document 上:菜单常从底部按钮点开,焦点不在编辑器,编辑器的 onKeyDown 收不到。
   useEffect(() => {
     if (!modelMenu) return;
     const onDown = (e: MouseEvent) => {
       const t = e.target as Node;
-      if (modelMenuRef.current?.contains(t) || edRef.current?.contains(t)) return;
+      if (modelMenuRef.current?.contains(t) || modelBtnRef.current?.contains(t) || edRef.current?.contains(t)) return;
       setModelMenu(false);
     };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.preventDefault(); setModelMenu(false); } };
     document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
   }, [modelMenu]);
+
+  // 换会话时收起:Composer 不随会话 remount,菜单会挂在新会话上还显示旧列表
+  useEffect(() => { setModelMenu(false); }, [session.id]);
 
   function openModelMenu() {
     if (modelMenu) { setModelMenu(false); return; } // 再点一次收起
@@ -1132,7 +1139,8 @@ export function Composer({ session }: { session: Session }) {
               <div key={m.value} ref={i === palIdx ? selItemRef : undefined}
                 className={`palette-item ${i === palIdx ? "sel" : ""}`}
                 onMouseEnter={() => setPalIdx(i)}
-                onClick={() => { setModel(session.id, m.value); setModelMenu(false); }}>
+                // mousedown 而非 click:WKWebView 里编辑器聚焦时首个 click 只挪光标/激活焦点被吞,要点两次
+                onMouseDown={(e) => { e.preventDefault(); setModel(session.id, m.value); setModelMenu(false); }}>
                 <div><b>{m.displayName}</b>{m.value === session.info.model && <span className="muted">{t(" · 当前")}</span>}
                 {m.description && <div className="muted">{m.description}</div>}</div>
               </div>
@@ -1260,7 +1268,8 @@ export function Composer({ session }: { session: Session }) {
           style={{ left: preview.left, top: preview.top, transform: "translateY(-100%)" }} />
       )}
       <div className="model-line">
-        <button className="model-switch" title={t("切换模型（同 /model）")} onClick={openModelMenu}>
+        <button className="model-switch" ref={modelBtnRef} title={t("切换模型（同 /model）")}
+          onMouseDown={(e) => { e.preventDefault(); openModelMenu(); }}>
           <strong>{modelLabel(session) || t("模型连接中…")}</strong>
           <ChevronDown size={12} />
         </button>
