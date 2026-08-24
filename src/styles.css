@@ -381,9 +381,13 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 .term-out::-webkit-scrollbar, .tool-card pre::-webkit-scrollbar { width: 0; height: 0; }
 /* 内容没滚到底 → 气泡底部中间浮一个下箭头,点击下滚一屏 */
 .term-out-wrap { position: relative; }
-.term-more { position: absolute; left: 50%; bottom: 0; transform: translateX(-50%); display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 20px; padding: 0; border-radius: 999px; border: 1px solid var(--border); background: color-mix(in srgb, var(--panel) 92%, transparent); color: var(--muted); cursor: pointer; box-shadow: 0 1px 5px rgba(0,0,0,.18); opacity: 1; transition: opacity .15s ease, color .12s ease, border-color .12s ease; }
+/* left 要补上 --acts-w 的一半:定位基准是 .term-out-wrap 的内容盒,而气泡右边
+ * 常驻 padding-right 给按钮组留位,按内容盒居中在视觉上会偏左半个 padding。 */
+.term-more { position: absolute; left: calc(50% + var(--acts-w, 0px) / 2); bottom: 0; transform: translateX(-50%); display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 20px; padding: 0; border-radius: 999px; border: 1px solid var(--border); background: color-mix(in srgb, var(--panel) 92%, transparent); color: var(--muted); cursor: pointer; box-shadow: 0 1px 5px rgba(0,0,0,.18); opacity: 1; transition: opacity .15s ease, color .12s ease, border-color .12s ease; }
 .term-more:hover { color: var(--accent); border-color: var(--accent); }
-.term-more:active { transform: translateX(-50%) scale(0.94); } /* 覆盖全局按压 scale,保住居中位移 */
+/* 必须带 :not(:disabled) 才压得住全局 button:active:not(:disabled) —— 少这一段
+ * 特异性就低它一分,按下瞬间 translateX(-50%) 被裸 scale 冲掉,按钮往右弹半个身位。 */
+.term-more:active:not(:disabled) { transform: translateX(-50%) scale(0.94); }
 @starting-style { .term-more { opacity: 0; } }
 /* 终端卡片右上角按钮组(引用 / 复制):悬停显形(与代码块 .code-copy 一致的观感) */
 .term-acts { position: absolute; top: 0; right: 0; display: flex; gap: 4px; }
@@ -404,7 +408,7 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 .term-bang { flex-shrink: 0; display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 4px; background: var(--accent); color: #fff; font-weight: 700; font-size: 11px; }
 .term-cmd-text { color: var(--accent); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; }
 /* padding-right 常驻给右上角按钮组留位:悬停才显形的按钮不能占流,否则整列会重排、文字抖动 */
-.line-term-out { position: relative; flex-direction: column; align-items: stretch; padding-right: 76px;
+.line-term-out { position: relative; flex-direction: column; align-items: stretch; --acts-w: 76px; padding-right: var(--acts-w);
   background: var(--panel); border: 1px solid var(--border); margin: 5px 0 10px; }
 .line-term-out .term-out { margin-top: 0; }
 .line-term-out:hover .term-copy { opacity: 1; }
@@ -1923,7 +1927,7 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
   border-radius: 50%; cursor: pointer; color: var(--accent); background: var(--panel);
   border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border)); }
 .brz-push-one:hover { color: #fff; background: var(--accent); border-color: var(--accent); }
-.brz-push-one:active { transform: translate(-50%, -50%) scale(0.94); }
+.brz-push-one:active:not(:disabled) { transform: translate(-50%, -50%) scale(0.94); }
 /* 忙碌态按钮:文字留在 DOM 里(只是隐形)撑住原宽度,菊花绝对居中盖上去 —— 宽度/位置/底色全程不变。
    position:relative 必须有,否则 .btn-busy 会去找更外层的定位祖先,菊花飞到按钮外(顶栏 push 就这么秃过)。
    :not(.brz-push) 是唯一例外 —— 那个按钮自身就是 absolute 居中,改成 relative 会掉回文档流;
