@@ -41,18 +41,28 @@ fs.mkdirSync(SSH_DIR, { recursive: true });
 const RESUME_ASK_TOKENS = 100_000;
 
 // ---------- 手机推送:任务完成/需审批 → App 全局悬浮窗(data-only 推送) ----------
-// 配置(env):DT_NOTIFY_URL + DT_NOTIFY_KEY 两个都填才发,缺一静默跳过。
+// 配置:env(DT_NOTIFY_URL / DT_NOTIFY_KEY / DT_NOTIFY_TOPIC)优先,没有就读 settings.json
+// 的 notifyUrl / notifyKey / notifyTopic。url + key 两个都得有才发,缺一静默跳过。
+// 之所以不能只认 env:Finder 启动的 .app 不读 shell profile,launchd 也不带这几个变量,
+// 于是打包版永远是 no-op —— 实测这样静默了快一个月。settings.json 跟着数据目录走,
+// 重启换机都在(文件本来就是 0600,已经存着各家 provider 的 key)。
 // URL 不设默认值:写死一个域名,别人配了自己的 key 也会打到那台机器上。
-const NOTIFY_URL = process.env.DT_NOTIFY_URL || "";
-const NOTIFY_KEY = process.env.DT_NOTIFY_KEY || "";
-const NOTIFY_TOPIC = process.env.DT_NOTIFY_TOPIC || "chatcode";
+function notifyCfg() {
+  const s = loadSettings();
+  return {
+    url: process.env.DT_NOTIFY_URL || s.notifyUrl || "",
+    key: process.env.DT_NOTIFY_KEY || s.notifyKey || "",
+    topic: process.env.DT_NOTIFY_TOPIC || s.notifyTopic || "chatcode",
+  };
+}
 async function pushOverlay(title, body) {
-  if (!NOTIFY_URL || !NOTIFY_KEY) return; // 未配置:静默 no-op
+  const { url, key, topic } = notifyCfg();
+  if (!url || !key) return; // 未配置:静默 no-op
   try {
-    await fetch(`${NOTIFY_URL}/api/notify`, {
+    await fetch(`${url}/api/notify`, {
       method: "POST",
-      headers: { "content-type": "application/json", "x-notify-key": NOTIFY_KEY },
-      body: JSON.stringify({ topic: NOTIFY_TOPIC, title, body: body || tr("点击查看"), overlay: true }),
+      headers: { "content-type": "application/json", "x-notify-key": key },
+      body: JSON.stringify({ topic, title, body: body || tr("点击查看"), overlay: true }),
     });
   } catch {}
 }
