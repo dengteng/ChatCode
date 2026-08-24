@@ -1824,7 +1824,14 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
 .timeline-loading .spin { animation: spin 0.9s linear infinite; transform-box: fill-box; transform-origin: 50% 50%; }
 
 /* 「分支」Tab(替代原分支管理弹窗):状态卡 / 分支列表 / 提交拓扑图三区 */
-.branches-tab { display: flex; flex-direction: column; gap: 10px; scrollbar-width: none; }
+/* 工作区 → 本地分支 → 各远端,整条链路上每一段连线的色号和线宽只有这一个出处。
+   挂在 .branches-tab 而不是 :root:配色方案(--accent)是在下层元素上覆盖的,
+   写进 :root 会当场按默认蓝算死,换 palette 也不跟着走。 */
+.branches-tab { display: flex; flex-direction: column; gap: 10px; scrollbar-width: none;
+  --wire-w: 2px;
+  --wire-c: color-mix(in srgb, var(--accent) 26%, var(--border));
+  --wire-c-strong: color-mix(in srgb, var(--accent) 75%, var(--border));
+  --wire-c-live: color-mix(in srgb, var(--accent) 55%, var(--border)); }
 .branches-tab::-webkit-scrollbar { display: none; } /* 分支页不显滚动条(仍可滚) */
 /* "已提交"/"已推送"的绿色药丸已废弃,统一走全局 .toast(见本文件上方 + components/Toast.tsx) */
 /* 本地 ↔ 远程分支映射区:一横行一对(左=本地、右=远程),同行等高,连线永远水平。
@@ -1977,11 +1984,12 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
 /* 连线层:映射实线 + 半截虚线 stub(可点新建对端) */
 .brz-map-svg { display: block; overflow: visible; }
 /* 线身/箭头两个色号和竖线①(.sync-wire / .sync-arrow)取同一套 —— 两段连线是同一条链路,
-   换色会读成两种关系。当前分支只靠线宽加重,不再靠换色。 */
-.brz-map-line { stroke: color-mix(in srgb, var(--accent) 26%, var(--border)); stroke-width: 1.5; }
-.brz-map-line.cur { stroke-width: 2; }
-.brz-map-head { fill: color-mix(in srgb, var(--accent) 75%, var(--border)); }
-.brz-map-dot { fill: color-mix(in srgb, var(--accent) 75%, var(--border)); }
+   换色会读成两种关系。色号和线宽都走 --wire-c / --wire-w,两边只能有一个出处:
+   之前这条 stroke 是 1.5、竖线①是实心 2px,同一个色公式细线抗锯齿要淡一档,
+   看着就成了"上下两截颜色不一样"。当前分支不再靠加粗区分 —— 主干整张图只有一条。 */
+.brz-map-line { stroke: var(--wire-c); stroke-width: var(--wire-w); }
+.brz-map-head { fill: var(--wire-c-strong); }
+.brz-map-dot { fill: var(--wire-c-strong); }
 /* 对端还不存在的那一行:线走虚线、端点和箭头一起淡下去,和「新建」标签的虚线框对上 */
 .brz-map-line.dash { stroke-dasharray: 3 3; }
 .brz-map-line.dash, .brz-map-dot.dash, .brz-map-head.dash { opacity: .75; }
@@ -2069,10 +2077,10 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
    (改版前它只占左半边、对准映射图的「本地分支」列;那张横排的图已经没了) */
 .sync-link { position: relative; box-sizing: border-box; width: 100%;
   display: flex; flex-direction: column; align-items: center; gap: 0; padding-top: 2px; padding-bottom: 2px; overflow: hidden; }
-.sync-wire { position: relative; width: 2px; flex: 0 0 16px; background: color-mix(in srgb, var(--accent) 26%, var(--border));
+.sync-wire { position: relative; width: var(--wire-w); flex: 0 0 16px; background: var(--wire-c);
   transition: background .2s ease; }
 /* 光在跑的时候整条线通电提亮,和分支映射那条横线是同一套语言 */
-.sync-link.flow-down .sync-wire { background: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+.sync-link.flow-down .sync-wire { background: var(--wire-c-live); }
 .sync-hub { display: flex; align-items: center; gap: 8px; padding: 5px 0; }
 /* commit 进行中顶替按钮的线段:高度对齐 sync-hub(按钮 27px + 上下 5px),换掉按钮时整条线不跳长度 */
 .sync-wire.wire-gap { flex: 0 0 37px; }
@@ -2080,7 +2088,7 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
 /* 箭头不用 svg 图标画:15px 的图标要在 2px 的竖线上居中,偏移量是 6.5px —— 半像素,渲染时和竖线不同轴。
    改用纯 CSS 实心三角(border 拼的):盒宽 8px、left:-3px,中心正好落在竖线中心(2px 盒的 1px 处),全整数;
    不用 45° 折角 —— 旋转后的描边靠抗锯齿画,细看总是歪的。分支映射图那个箭头同样改成实心三角。 */
-.sync-arrow { position: relative; width: 2px; height: 6px; margin-top: -1px; color: color-mix(in srgb, var(--accent) 75%, var(--border)); }
+.sync-arrow { position: relative; width: var(--wire-w); height: 6px; margin-top: -1px; color: var(--wire-c-strong); }
 .sync-arrow::after {
   content: ""; position: absolute; left: -3px; top: 0; width: 0; height: 0;
   border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 6px solid currentColor;

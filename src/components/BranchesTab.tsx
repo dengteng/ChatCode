@@ -421,7 +421,7 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
   const [beamTo, setBeamTo] = useState<string[] | null>(null);
   const bandRef = useRef<HTMLDivElement>(null);
   const [dx, setDx] = useState({ focus: 0, cur: 0, w: 0 }); // chip 中心距竖脊左边的距离(px) + 竖脊宽
-  useLayoutEffect(() => {
+  const measure = () => {
     const band = bandRef.current, root = band?.parentElement;
     if (!band || !root) return;
     const box = root.getBoundingClientRect();
@@ -435,7 +435,10 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
     setDx((p) => (p.focus === next.focus && p.cur === next.cur && p.w === next.w ? p : next));
     // 竖线①那块仍是居中布局(它在竖脊外面,拿不到这个左边),换算成"相对中线"的偏移给它
     onStem(next.cur - next.w / 2);
-  });
+  };
+  // 每次渲染量一遍。但横着滑 chip 排不引起渲染 —— 得在 onScroll 里再量,
+  // 否则线还钉在老位置,滑到一半就和 chip 脱开了。
+  useLayoutEffect(measure);
   const b = local.find((x) => x.name === focus);
   const isCur = focus === current;
   // 顶排顺序:main → 其余按名排。**不掺当前分支** —— 切一次分支就整排重洗的话,
@@ -497,7 +500,7 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
         <span className="sec-label">{t("本地分支")}</span>
       </div>
       {!local.length && <span className="muted brz-empty">{t("暂无本地分支")}</span>}
-      <div className="brz-band" ref={bandRef}>
+      <div className="brz-band" ref={bandRef} onScroll={measure}>
         {localSorted.map((x) => (
           <button key={x.name} data-ref={x.name}
             className={`brz-tag local ${x.name === current ? "cur" : ""} ${x.name === focus ? "focus" : ""} ${x.gone ? "gone" : ""} ${picking && picking !== x.name ? "pick-target" : ""} ${picking === x.name ? "pick-self" : ""}`}
@@ -529,11 +532,11 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
       {!!lanes.length && (
         <div className="brz-fan" style={{ width: Math.max(rowW, cx + 8) }}>
           <svg className="brz-map-svg" width={Math.max(rowW, cx + 8)} height={FAN_H}>
-            <line x1={cx} y1={0} x2={cx} y2={FORK_Y} className={`brz-map-line ${isCur ? "cur" : ""}`} />
+            <line x1={cx} y1={0} x2={cx} y2={FORK_Y} className="brz-map-line" />
             <circle cx={cx} cy={1} r={2.5} className="brz-map-dot" />
             {lanes.map((l, i) => {
               const x = tabX(i), dash = !l.isUpstream;
-              const cls = `brz-map-line ${isCur ? "cur" : ""} ${dash ? "dash" : ""}`;
+              const cls = `brz-map-line ${dash ? "dash" : ""}`;
               return (
                 <g key={l.remote}>
                   <path fill="none" className={cls} d={forkPath(x, FORK_Y)} />
