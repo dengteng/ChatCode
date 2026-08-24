@@ -1830,8 +1830,7 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
 .branches-tab { display: flex; flex-direction: column; gap: 10px; scrollbar-width: none;
   --wire-w: 2px;
   --wire-c: color-mix(in srgb, var(--accent) 26%, var(--border));
-  --wire-c-strong: color-mix(in srgb, var(--accent) 75%, var(--border));
-  --wire-c-live: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+  --wire-c-strong: color-mix(in srgb, var(--accent) 75%, var(--border)); }
 .branches-tab::-webkit-scrollbar { display: none; } /* 分支页不显滚动条(仍可滚) */
 /* "已提交"/"已推送"的绿色药丸已废弃,统一走全局 .toast(见本文件上方 + components/Toast.tsx) */
 /* 本地 ↔ 远程分支映射区:一横行一对(左=本地、右=远程),同行等高,连线永远水平。
@@ -2077,10 +2076,9 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
    (改版前它只占左半边、对准映射图的「本地分支」列;那张横排的图已经没了) */
 .sync-link { position: relative; box-sizing: border-box; width: 100%;
   display: flex; flex-direction: column; align-items: center; gap: 0; padding-top: 2px; padding-bottom: 2px; overflow: hidden; }
-.sync-wire { position: relative; width: var(--wire-w); flex: 0 0 16px; background: var(--wire-c);
-  transition: background .2s ease; }
-/* 光在跑的时候整条线通电提亮,和分支映射那条横线是同一套语言 */
-.sync-link.flow-down .sync-wire { background: var(--wire-c-live); }
+.sync-wire { position: relative; width: var(--wire-w); flex: 0 0 16px; background: var(--wire-c); }
+/* 底线不随光跑提亮:提亮到 accent 55% 后,和 85% 的光段只差 30%,光就看不见了 ——
+   下面扇出那几条底线恒定 --wire-c(26%)、光是纯 accent,对比大三倍,这条得照着来。 */
 .sync-hub { display: flex; align-items: center; gap: 8px; padding: 5px 0; }
 /* commit 进行中顶替按钮的线段:高度对齐 sync-hub(按钮 27px + 上下 5px),换掉按钮时整条线不跳长度 */
 .sync-wire.wire-gap { flex: 0 0 37px; }
@@ -2247,7 +2245,11 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
 /* position:relative + 自身滚动:diff2html 行号是 absolute,必须让最近定位祖先是「会滚动的这层」,
    否则行号相对外层 fixed 弹窗定位、内容滚了行号不动。 */
 .d2h-wrap { position: relative; overflow: auto; max-height: 340px; font: 11px/1.55 Menlo, monospace; }
-.d2h-legend { padding: 5px 10px; font-size: 11px; color: var(--muted); border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--text) 4%, transparent); }
+/* 左内边距归零:行号列在表格里是 position:absolute、从 .d2h-wrap 左边缘起算,
+   图例留 10px 就对不上了。字体也跟着行号走 Menlo,两列宽度才严丝合缝。 */
+.d2h-legend { display: flex; align-items: center; padding: 5px 10px 5px 0; font-size: 11px; color: var(--muted); border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--text) 4%, transparent); }
+.d2h-lg-num { flex: none; box-sizing: border-box; width: 3.5em; padding: 0 .5em; text-align: right; font-family: Menlo, monospace; }
+.d2h-lg-rest { margin-left: 8px; }
 .d2h-legend .d2h-lg-ins { color: #3fb950; } .d2h-legend .d2h-lg-del { color: #f85149; }
 .d2h-legend .d2h-lg-clip { color: #d29922; }
 .d2h-wrap .d2h-file-header, .d2h-wrap .d2h-file-list-header { display: none; } /* 文件头/列表另有 UI,省掉 */

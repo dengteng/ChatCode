@@ -22,8 +22,11 @@ function DiffHtml({ patch, clipped }: { patch: string; clipped?: boolean }) {
   );
   if (!out) return <div className="muted branches-empty">{t("（无文本差异）")}</div>;
   return <>
-    <div className="d2h-legend">{t("左列=改前行号")} · {t("右列=改后行号")} · <span className="d2h-lg-ins">{t("diff.added")}</span> <span className="d2h-lg-del">{t("diff.deleted")}</span>
-      {clipped && <> · <span className="d2h-lg-clip">{t("文件较大，只显示改动附近")}</span></>}</div>
+    {/* 两个「改前/改后」当行号列的表头用:宽度和 diff2html 的 .line-num1/.line-num2 一样(3.5em),
+        直接压在两列上方,比写一句"左列=…右列=…"少读一遍还不会记错哪列是哪列 */}
+    <div className="d2h-legend"><span className="d2h-lg-num">{t("改前")}</span><span className="d2h-lg-num">{t("改后")}</span>
+      <span className="d2h-lg-rest"><span className="d2h-lg-ins">{t("diff.added")}</span> <span className="d2h-lg-del">{t("diff.deleted")}</span>
+        {clipped && <> · <span className="d2h-lg-clip">{t("文件较大，只显示改动附近")}</span></>}</span></div>
     <div className="d2h-wrap" dangerouslySetInnerHTML={{ __html: out }} />
   </>;
 }
