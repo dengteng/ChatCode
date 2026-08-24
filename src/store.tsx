@@ -459,6 +459,14 @@ function handleSdkMessage(dispatch: (a: Action) => void, id: string, msg: any, l
     dispatch({ type: "patch", id, patch: { bgTasks: tasks, ...(tasks.length ? { bgWait: true } : {}) } });
     return;
   }
+  // API 退避重发:SDK 每次撞上可重试错误(529 过载、超时…)都会先发这条,再等 retry_delay_ms 重发。
+  // 以前这条没人接,于是整个退避期界面上只有一句"正在思考…"(实测 529 能连着退避 3 分多钟),
+  // 用户看到的是彻底静默的卡死 —— 只能靠反复重试碰运气。接住它,把"第几次重试"摆到气泡上。
+  if (msg.type === "system" && msg.subtype === "api_retry") {
+    if (!live) return; // 回放历史没意义:那次重试早有结论了
+    dispatch({ type: "patch", id, patch: { apiRetry: { attempt: msg.attempt, max: msg.max_retries, status: msg.error_status ?? null } } });
+    return;
+  }
   // 压缩上下文:status 报开始,compact_boundary 报压缩前后的 token 数。
   // 注意 status(compact_result:"success") 早于 compact_boundary 到达 —— 不能在它上面收尾,
   // 否则 boundary 带来的 token 数就没有归属,会另起一条空的压缩记录。
@@ -484,6 +492,8 @@ function handleSdkMessage(dispatch: (a: Action) => void, id: string, msg: any, l
     if (msg.parent_tool_use_id) return;
     const ev = msg.event;
     if (ev.type === "message_start") {
+      // 请求真的通了 → 退避结束,撤掉"第 N 次重试"提示(重试期间不会有 message_start)
+      if (stateRef?.current.sessions[id]?.apiRetry) dispatch({ type: "patch", id, patch: { apiRetry: null } });
       const u = ev.message?.usage;
       if (u) {
         const ctx = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
@@ -500,7 +510,10 @@ function handleSdkMessage(dispatch: (a: Action) => void, id: string, msg: any, l
   }
   if (msg.type === "assistant") {
     // 这条消息由哪个模型产生(会话中途切模型时,逐条据此选头像/名称)。流式先建的 agent_text 无 model,靠 dedup 回填。
-    const model = msg.message?.model;
+    // SDK 给"合成消息"(API 报错等自己造的回复)填的 model 是字面量 "<synthetic>",不是模型 id ——
+    // 原样存进时间线,这一轮的头像就按它渲染成绿圈里一个 "<",名字也退回默认品牌名。
+    // 当没有 model 处理,交给 groupModel 回退到本会话当前模型(报错那轮用的就是它)。
+    const model = msg.message?.model?.startsWith("<") ? undefined : msg.message?.model;
     for (const block of msg.message?.content ?? []) {
       // 实时:正常回复已由 stream_event 显示;但本地命令(/cost /context)只来最终 assistant 消息、无流式,需补显(去重防和流式重复)。回放历史(!live)时直接补完整文本。
       if (block.type === "text" && block.text.trim()) {
@@ -565,7 +578,7 @@ function handleSdkMessage(dispatch: (a: Action) => void, id: string, msg: any, l
       // 本轮若还挂着后台任务(bgTasks 非空)→ 轮次未完全了结,bgWait 保持;后台任务清空后的续跑 result 才放行队列。
       // 用户中断(aborted)时必清闩锁:SDK 可能先回 result 再发后台任务清空信号,不清的话闩锁会卡死队列。
       const hasBg = (stateRef?.current.sessions[id]?.bgTasks?.length ?? 0) > 0;
-      dispatch({ type: "patch", id, patch: { status: "idle", freshDone: !msg.aborted, ...(msg.aborted || !hasBg ? { bgWait: false } : {}) } });
+      dispatch({ type: "patch", id, patch: { status: "idle", freshDone: !msg.aborted, apiRetry: null, ...(msg.aborted || !hasBg ? { bgWait: false } : {}) } });
       if (!msg.aborted) { notify(i18n.t("任务完成"), i18n.t("花费 ${{cost}}", { cost: (msg.total_cost_usd ?? 0).toFixed(4) })); invoke("bounce_dock").catch(() => {}); } // d: 完成提醒 + dock 跳动(不在前台时才跳)
     }
   }

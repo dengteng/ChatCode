@@ -136,7 +136,12 @@ export interface Session {
   bgTasks?: string[];        // SDK background_tasks_changed 电平(REPLACE):当前在跑的后台任务 id 集,空=无
   bgWait?: boolean;          // 上一轮有后台任务,轮次还没完全了结(还在等后台任务及它的续跑)→ 禁止待发队列出队
   compactRetried?: boolean;  // /compact 被并进别人的轮次、已自动重发过一次 —— 防重发死循环,压缩真做成了就清
+  apiRetry?: ApiRetry | null; // SDK 正在退避重发本轮请求(529/超时…);请求真的通了就清空
 }
+
+// SDK 的 system/api_retry:一次可重试的 API 失败 + 即将重发。attempt 从 1 起,status 是 HTTP 码
+// (连接超时这类没有响应的为 null)。只在实时会话里有意义,不落盘、不回放。
+export interface ApiRetry { attempt: number; max: number; status: number | null }
 
 // 1M 上下文的模型,其 resolvedModel 带 [1m] 后缀。modelUsage 报的 contextWindow 有时仍是 200k,
 // 且按模型名分桶(子 agent 的 haiku 也占一桶),所以这里以模型 id 为准兜底。

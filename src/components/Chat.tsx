@@ -5,7 +5,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { invoke } from "@tauri-apps/api/core";
 import { openPath, openUrl, revealPath } from "../native";
-import type { PermissionSuggestion, ResumeChoice, ResumePrompt, Session, TimelineItem } from "../types";
+import type { ApiRetry, PermissionSuggestion, ResumeChoice, ResumePrompt, Session, TimelineItem } from "../types";
 import { modelDisplayName } from "../types";
 import { useStore, fetchBlob, type RememberChoice } from "../store";
 import { applyEdgeGlow } from "../lib/edgeGlow";
@@ -758,7 +758,7 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
                 <div className="msg-col agent-turn">
                   <div className="msg-name">{nameOf(turnModel)}</div>
                   {isActive
-                    ? <ActiveAgentBubble items={g.agent} running showFull={false} cwd={session.termCwd || session.cwd} liveInput={session.contextTokens} settle={null} onClick={() => onShowTurn(anchor)} onPermission={onPerm} agentLabel={t("{{name}} 的回复", { name: nameOf(turnModel) })} />
+                    ? <ActiveAgentBubble items={g.agent} running showFull={false} cwd={session.termCwd || session.cwd} liveInput={session.contextTokens} settle={null} turnStart={anchor || undefined} retry={session.apiRetry} onClick={() => onShowTurn(anchor)} onPermission={onPerm} agentLabel={t("{{name}} 的回复", { name: nameOf(turnModel) })} />
                     : <AgentTurnCard items={g.agent} running={false} showFull cwd={session.termCwd || session.cwd} liveInput={session.contextTokens} settle={settle} bgWait={bgWait} onClick={() => onShowTurn(anchor)} onPermission={onPerm} agentLabel={t("{{name}} 的回复", { name: nameOf(turnModel) })} />}
                   {/* 建议 chips(左)和复制/贴回按钮(右)同占一行 —— 分两行时按钮被 chips 顶得离气泡老远 */}
                   {!isActive && (
@@ -998,15 +998,23 @@ function TurnChoice({ answer }: { answer?: string }) {
 // 只认 Claude CLI 自己的这几句:第三方 provider 的 key 失效是另一回事(该去设置改 key),别把人往 OAuth 上引。
 const AUTH_FAIL = /failed to authenticate|oauth (session|token) (has )?expired|please run\s*\/login|not logged in/i;
 
+// 历史里的图片服务端解不开时,API 每轮都回这句并把图剔掉。关键在于它**不是偶发**:
+// Claude API 无状态,每轮都重发整段历史,那张坏图会一直躺在里面 —— 重试多少次都是同一个结果,
+// 得清掉上下文(或压缩)才能脱身。不提示的话用户只会一遍遍重试,以为是网络抽风。
+const BAD_IMAGE = /image in the conversation could not be processed/i;
+
 // 一个 agent 回合折叠成一张卡片:标题随状态变化,点开进右侧看详情(流式)。
 // 执行中无待办 → "Agent 正在工作…";执行中有授权请求 → "Agent 正在工作,请求执行 xxx";已结束 → "Claude 的回复"。
-function AgentTurnCard({ items, running, showFull, cwd, liveInput, settle, bgWait, onClick, onPermission, agentLabel }: { items: TimelineItem[]; running: boolean; showFull?: boolean; cwd: string; liveInput?: number; settle?: (TimelineItem & { kind: "result" }) | null; bgWait?: BgTask[]; onClick: () => void; onPermission: OnPermission; agentLabel?: string }) {
+function AgentTurnCard({ items, running, showFull, cwd, liveInput, settle, bgWait, turnStart, retry, onClick, onPermission, agentLabel }: { items: TimelineItem[]; running: boolean; showFull?: boolean; cwd: string; liveInput?: number; settle?: (TimelineItem & { kind: "result" }) | null; bgWait?: BgTask[]; turnStart?: number; retry?: ApiRetry | null; onClick: () => void; onPermission: OnPermission; agentLabel?: string }) {
   const { t } = useTranslation();
   const { authAction } = useStore();
   // 待授权请求就地放在卡片内部,不另起一张卡。AskUserQuestion 改在输入框处强制作答,不塞进卡片。
   const pendingPerms = items.filter((it): it is Extract<TimelineItem, { kind: "permission" }> => it.kind === "permission" && !it.decision && it.toolName !== "AskUserQuestion");
   const now = useNow(running);
-  const startTs = items[0]?.ts; // 本轮起点=组内首个动作
+  // 本轮起点=组内首个动作。但请求还没通时(API 在退避重发)组里一个 item 都没有,
+  // 光靠 items[0] 会让"本轮耗时"死钉在 0s —— 退避几分钟界面上依然是 0s,看着像整个卡死了。
+  // 回退到发起本轮的那条用户消息 ts,等待期一样在走秒。
+  const startTs = items[0]?.ts ?? turnStart;
   const elapsed = startTs ? Math.max(0, now - startTs - permWaitMs(items, now)) : 0; // 扣掉等用户选择的时间
   // 气泡右上角时间 = 本轮回复完成时刻(优先结算行 ts,回退到最后一个动作);运行中还没完成则不显示
   const doneTs = settle?.ts ?? items[items.length - 1]?.ts;
@@ -1062,6 +1070,16 @@ function AgentTurnCard({ items, running, showFull, cwd, liveInput, settle, bgWai
           <span>{t("Claude 登录已失效。重新授权后再发一次这条消息。")}</span>
           <button className="primary" onClick={() => authAction("claude", "login")}>{t("去登录")}</button>
         </div>
+      )}
+      {/* 坏图:重试无用,必须先把它从历史里弄走。不写清楚的话用户只会一直重发同一条消息。 */}
+      {items.some((it) => it.kind === "agent_text" && BAD_IMAGE.test(it.text)) && (
+        <div className="bubble-warn">{t("⚠ 历史里有一张图服务端读不了,每轮都会被剔除 —— 重试没用。先 /clear 清空上下文(或 /compact 压缩)再发一次;要它看图就重新贴图,或直接给文件路径让它自己读。")}</div>
+      )}
+      {/* 退避重发中:没这条的话,整段等待期界面上只有一句"正在思考…",看着与卡死无异 */}
+      {running && retry && (
+        <div className="bubble-warn">{retry.status === 529
+          ? t("⏳ 服务端过载(529),正在第 {{n}}/{{max}} 次重试…", { n: retry.attempt, max: retry.max })
+          : t("⏳ 请求失败{{code}},正在第 {{n}}/{{max}} 次重试…", { code: retry.status ? `(${retry.status})` : "", n: retry.attempt, max: retry.max })}</div>
       )}
       {!!bgWait?.length && <BgTasksBar tasks={bgWait} />}
       {settle && <RoundMeta r={settle} doneTs={!running ? doneTs : undefined} />}
