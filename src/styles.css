@@ -1189,6 +1189,9 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 .next-chip:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
   background: color-mix(in srgb, var(--accent) 14%, var(--panel)); }
 .next-chip:active { transform: translateY(1px); }
+/* 历史轮的建议:留着能点,但淡下去 —— 十轮全按最新轮那样亮,整屏就只剩按钮 */
+.next-chips.past { opacity: .5; transition: opacity .12s ease; }
+.next-chips.past:hover { opacity: 1; }
 /* 全局 toast(components/Toast.tsx)—— 全 App 只此一套。旧的绿色实心药丸(.branches-toast)已并进来。
    底部居中、向上堆叠;容器不吃事件,只有卡片本身可点关闭,免得挡住输入框。 */
 .toast-host { position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%); z-index: 2000;

@@ -675,6 +675,10 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
           let lastUser = -1, lastAgent = -1;
           groups.forEach((g, i) => { if ("user" in g) lastUser = i; else if ("agent" in g) lastAgent = i; });
           if (running && (!groups.length || lastAgent < lastUser)) { groups.push({ agent: [] }); lastAgent = groups.length - 1; }
+          // 建议 chips 保留最近 SUGGEST_KEEP 个 agent 回合(不再只挂最后一轮),再老的才收起来。
+          const agentGis: number[] = [];
+          groups.forEach((g, i) => { if ("agent" in g) agentGis.push(i); });
+          const chipGis = new Set(agentGis.slice(-SUGGEST_KEEP));
           const onPerm = (rid: string, b: "allow" | "deny", msg?: string, remember?: RememberChoice) => respondPermission(session.id, rid, b, msg, remember);
           // 点建议 chip = 等于自己敲这句话回车。agent 还在跑就进待发队列(和斜杠命令菜单同一道闸)
           const sendChip = (text: string) => {
@@ -699,8 +703,15 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
           const rows = groups.slice(start).map((g, si) => {
             const gi = start + si;
             // anchor = 最近的前置用户消息 ts。只看紧邻上一组会漏:中间夹了 term(git)组时退回 0,多张卡全指向会话开头那轮
-            let anchor = 0;
-            for (let k = gi - 1; k >= 0; k--) { const p = groups[k]; if ("user" in p) { anchor = p.user.ts; break; } }
+            let anchor = 0, anchorText = "";
+            for (let k = gi - 1; k >= 0; k--) {
+              const p = groups[k];
+              if ("user" in p) {
+                anchor = p.user.ts;
+                anchorText = ((p.user as any).blocks as any[]).filter((b) => b.type === "text").map((b) => b.text).join("").trim();
+                break;
+              }
+            }
             if ("user" in g) {
               // 这条消息后的 agent 回合被打断(interrupt → result.aborted)时,气泡下方给出 重试/编辑/复制。
               const nextG = groups[gi + 1];
@@ -752,15 +763,23 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
                   {/* 建议 chips(左)和复制/贴回按钮(右)同占一行 —— 分两行时按钮被 chips 顶得离气泡老远 */}
                   {!isActive && (
                     <div className="turn-foot">
-                      {/* 下一步建议:只挂最后一个 agent 回合 —— 一发新消息它就不是最后一组了,chip 自动消失。
-                          历史每轮都挂一排会把整屏塞满按钮。 */}
-                      {gi === lastAgent && (() => {
+                      {/* 下一步建议:最近 SUGGEST_KEEP 轮都留着(以前只挂最后一轮,发一条消息按钮就没了)。
+                          历史轮的 chip 淡显,点下去时补一行定位上下文 —— 不搬运原文(原文还在会话上下文里),
+                          只告诉 agent「这句是接哪一轮说的」,否则跨轮点建议它会按最新话题理解。 */}
+                      {chipGis.has(gi) && (() => {
                         const steps = nextSteps(g.agent);
                         if (!steps.length) return null;
-                        return <div className="next-chips">
+                        const past = gi !== lastAgent;
+                        const withCtx = (s: string) => {
+                          if (!past) return s;
+                          const q = clipLine(anchorText, 60), a = clipLine(turnText(g.agent), 80);
+                          const head = [q && t("我当时问：{{q}}", { q }), a && t("你当时答：{{a}}", { a })].filter(Boolean).join("；");
+                          return head ? `${t("（承接前面那一轮 —— {{head}}）", { head })}\n\n${s}` : s;
+                        };
+                        return <div className={`next-chips${past ? " past" : ""}`}>
                           {steps.map((s, i) => (
-                            <button key={i} className="next-chip" title={t("发送：{{text}}", { text: s })}
-                              onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); sendChip(s); } }}>{s}</button>
+                            <button key={i} className="next-chip" title={past ? t("接着那轮发送：{{text}}", { text: s }) : t("发送：{{text}}", { text: s })}
+                              onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); sendChip(withCtx(s)); } }}>{s}</button>
                           ))}
                         </div>;
                       })()}
@@ -1356,6 +1375,14 @@ function MemoryRefs({ memories, kind, cwd }: { memories: MemRef[]; kind: "ref" |
 // 一整回合的正文:和气泡里 segments 的取法一致(正文常被工具调用切成好几段 agent_text)
 const turnText = (items: TimelineItem[]) =>
   items.filter((it) => it.kind === "agent_text" && it.text.trim()).map((it) => (it as any).text.trim()).join("\n\n");
+
+// 建议 chips 往回保留几轮。再多屏上就全是按钮,再少就回到"发一条消息按钮全没了"。
+const SUGGEST_KEEP = 10;
+// 压成一行再截断,给跨轮建议做定位摘要用(原文照旧在会话上下文里,这里只要够认出是哪一轮)
+const clipLine = (s: string, n: number) => {
+  const one = s.replace(/\s+/g, " ").trim();
+  return one.length > n ? one.slice(0, n) + "…" : one;
+};
 
 // agent 按系统提示(sidecar 的 NEXT_STEPS_INSTRUCTION)在回复末尾留的一行「本轮建议：A | B」。
 // 这行照常显示在正文里,这里只是把它再解析成一排可点的快捷指令 —— 不改 timeline 里的 text,
