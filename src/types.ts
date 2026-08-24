@@ -1,3 +1,5 @@
+import i18n from "./i18n";
+
 // 前端统一事件模型 —— 有意对齐 ACP 的概念,以后接 Codex/Gemini 时在 sidecar 层加适配器即可
 export type ContentBlock =
   | { type: "text"; text: string }
@@ -153,9 +155,49 @@ function modelInList(models: ModelInfo[], modelValue: string): ModelInfo | undef
 
 export function modelLabel(session: Session): string {
   const byId = session.info.model ? modelInList(session.models, session.info.model) : undefined;
-  if (session.info.model) return byId?.displayName ?? session.info.model;
+  if (session.info.model) return byId ? modelName(session.models, byId) : session.info.model;
   const def = session.models.find((m) => m.value === "default") ?? session.models[0];
-  return def?.displayName ?? "";
+  return def ? modelName(session.models, def) : "";
+}
+
+// 模型 id → 版本号("claude-opus-5[1m]" → "5"、"claude-haiku-4-5-20251001" → "4.5")。
+// SDK 报的 displayName 只有家族名("Opus"/"Sonnet"),可同叫 Opus 的 4.8 和 5 是两个模型 ——
+// 用户想知道的正是"几代",光看家族名等于没说。
+// 切法:先扔掉 [1m] 这类后缀,按 - 切,跳过 "claude" 和家族名,吃连续的 1~2 位数字段。
+// 尾巴上的日期戳(20251001)就是靠"最多 2 位"停下的,不然会得到 "4.5.20251001"。
+// 非 claude 家族(deepseek-v4-pro 之类)第三段就不是纯数字,直接返回空 —— 不猜,原样用 displayName。
+function modelVer(id?: string): string {
+  const segs = (id ?? "").replace(/\[.*$/, "").split("-").slice(2);
+  const v: string[] = [];
+  for (const s of segs) { if (!/^\d{1,2}$/.test(s)) break; v.push(s); }
+  return v.join(".");
+}
+
+// displayName 补上版本号。版本插在家族名之后、括号补充之前:"Opus (1M context)" → "Opus 5 (1M context)"。
+// 判重只看括号前那截:"(1M context)" 里的 1 是上下文窗口不是版本号,整串判数字会误判成"已带版本"。
+function withVer(m: ModelInfo): string {
+  const i = m.displayName.search(/\s*[(（]/);
+  const head = (i < 0 ? m.displayName : m.displayName.slice(0, i)).trim();
+  if (/\d/.test(head)) return m.displayName; // SDK 哪天自己带上版本了,别加两遍
+  const ver = modelVer(m.resolvedModel ?? m.model ?? m.value);
+  return ver ? `${head} ${ver}${i < 0 ? "" : m.displayName.slice(i)}` : m.displayName;
+}
+
+// 模型条目 → 展示名。
+//
+// default 那条特殊:SDK 给的是写死的英文 "Default (recommended)",两个毛病 ——
+// ① 不跟界面语言走;② "recommended" 对用户零信息量,他真正想知道的是"default 现在到底跑哪个模型"。
+// 换成「默认 (Opus 5)」:括号里放 resolvedModel 对应那条模型的显示名,并剥掉它自己的括号补充
+// (SDK 的 "Opus (1M context)" 直接嵌进去会套成「默认 (Opus (1M context))」,上下文窗口用量条那儿已经写了)。
+// 列表里找不到对应条目就退回裸的模型 id —— 再难看也比 "recommended" 有用。
+export function modelName(models: ModelInfo[], m: ModelInfo): string {
+  if (m.value !== "default") return withVer(m);
+  const real = m.resolvedModel;
+  // 排除 default 自己:它的 resolvedModel 就是 real,不排会匹配到自身、绕回 "Default (recommended)"
+  const hit = real ? models.find((x) => x.value !== "default" && (x.value === real || x.resolvedModel === real || x.model === real)) : undefined;
+  const short = (hit ? withVer(hit).replace(/\s*[(（].*$/, "") : real ?? "").trim();
+  // 半角括号:这一串中英混排(默认 / Opus 5),全角括号在 en 界面下会变成「Default（Opus 5）」
+  return short ? `${i18n.t("默认")} (${short})` : i18n.t("默认");
 }
 
 // 某个具体模型 id → 展示名(如 "claude-opus-4-8" → "Opus 4.8"、"deepseek-v4-pro" → "DeepSeek V4 Pro")。
@@ -163,7 +205,8 @@ export function modelLabel(session: Session): string {
 // 列表里查不到(如子 agent 的 haiku 未在 /model 菜单)时返回 undefined,调用方回退到 brandName。
 export function modelDisplayName(session: Session, modelId?: string): string | undefined {
   if (!modelId) return undefined;
-  return modelInList(session.models, modelId)?.displayName;
+  const hit = modelInList(session.models, modelId);
+  return hit ? modelName(session.models, hit) : undefined;
 }
 
 // 每个模型见过的最大上下文窗口,落 localStorage。

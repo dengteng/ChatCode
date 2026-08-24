@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Folder, File, CornerLeftUp, RotateCw, ChevronDown, X, Sparkles } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Session } from "../types";
-import { BUILTIN_COMMANDS, modelLabel, contextWindowOf, canSendImage } from "../types";
+import { BUILTIN_COMMANDS, modelLabel, modelName, contextWindowOf, canSendImage } from "../types";
 import { useStore, fetchBlob } from "../store";
 import { UsageBar } from "./UsageBar";
 import { openImageWindow } from "../popout";
@@ -1141,7 +1141,8 @@ export function Composer({ session }: { session: Session }) {
                 onMouseEnter={() => setPalIdx(i)}
                 // mousedown 而非 click:WKWebView 里编辑器聚焦时首个 click 只挪光标/激活焦点被吞,要点两次
                 onMouseDown={(e) => { e.preventDefault(); setModel(session.id, m.value); setModelMenu(false); }}>
-                <div><b>{m.displayName}</b>{m.value === session.info.model && <span className="muted">{t(" · 当前")}</span>}
+                {/* 菜单里也走 modelName:选中后底栏显示什么,菜单里就该长什么样(default 那条尤其) */}
+                <div><b>{modelName(session.models, m)}</b>{m.value === session.info.model && <span className="muted">{t(" · 当前")}</span>}
                 {m.description && <div className="muted">{m.description}</div>}</div>
               </div>
             ))}

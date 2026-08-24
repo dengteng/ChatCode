@@ -210,6 +210,36 @@ export async function copyText(text: string): Promise<boolean> {
   } catch { return false; }
 }
 
+// 富文本复制:同时写 text/html 和 text/plain。粘到飞书/Word/Excel 会挑 text/html,表格粘过去还是表格;
+// 纯文本编辑器挑 text/plain,拿到 Markdown 原文。以前只写 text/plain,表格粘到哪儿都是一堆竖线。
+// node 传渲染好的 DOM(所见即所得,不用再实现一遍 Markdown→HTML);写不成一律退回 copyText。
+export async function copyRich(node: HTMLElement | null | undefined, text: string): Promise<boolean> {
+  if (node && typeof ClipboardItem !== "undefined") {
+    try {
+      const html = pasteHtml(node);
+      await navigator.clipboard.write([new ClipboardItem({
+        "text/html": new Blob([html], { type: "text/html" }),
+        "text/plain": new Blob([text], { type: "text/plain" }),
+      })]);
+      return true;
+    } catch { /* 窗口未聚焦 / 不支持 → 下面退回纯文本(那条路还有 execCommand 兜底) */ }
+  }
+  return copyText(text);
+}
+
+// DOM 片段 → 可粘贴的 HTML。两件事:
+// ① 剥掉界面自己的按钮(代码块、表格右上角那些"复制"),否则粘出来平白多几个"复制"二字;
+// ② 把表格边框内联到元素上 —— 粘贴目标几乎都不认外部 CSS,不内联粘过去就是没框的一坨字。
+const CELL_STYLE = "border:1px solid #d0d0d0;padding:4px 8px;text-align:left;vertical-align:top";
+function pasteHtml(node: HTMLElement): string {
+  const c = node.cloneNode(true) as HTMLElement;
+  c.querySelectorAll("button").forEach((b) => b.remove());
+  for (const el of c.querySelectorAll("table")) el.setAttribute("style", "border-collapse:collapse");
+  for (const el of c.querySelectorAll("td")) el.setAttribute("style", CELL_STYLE);
+  for (const el of c.querySelectorAll("th")) el.setAttribute("style", `${CELL_STYLE};background:#f2f2f2;font-weight:600`);
+  return c.outerHTML; // 用 outerHTML:复制单张表格时,<table> 这层壳本身不能丢
+}
+
 // 气泡右上角那组按钮:贴到输入框 + 复制(顺序即左右)。绝对定位在这层,按钮本身走普通流,
 // 不用给"复制"算固定右偏移("已复制"文案会变宽,写死就会错位)。
 function BubbleActs({ text }: { text: string }) {
@@ -331,9 +361,36 @@ function CodeBlock({ children }: { children?: ReactNode }) {
   );
 }
 
+// 表格:右上角挂一个复制按钮,单独复制这一张表。
+// text/html 给飞书/Word/Excel(粘过去还是表格),text/plain 用 TSV —— 没有 HTML 通道时
+// (纯文本编辑器)也还能按列对齐;Markdown 管道表在那些地方反而更难读。
+function TableBlock({ children }: { children?: ReactNode }) {
+  const { t } = useTranslation();
+  const ref = useRef<HTMLDivElement>(null);
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    const tb = ref.current?.querySelector("table");
+    if (!tb) return;
+    const tsv = [...tb.rows].map((r) => [...r.cells].map((c) => c.innerText.replace(/\s+/g, " ").trim()).join("\t")).join("\n");
+    copyRich(tb, tsv).then((ok) => { if (ok) { setCopied(true); window.setTimeout(() => setCopied(false), 1500); } });
+  };
+  return (
+    // 按钮放在不滚动的外层(和代码块 .code-block-wrap 同一套路)——
+    // <table> 自己带 overflow-x,塞进去的话横向滚表格时按钮会跟着跑出视野
+    <div className="md-table-wrap" ref={ref}>
+      {/* mousedown 而非 click:窗口未聚焦时首次 click 不派发,要点两次 */}
+      <button className="code-copy" title={t("复制表格")} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); copy(); }}>
+        {copied ? <><Check size={12} /> {t("已复制")}</> : <><Copy size={12} /> {t("复制表格")}</>}
+      </button>
+      <table>{children}</table>
+    </div>
+  );
+}
+
 // 链接走系统浏览器,别让 webview 自己导航到外链(会把整个 app 界面顶掉)。code/链接里的路径也做 hover 操作。
 function makeMdComponents(cwd: string) {
   return {
+    table: ({ children }: { children?: ReactNode }) => <TableBlock>{children}</TableBlock>,
     a: ({ href, children }: { href?: string; children?: ReactNode }) => {
       if (!href) return <>{children}</>;
       const { url, rest } = splitAutoLink(href, children);
@@ -358,6 +415,13 @@ const pokeRepaint = (el: HTMLElement, top: () => number, ok: () => boolean = () 
     el.scrollTop = top();
   });
 
+// 每个会话的浏览位置。只活在内存里 —— 关掉 ChatCode 就忘,重开一律回到最新消息。
+// ts/off 是"视口顶那一行是谁、离视口顶多远":光记 scrollTop 不够,人在别的会话时这边可能还在长新消息,
+// 窗口化渲染(histCap)会把更早的回合挤出去,同一个 scrollTop 就指到别的内容上了。按行对齐才稳。
+// stick=true(当时就贴着底)不恢复位置,直接回到底 —— 那才是用户想看的"最新"。
+type ScrollPos = { top: number; cap: number; stick: boolean; ts: number; off: number };
+const scrollMem = new Map<string, ScrollPos>();
+
 export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { session: Session; onToggleInfo: (tab?: "project" | "branches" | "files") => void; onShowTurn: (anchor: number) => void; onOpenSettings: () => void }) {
   const { t } = useTranslation();
   const { state, respondPermission, sshReconnect, sshClose, configureSsh, chooseResume, requestGitInfo, runTerminal, listSshHosts, sendMessage, enqueuePending } = useStore();
@@ -374,8 +438,18 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
   // 长会话滚动卡顿:整条历史全渲染时 DOM 上万节点,WKWebView 每帧重排扛不住。
   // 只渲染最近 N 个回合,顶部"加载更早消息"按需往前翻。
   const HIST_STEP = 30;
-  const [histCap, setHistCap] = useState(HIST_STEP);
-  useEffect(() => { setHistCap(HIST_STEP); }, [session.id]);
+  const [histCap, setHistCap] = useState(() => scrollMem.get(session.id)?.cap ?? HIST_STEP);
+  const capRef = useRef(histCap); capRef.current = histCap; // 滚动回调里要读当前值,又不想把它进依赖
+  // 切会话:在渲染期就把窗口大小调回上次那档(<Chat> 没有 key,不会重新挂载)。
+  // 放 useEffect 里会先按 30 条渲染一帧、再撑开重排,恢复位置就落在一个中间态的 scrollHeight 上。
+  const lastId = useRef(session.id);
+  const pendingRestore = useRef<ScrollPos | null>(null);
+  if (lastId.current !== session.id) {
+    lastId.current = session.id;
+    const saved = scrollMem.get(session.id);
+    setHistCap(saved?.cap ?? HIST_STEP);
+    pendingRestore.current = saved ?? null;
+  }
   // 往前翻会在顶部插入内容,把滚动位置往下顶;记住加载前的 scrollHeight,渲染后原地补回
   const histRestore = useRef<{ h: number; top: number } | null>(null);
   useLayoutEffect(() => {
@@ -429,6 +503,18 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
     const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
     stick.current = dist < 80;      // 贴底(80px 内)恢复跟随
     setShowJump(dist > 300);        // 离底 300px 以上,显示回到底部按钮
+    rememberPos(el);
+  };
+  // 记下当前浏览位置(切走再切回来接着看)。锚点用 elementFromPoint 取视口顶那一行:
+  // O(1),不像 querySelectorAll 那样每次滚动都去遍历上千行。
+  const rememberPos = (el: HTMLElement) => {
+    const r = el.getBoundingClientRect();
+    const row = document.elementFromPoint(r.left + 8, r.top + 2)?.closest<HTMLElement>("[data-ts]");
+    scrollMem.set(session.id, {
+      top: el.scrollTop, cap: capRef.current, stick: stick.current,
+      ts: row ? +(row.dataset.ts ?? 0) : 0,
+      off: row ? row.getBoundingClientRect().top - r.top : 0, // 该行相对视口顶的偏移(通常为负)
+    });
   };
   // 回到底部也是"编程式跳转",同样要补 pokeRepaint —— 少了它就是点完一片空白、滚动条还在,
   // 得发条消息触发重渲染才上色(切会话、往前翻历史踩过同一个坑,见 pokeRepaint 注释)。
@@ -438,15 +524,34 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
     stick.current = true;
     setShowJump(false);
   };
-  // 切会话:同步(paint 前)把滚动条钉到底。
+  // 切会话:同步(paint 前)定位。有上次的浏览位置就回到那儿,没有(或当时就贴着底)才钉到底。
   // 之前用 useEffect + sentinel.scrollIntoView 有两个毛病:① useEffect 在 paint 之后跑,
   // 浏览器已经先把 .timeline 这个复用 DOM 的 scrollTop 恢复到一个略偏的位置、闪一下;
   // ② scrollIntoView 对准的是零高 sentinel,而 .timeline 有 12px 底部 padding,会停在离底还差一点的地方。
   // 直接 scrollTop = scrollHeight 落点精确,useLayoutEffect 保证在 paint 前完成,不闪不偏。
   useLayoutEffect(() => {
-    stick.current = true;
     const el = timelineRef.current;
+    const p = pendingRestore.current;
+    pendingRestore.current = null;
     if (!el) return;
+    // 锚行还在就按它对齐(离开期间长出的新消息不会把位置带偏);找不到才退回死记的 scrollTop。
+    const row = p?.ts ? el.querySelector<HTMLElement>(`[data-ts="${p.ts}"]`) : null;
+    // 锚行没了、历史又还在回放中 → 这会儿的 scrollHeight 还不作数,别拿旧数字硬定位,老实回底部。
+    if (p && !p.stick && (row || !session.loadingHistory)) {
+      stick.current = false;
+      const top = row
+        ? el.scrollTop + (row.getBoundingClientRect().top - el.getBoundingClientRect().top) - p.off
+        : p.top;
+      const landed = Math.max(0, Math.min(top, el.scrollHeight - el.clientHeight));
+      el.scrollTop = landed;
+      setShowJump(el.scrollHeight - landed - el.clientHeight > 300);
+      // 守卫用"落点没被别人挪过",不能用 stick —— 恢复的位置若正好离底 80px 内,
+      // 紧跟着的 scroll 事件会把 stick 置回 true,拿 stick 当条件就会把这一脚重绘跳过去(白屏)。
+      const raf = pokeRepaint(el, () => landed, () => Math.abs(el.scrollTop - landed) < 2);
+      return () => cancelAnimationFrame(raf);
+    }
+    stick.current = true;
+    setShowJump(false);
     el.scrollTop = el.scrollHeight;
     // 编程式定位到底部同样不触发重绘,补一脚(见 pokeRepaint)。
     // ok 守卫:期间用户已手动往上翻(stick=false)就别硬拽回底部。
@@ -786,8 +891,11 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
                       {/* 复制整条回复:和用户气泡下方那排同一套样式(.msg-redo-row),只是靠右对齐到气泡右下角 */}
                       {turnText(g.agent) && (
                         <div className="msg-redo-row agent-actions">
-                          <button title={t("贴到输入框:整条回复变成一个引用 chip")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); pasteToComposer(turnText(g.agent)); } }}><Paperclip size={13} /></button>
-                          <button title={t("复制整条回复")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); copyText(turnText(g.agent)).then((ok) => ok && toast(t("已复制"), "success")); } }}><Copy size={13} /></button>
+                          <button title={t("贴到输入框:整条回复变成一个引用 chip")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); pasteToComposer(turnCopyText(g.agent)); } }}><Paperclip size={13} /></button>
+                          {/* 富文本复制:HTML 取屏幕上那份渲染结果(表格粘到飞书/Word 还是表格),纯文本退回 Markdown 原文 */}
+                          <button title={t("复制整条回复")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault();
+                            const body = e.currentTarget.closest(".msg-col")?.querySelector<HTMLElement>(".agent-turn-full");
+                            copyRich(body, turnCopyText(g.agent)).then((ok) => ok && toast(t("已复制"), "success")); } }}><Copy size={13} /></button>
                         </div>
                       )}
                     </div>
@@ -1412,6 +1520,9 @@ const NEXT_RE = /^[\s>*#`\-]*本轮建议\**\s*[：:]\**\s*(.+?)\s*\**$/;
 // 只改渲染用的字符串,timeline 里的 text 原样保留:sidecar 的汇总照常工作,前端去重也不受影响。
 const SUMMARY_LINE_RE = /^[\s>*#`\-]*本轮小结\**\s*[：:]/;
 const stripSummary = (text: string) => text.split("\n").filter((l) => !SUMMARY_LINE_RE.test(l)).join("\n").trim();
+// 复制/贴回输入框用的正文:和屏幕上看到的一致(同样抹掉小结行)。
+// turnText 本身不能动 —— nextSteps 要从原文里认「本轮建议」那行,跨轮摘要也用它。
+const turnCopyText = (items: TimelineItem[]) => stripSummary(turnText(items));
 function nextSteps(items: TimelineItem[]): string[] {
   const lines = turnText(items).split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {

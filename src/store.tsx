@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useReducer, useRef, useState, typ
 import { flushSync } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import type { AccountUsage, AuthStatus, GitDiffData, GitInfo, GitLogData, IndexEntry, LimitUsage, ModelInfo, PermissionSuggestion, ResumeChoice, SearchResult, Session, SessionGroup, SessionInfo, Spend, SshHost, TimelineItem, Wallet } from "./types";
-import { sessionProvider } from "./types";
+import { sessionProvider, modelName } from "./types";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { toast, dismissToast } from "./components/Toast";
 import i18n, { getLang } from "./i18n";
@@ -726,7 +726,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               send({ type: "get_models", sessionId: HOME_MODELS_ID }); // 首页选择器的列表补上这家
               // 打开着的会话也顺手切过去(displayName 直接给:models 广播可能还没到,否则条子会显示原始 id)
               const aid = stateRef.current.activeId;
-              if (aid) api.setModel(aid, pick.value, pick.displayName);
+              if (aid) api.setModel(aid, pick.value, modelName(stateRef.current.homeModels, pick));
             }
             break;
           }
@@ -998,7 +998,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     },
     setModel(id, model, labelHint) {
       const sess = stateRef.current.sessions[id];
-      const label = labelHint ?? sess?.models?.find((m) => m.value === model)?.displayName ?? model;
+      const hit = sess?.models?.find((m) => m.value === model);
+      const label = labelHint ?? (hit && sess ? modelName(sess.models, hit) : model);
       dispatch({ type: "append", id, item: { kind: "system", text: i18n.t("⚙ 模型已切换为 {{label}}", { label }), ts: Date.now() } });
       if (sess) dispatch({ type: "patch", id, patch: { info: { ...sess.info, model } } });
       send({ type: "set_model", sessionId: id, model });

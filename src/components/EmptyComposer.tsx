@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { FolderOpen, ArrowUp, X, ChevronDown, Info, Folder, File, CornerLeftUp, Sparkles } from "lucide-react";
-import { BUILTIN_COMMANDS } from "../types";
+import { BUILTIN_COMMANDS, modelName } from "../types";
 import { useStore } from "../store";
 import { openImageWindow } from "../popout";
 import { onEdgeGlow } from "../lib/edgeGlow";
@@ -91,8 +91,8 @@ export function EmptyComposer() {
     return () => document.removeEventListener("mousedown", onDown);
   }, [modelMenu]);
   const curModel = state.homeModels.find((m) => m.value === state.homeModel);
-  const modelText = curModel?.displayName
-    ?? (state.homeModel === "default" ? (state.homeModels.find((m) => m.value === "default")?.displayName ?? t("默认模型")) : state.homeModel);
+  const modelText = curModel ? modelName(state.homeModels, curModel)
+    : (state.homeModel === "default" ? t("默认模型") : state.homeModel);
 
   const pick = async () => { try { const p = await invoke<string | null>("choose_directory"); if (p) setCwd(p); } catch { /* 取消选择 */ } };
 
@@ -332,7 +332,7 @@ export function EmptyComposer() {
                 {state.homeModels.map((m) => (
                   <div key={m.value} className={`palette-item ${m.value === state.homeModel ? "sel" : ""}`}
                     onMouseDown={(e) => { e.preventDefault(); setHomeModel(m.value); setModelMenu(false); }}>
-                    <div><b>{m.displayName}</b>{m.value === state.homeModel && <span className="muted">{t(" · 当前")}</span>}
+                    <div><b>{modelName(state.homeModels, m)}</b>{m.value === state.homeModel && <span className="muted">{t(" · 当前")}</span>}
                     {m.description && <div className="muted">{m.description}</div>}</div>
                   </div>
                 ))}

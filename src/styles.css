@@ -540,6 +540,9 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 .md a { color: var(--accent); }
 .md blockquote { border-left: 2px solid var(--border); margin: 4px 0; padding-left: 10px; color: var(--muted); }
 .md table { border-collapse: collapse; margin: 6px 0; display: block; overflow-x: auto; max-width: 100%; }
+/* 表格外层:只做定位锚,不吃滚动 —— 横向滚表格时右上角的复制按钮才不会跟着跑掉(复用 .code-copy 观感) */
+.md-table-wrap { position: relative; }
+.md-table-wrap:hover .code-copy { opacity: 1; }
 .md th, .md td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; }
 .md th { background: var(--code-bg); font-weight: 600; }
 
@@ -1845,8 +1848,10 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
   overflow-x: auto; scrollbar-width: none; }
 .brz-band::-webkit-scrollbar { display: none; }
 /* width:auto 必须写:.brz-tag 基础样式是 width:100%(为原来那张整行宽的映射图定的),
-   放进这排 flex 里会让每个 chip 都撑满整行、一行只站得下一个 */
-.brz-band .brz-tag { flex: none; width: auto; max-width: 180px; }
+   放进这排 flex 里会让每个 chip 都撑满整行、一行只站得下一个。
+   min-width 对齐下面那排远端 tab 的 TAB_W(由 .brz-spine 下发 --tab-w,别在这儿写死数字):
+   本地分支通常就一两条,名字又短,不给下限就缩成一颗小豆子,和底下 118px 的远端方块完全不是一个量级 */
+.brz-band .brz-tag { flex: none; width: auto; min-width: var(--tab-w, 118px); max-width: 180px; }
 /* 扇出区:svg 打底,push 按钮绝对定位压在线上。
    负 margin + 下面那 20px padding 是一对:把标题的落脚带塞进扇出图的最后 20px 里(那一段只有中间几条线,
    左边是空的),tab 排的 y 一点没动,标题却腾到了 tab 上方 —— 不然标题和最左那个 tab 会横向撞上。 */

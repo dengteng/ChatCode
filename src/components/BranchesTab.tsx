@@ -490,7 +490,9 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
   const forkLen = (x: number) => Math.abs(x - cx) < 1 ? tipY - 7
     : FORK_Y + (Math.abs(x - cx) - rOf(x)) + (Math.PI * rOf(x)) / 2 + (tipY - 7 - FORK_Y - rOf(x));
   return (
-    <div className="brz-spine">
+    // --tab-w 下发给 CSS:本地分支 chip 的最小宽度对齐远端 tab,两排读起来才是同一个量级
+    // (常见就一两条本地分支,不给下限的话「oss」缩成一颗小豆子,底下却是一排 118px 的大方块)
+    <div className="brz-spine" style={{ "--tab-w": `${TAB_W}px` } as React.CSSProperties}>
       <div className="brz-spine-h">
         <span className="sec-label">{t("本地分支")}</span>
       </div>
