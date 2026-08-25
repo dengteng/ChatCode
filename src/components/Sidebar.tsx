@@ -41,7 +41,10 @@ export function Sidebar({ onSearch, onOpenSettings, update, onShowUpdate }:
   const [cwd, setCwd] = useState("");
   const [casual, setCasual] = useState(false);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
-  const [killPrompt, setKillPrompt] = useState<IndexEntry | null>(null); // 待确认关闭的会话(Tauri 的 confirm() 不可靠,自己弹);有活跃进程时多给一档"是否一并结束"
+  // 待确认关闭的会话(Tauri 的 confirm() 不可靠,自己弹);有活跃进程时多给一档"是否一并结束"。
+  // procs 是开弹窗那一刻的快照:runtime 靠轮询刷新,若弹窗内容跟着实时值变,
+  // 一次刷新落在 mousedown 与 mouseup 之间就会挪动/重挂载按钮,click 直接丢掉(表现为"点一下没反应,再点才行")。
+  const [killPrompt, setKillPrompt] = useState<{ e: IndexEntry; procs: number } | null>(null);
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null); // 右键菜单
   const [editId, setEditId] = useState<string | null>(null); // 正在重命名的会话
   const editRef = useRef<HTMLInputElement>(null); // 非受控:DOM 自己管值,避免与 React 重渲染/输入法打架
@@ -166,7 +169,7 @@ export function Sidebar({ onSearch, onOpenSettings, update, onShowUpdate }:
 
 
   // 关闭一律先弹窗确认(删历史不可撤销)。有没有活跃进程只改弹窗里给几个选项,不改这条路径。
-  const onClose = (ev: React.MouseEvent, e: IndexEntry) => { ev.stopPropagation(); setKillPrompt(e); };
+  const onClose = (ev: React.MouseEvent, e: IndexEntry) => { ev.stopPropagation(); setKillPrompt({ e, procs: procCount(e.id) }); };
   const procCount = (id: string) => {
     const rt = state.git[id]?.runtime;
     return (rt?.processes.length || 0) + (rt?.ports.length || 0);
@@ -422,7 +425,7 @@ export function Sidebar({ onSearch, onOpenSettings, update, onShowUpdate }:
                 )}
               </div>
             )}
-            <div className="ctx-item danger" onClick={() => { setMenu(null); setKillPrompt(e); }}>{t("关闭会话…")}</div>
+            <div className="ctx-item danger" onClick={() => { setMenu(null); setKillPrompt({ e, procs: procCount(e.id) }); }}>{t("关闭会话…")}</div>
           </div>
         );
       })()}
@@ -461,16 +464,16 @@ export function Sidebar({ onSearch, onOpenSettings, update, onShowUpdate }:
       {killPrompt && createPortal(
         <div className="workspace-shade" onMouseDown={() => setKillPrompt(null)}>
           <div className="workspace-dialog kill-dialog" onMouseDown={(e) => e.stopPropagation()}>
-            <div className="workspace-title">{t("关闭「{{title}}」", { title: killPrompt.title })}</div>
+            <div className="workspace-title">{t("关闭「{{title}}」", { title: killPrompt.e.title })}</div>
             {/* 两种情形共用同一层 dom/class,尺寸自然一致(宽度来自 .workspace-dialog),差别只在中间这几个按钮 */}
-            <p>{procCount(killPrompt.id) > 0
-              ? t("该会话仍有 {{count}} 个活跃进程/端口。关闭后要一并结束它们吗？", { count: procCount(killPrompt.id) })
+            <p>{killPrompt.procs > 0
+              ? t("该会话仍有 {{count}} 个活跃进程/端口。关闭后要一并结束它们吗？", { count: killPrompt.procs })
               : t("关闭后该会话的历史将被删除，且无法恢复。")}</p>
             <div className="kill-dialog-ops">
-              {procCount(killPrompt.id) > 0 ? <>
-                <button className="kill-yes" onClick={() => doClose(killPrompt, true)}>{t("结束进程并关闭")}</button>
-                <button onClick={() => doClose(killPrompt, false)}>{t("保留进程，仅关闭")}</button>
-              </> : <button className="kill-yes" onClick={() => doClose(killPrompt, false)}>{t("确认关闭")}</button>}
+              {killPrompt.procs > 0 ? <>
+                <button className="kill-yes" onClick={() => doClose(killPrompt.e, true)}>{t("结束进程并关闭")}</button>
+                <button onClick={() => doClose(killPrompt.e, false)}>{t("保留进程，仅关闭")}</button>
+              </> : <button className="kill-yes" onClick={() => doClose(killPrompt.e, false)}>{t("确认关闭")}</button>}
               <button className="ghost" onClick={() => setKillPrompt(null)}>{t("取消")}</button>
             </div>
           </div>
