@@ -1919,16 +1919,21 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
   border: 0; background: none; font-size: 11px; color: var(--muted); cursor: pointer; }
 .brz-spine-tip:hover { color: var(--accent); }
 .brz-spine-tip { text-decoration: underline dotted; text-underline-offset: 2px; }
-/* 主干上的 push 按钮:压住连线(自带底色遮线),left/top 由 JS 按主干中点给 */
-.brz-push { position: absolute; z-index: 1; transform: translate(-50%, -50%);
-  display: inline-flex; align-items: center; justify-content: center; width: 46px; height: 17px; padding: 0;
+/* 主干中点的操作组:push / pull 同一个位置,分叉状态下两个都在就并排。
+   居中的 translate 提到这一层 —— 挂在按钮自己身上的话,:active 的 scale 一来就把它冲掉,
+   按钮按下瞬间往右下跳走,mouseup 落在按钮外、click 不派发,按了等于没按。
+   left/top 由 JS 按主干中点给。 */
+.brz-ops { position: absolute; z-index: 1; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 5px; }
+/* 压住连线,自带底色遮线 */
+.brz-push { display: inline-flex; align-items: center; justify-content: center; width: 46px; height: 17px; padding: 0;
   font-size: 10px; font-weight: 700; line-height: 1; border-radius: 999px; cursor: pointer;
   color: #fff; background: var(--accent); border: 1px solid var(--accent); }
 .brz-push:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 86%, #000); }
-/* 覆盖全局 button:active 的裸 scale(0.97):那会把居中用的 translate(-50%,-50%) 整个冲掉,
-   按钮在按下瞬间向右下跳走, mouseup 落在按钮外 → click 不派发, push 永远不执行。 */
-.brz-push:active:not(:disabled) { transform: translate(-50%, -50%) scale(0.97); }
 .brz-push:disabled { cursor: default; }
+/* pull 走描边款、push 走实心款:同一条线上两颗一模一样的药丸,得停下来读字才知道按的是哪个。
+   描边和分叉线上那排单推小圆点同一套语言(accent 描边 + panel 底),底仍不透明,照样遮得住线。 */
+.brz-push.pull { color: var(--accent); background: var(--panel); border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+.brz-push.pull:hover:not(:disabled) { color: #fff; background: var(--accent); border-color: var(--accent); }
 /* 分叉线上的单推按钮:只推这一条。做成小圆点而不是第二颗药丸 —— 主干那颗是"全推",
    层级得看得出来;两颗一样大就成了两个平级选项,反倒要停下来读文字才知道差别。
    left/top 由 JS 按分叉线的中点给(每条线各一个)。 */
@@ -1939,13 +1944,11 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
 .brz-push-one:hover { color: #fff; background: var(--accent); border-color: var(--accent); }
 .brz-push-one:active:not(:disabled) { transform: translate(-50%, -50%) scale(0.94); }
 /* 忙碌态按钮:文字留在 DOM 里(只是隐形)撑住原宽度,菊花绝对居中盖上去 —— 宽度/位置/底色全程不变。
-   position:relative 必须有,否则 .btn-busy 会去找更外层的定位祖先,菊花飞到按钮外(顶栏 push 就这么秃过)。
-   :not(.brz-push) 是唯一例外 —— 那个按钮自身就是 absolute 居中,改成 relative 会掉回文档流;
-   它本来就是定位祖先,菊花照样贴得住。 */
+   position:relative 必须有,否则 .btn-busy 会去找更外层的定位祖先,菊花飞到按钮外(顶栏 push 就这么秃过)。 */
 /* :disabled 也要写:全局 button:disabled{opacity:.5} 的特异性(0-1-1)比裸 .is-busy(0-1-0)高,
    不带 :disabled 压不住,忙碌中的按钮会整块变淡。 */
 .is-busy, .is-busy:disabled { opacity: 1; }
-.is-busy:not(.brz-push) { position: relative; }
+.is-busy { position: relative; }
 .is-busy > :not(.btn-busy) { visibility: hidden; }
 .btn-busy { position: absolute; inset: 0; display: grid; place-items: center; }
 /* 忙碌态「...」:三个小点依次亮起(替代菊花),颜色跟按钮文字走 */

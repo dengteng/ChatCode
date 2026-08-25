@@ -18,7 +18,7 @@ interface Img { media_type: string; data: string }
 const ARG_CMDS = new Set(["/goal"]);
 
 // 一条输入历史 = 编辑器 HTML + 图片数据(不能只存文本,否则 ↑ 回显会把图片丢掉)
-interface HistEntry { html: string; imgs: Record<string, Img>; text: string }
+interface HistEntry { html: string; imgs: Record<string, Img>; text: string; ts: number }
 
 const ZWSP = "​"; // 零宽字符:插在图片标签后,保证光标能停到标签之后继续输入
 
@@ -121,7 +121,14 @@ const draftStore = new Map<string, { html: string; imgs: Record<string, Img> }>(
 // 为什么要放到组件外:切会话时 <Chat session={active}> 没有 key,Composer 根本不重新挂载 ——
 // 组件内的 useRef 是同一份,四个会话就共用一条历史,在 A 里按 ↑ 会翻出 B 里发过的指令。
 // 放这里 + 用 session.id 取,和上面草稿走同一套(顺带:历史本来就该跟着会话走,和草稿一个道理)。
+// 这里只存**不进时间线**的那些(!终端命令、/model、/clear …);发给 agent 的消息不往这存,
+// 它们由时间线本身供给历史 —— 这个 Map 是内存的,关掉 app 就空了,时间线会随会话恢复回来。
 const histStore = new Map<string, HistEntry[]>();
+
+// 纯文本 → 编辑器 HTML。换行走 <br>;尖括号必须转义 —— 历史消息里一段字面 `<div>` 直接塞进
+// innerHTML 会被当标签吃掉,回显出来就少一截。
+const textHtml = (text: string) =>
+  text.split("\n").map((ln) => ln.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]!)).join("<br>");
 
 // /export:把可见时间线整理成 Markdown(用户/Agent 对话 + 终端 + 系统提示;跳过工具细节与执行说明)
 function timelineToMarkdown(session: Session): string {
@@ -207,11 +214,36 @@ export function Composer({ session }: { session: Session }) {
   const [imgCount, setImgCount] = useState(0);
   const [preview, setPreview] = useState<{ src: string; left: number; top: number } | null>(null); // 悬浮预览
   const [suggestion, setSuggestion] = useState(""); // 基于历史的灰字自动建议(光标后的补全)
-  const hist = () => { // 当前会话的历史(懒建),不是全 app 一条
+  const liveHist = () => { // 当前会话的本地历史(懒建),不是全 app 一条
     let h = histStore.get(session.id);
     if (!h) histStore.set(session.id, (h = []));
     return h;
   };
+  // 时间线里的用户消息就是这个会话的历史本体 —— 关掉 app 再打开,histStore 空了,但时间线随会话
+  // 恢复回来,↑ 照样翻得到开会话前发的消息(这正是原来翻不到的原因)。
+  // 本次会话发出去的那几条带 composerHtml,图片/引用 chip 能原样还原;恢复回来的只有 blocks,
+  // 退化成纯文本(图片数据在 sidecar,为翻个历史去逐条取不值)。
+  const timelineHist = useMemo<HistEntry[]>(() => {
+    const out: HistEntry[] = [];
+    for (const it of session.timeline) {
+      if (it.kind !== "user") continue;
+      const text = it.blocks.map((b) => (b.type === "text" ? b.text : "")).filter(Boolean).join("\n").trim();
+      if (it.composerHtml) out.push({ html: it.composerHtml, imgs: it.composerImgs ?? {}, text, ts: it.ts });
+      else if (text) out.push({ html: textHtml(text), imgs: {}, text, ts: it.ts });
+    }
+    return out.reverse(); // 新的排前面,↑ 第一下就是最近一条
+  }, [session.timeline]);
+  // 两路合并按时间倒序,再把紧挨着的重复项折掉。同一条发出去的消息两边都有(histStore 一份、
+  // 时间线一份),它俩的 html 完全相同 —— 先比 html 就把这种成对的收掉了;文本那条顺带把
+  // "连发两条一模一样的"也折成一条(shell 历史就是这么做的),只发图没文字的除外。
+  const dupe = (a: HistEntry, b: HistEntry) =>
+    a.html === b.html || (!!a.text && a.text === b.text && hasImgs(a) === hasImgs(b));
+  const hist = () => {
+    const all = [...liveHist(), ...timelineHist].sort((a, b) => b.ts - a.ts);
+    return all.filter((h, i) => i === 0 || !dupe(h, all[i - 1]));
+  };
+  const histIdx = useRef(-1);             // ↑ 翻到第几条(-1 = 没在翻历史,框里是用户自己的内容)
+  const histDraft = useRef<HistEntry | null>(null); // 开始翻之前框里那份,↓ 翻回头时还给他
   const selItemRef = useRef<HTMLDivElement>(null); // 命令面板当前选中项,用于键盘导航时滚动进视口
   // @ 提及:mention=光标处的 @token(null=菜单关);mDir=浏览模式当前目录;mAll=全量索引(过滤用)
   const [mention, setMention] = useState<{ query: string } | null>(null);
@@ -420,10 +452,10 @@ export function Composer({ session }: { session: Session }) {
 
   // 快照当前编辑器内容(含图片),必须在 clearEditor 之前调用
   function snapshot(): HistEntry {
-    return { html: edRef.current?.innerHTML ?? "", imgs: Object.fromEntries(imgData.current), text: getText().trim() };
+    return { html: edRef.current?.innerHTML ?? "", imgs: Object.fromEntries(imgData.current), text: getText().trim(), ts: Date.now() };
   }
   function pushHistory(h: HistEntry) {
-    if (h.text || hasImgs(h)) hist().unshift(h);
+    if (h.text || hasImgs(h)) liveHist().unshift(h);
   }
   // ↑ 回显上一条:整体还原 HTML + 图片数据,图片标签因此不会丢
   function restoreHistory(h: HistEntry) {
@@ -434,10 +466,25 @@ export function Composer({ session }: { session: Session }) {
     idc.current = maxId + 1; // 新插入的图片不能和还原出来的 chip id 撞
     renumber();
     ed.focus();
+    // 光标一律落在最前面。翻历史时光标停在末尾的话,下一下 ↑ 就成了"把光标往上移一行",
+    // 一条就翻不动了 —— 钉在第一位,连按 ↑ 才能一路往上翻。
     const sel = window.getSelection();
-    const r = document.createRange(); r.selectNodeContents(ed); r.collapse(false);
+    const r = document.createRange(); r.selectNodeContents(ed); r.collapse(true);
     sel?.removeAllRanges(); sel?.addRange(r);
+    ed.scrollTop = 0;
     syncText();
+  }
+
+  // 光标是否落在编辑器最前面。不能只看 textContent 为空 —— 图片 chip 和 <br> 都不贡献文本,
+  // 光标停在图片后面/第二行行首也会被算成"在最前",↑ 就抢走了本该移动光标的那一下。
+  function caretAtStart() {
+    const ed = edRef.current, sel = window.getSelection();
+    if (!ed || !sel || !sel.isCollapsed || !sel.rangeCount || !ed.contains(sel.anchorNode)) return false;
+    const r = sel.getRangeAt(0);
+    const pre = document.createRange();
+    pre.selectNodeContents(ed); pre.setEnd(r.startContainer, r.startOffset);
+    const frag = pre.cloneContents();
+    return (frag.textContent ?? "").split(ZWSP).join("") === "" && !frag.querySelector(".img-tag, .snip-tag, br");
   }
 
   // 图片标签是原子块:光标只能停在它前面或后面,不能钻进去。
@@ -511,6 +558,7 @@ export function Composer({ session }: { session: Session }) {
     imgData.current.clear();
     draftStore.delete(session.id); // 已发送,清掉草稿
     setText(""); setImgCount(0); setPalIdx(0); setPreview(null); setSuggestion("");
+    histIdx.current = -1; histDraft.current = null; // 发出去了,下一轮 ↑ 从最新一条重新数
   }
 
   // 模型菜单开着时:点菜单和输入框以外的任何位置都收起(点输入框保留,方便直接打字)。
@@ -540,7 +588,7 @@ export function Composer({ session }: { session: Session }) {
     setModelMenu(true);
   }
 
-  const plainHist = (text: string): HistEntry => ({ html: text, imgs: {}, text });
+  const plainHist = (text: string): HistEntry => ({ html: textHtml(text), imgs: {}, text, ts: Date.now() });
 
   // 纯前端命令:CLI 有,但 SDK init 不上报、当 prompt 发会被模型当字面文本,故在客户端实现,不发给 agent。
   // 命中返回 true(调用方据此不再走 sendMessage)。
@@ -800,7 +848,6 @@ export function Composer({ session }: { session: Session }) {
     // 用 performance.now() 而不是 e.timeStamp:合成事件的 timeStamp 可能是 0 或另一套时钟,
     // 一旦算出负的时间差,这里就会把之后每一个回车都吃掉。
     if (e.key === "Enter" && performance.now() - compEndAt.current < 100) { e.preventDefault(); return; }
-    const live = getText();
 
     // agent 运行中:Esc 不打断任务(已按用户要求禁用)
 
@@ -860,11 +907,20 @@ export function Composer({ session }: { session: Session }) {
     }
     // 模型菜单打开时:esc 关闭
     if (modelMenu && e.key === "Escape") { e.preventDefault(); setModelMenu(false); return; }
-    // 输入历史:只有空输入框按 ↑ 才回显上一条。框里一有内容(包括刚回显出来的),
-    // 上下左右一律交还给光标 —— 之前回显后还继续翻历史,光标就再也移不动了。
-    if (e.key === "ArrowUp" && imgCount === 0 && !live && hist().length) {
+    // 输入历史:光标停在第一位时 ↑/↓ 翻历史,不限次数。判据从"框里是空的"改成"光标在最前面",
+    // 加上每翻一条都把光标钉回第一位,连按 ↑ 就能一路往上翻;光标不在第一位时方向键照常移动光标,
+    // 两种意图不会打架。
+    if ((e.key === "ArrowUp" || e.key === "ArrowDown") && caretAtStart()) {
+      const h = hist();
+      const next = histIdx.current + (e.key === "ArrowUp" ? 1 : -1);
+      if (next < -1) return;                            // 已经在最新一条之下:↓ 交还给光标
+      if (next >= h.length) { e.preventDefault(); return; } // 到头了就停住,别掉回"移动光标"
       e.preventDefault();
-      restoreHistory(hist()[0]);
+      if (histIdx.current === -1) histDraft.current = snapshot(); // 开始翻之前先把手上这份收好
+      histIdx.current = next;
+      if (next >= 0) restoreHistory(h[next]);
+      else if (histDraft.current && (histDraft.current.text || hasImgs(histDraft.current))) restoreHistory(histDraft.current);
+      else clearEditor();
       return;
     }
     // backspace 落在图片 chip 之后(隔着零宽字符)时,一次删掉整块,不用先删掉那个看不见的零宽字符再删一次。
@@ -1040,6 +1096,7 @@ export function Composer({ session }: { session: Session }) {
   useEffect(() => {
     const ed = edRef.current;
     const d = draftStore.get(session.id);
+    histIdx.current = -1; histDraft.current = null; // 历史是按会话分的,翻到第几条也别跟过来
     if (ed) {
       ed.innerHTML = d?.html ?? "";
       imgData.current = new Map(Object.entries(d?.imgs ?? {}));
@@ -1233,7 +1290,9 @@ export function Composer({ session }: { session: Session }) {
           className="editor"
           contentEditable
           suppressContentEditableWarning
-          onInput={() => { syncText(); refreshMention(); }}
+          // 手动改了内容就退出"翻历史"状态:框里已经是他自己的东西了,下一下 ↑ 该从最新一条重新数。
+          // 回显历史走 innerHTML 直赋值,不触发 input,不会误伤。
+          onInput={() => { histIdx.current = -1; histDraft.current = null; syncText(); refreshMention(); }}
           onKeyDown={onKeyDown}
           onKeyUp={refreshMention}
           onPaste={onPaste}

@@ -563,6 +563,7 @@
   "有未提交改动": "Has uncommitted changes",
   "一次推到全部 {{n}} 个远端:{{list}}": "Push to all {{n}} remotes at once: {{list}}",
   "推送到 {{r}}:{{cmd}}": "Push to {{r}}: {{cmd}}",
+  "从 {{r}} 拉取 {{n}} 个新提交（git pull）": "Pull {{n}} new commits from {{r}} (git pull)",
   "只推到 {{r}}:{{cmd}}": "Push to {{r}} only: {{cmd}}",
   "(未推送)": "(unpushed)",
   "对比左端": "Compare left side",

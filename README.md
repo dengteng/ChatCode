@@ -6,7 +6,7 @@
 
 # ChatCode
 
-**Chat with an agent. Put it to work on what you actually want built.**
+**Chat with an agent, and put it to work building what you've been dreaming up.**
 
 ChatCode is a conversational coding client wrapped around a terminal core — light, easy, safe, and capable.<br>
 Read files, edit code, run tests, drive Git, execute shell commands — all in one window.
@@ -24,16 +24,16 @@ Read files, edit code, run tests, drive Git, execute shell commands — all in o
 
 ---
 
-
 ## Quick start
 
-Every model runs through the [Claude Code CLI](https://docs.claude.com/en/docs/claude-code/overview) (v2+), so they all inherit its full harness of tools. If you already have it, ChatCode finds it on its own; if not, the setup screen installs it for you in one click (behind the Great Firewall it detects that and switches to the npmmirror registry automatically).
+Every model runs through the [Claude Code CLI](https://docs.claude.com/en/docs/claude-code/overview) (v2+), so they all inherit its full harness of tools. It installs anywhere, including mainland China — the setup screen on first launch has a one-click install (behind the Great Firewall it detects that and switches to the npmmirror registry automatically).
 
 ```sh
 claude --version   # already installed? this prints v2.x
 ```
 
-Claude uses subscription OAuth — no API key needed. Other models take a key under Settings → Models, and you can switch between them at any time.
+Coding with a Claude model goes through subscription OAuth, so there's no API key to fill in.
+For any other model, set its API key under Settings → Models, and you can switch models mid-session at any time.
 
 ## Features
 
@@ -41,9 +41,9 @@ Claude uses subscription OAuth — no API key needed. Other models take a key un
 
 The reach of terminal commands with the comfort of a real UI.
 
-- `!` runs shell, `@` finds files, `/` sends commands, `#` picks a Skill, `↑` recalls the last message — your terminal habits carry over unchanged
+- `!` runs shell, `@` finds files, `/` sends commands, `#` picks a Skill, `↑` recalls the previous message — your terminal habits carry over unchanged
 - Paste images and quote messages inline with your text: compact, and tightly tied to what you're asking about
-- Don't want to sit and wait? Queue up to 3 messages — the agent works through them in order as it finishes.
+- Don't want to sit and wait? Queue up to 3 messages — the agent works through them in order once it finishes what it's on
 
 ### Multi-model support
 
@@ -66,7 +66,7 @@ A drawer on the right side of each project: Branches, Files, Memory, Activity.
 It interrupts you for the calls that are actually yours to make, and handles the rest on its own.
 
 - Turn on auto-approve and a task runs start to finish without round trips
-- Context, 5-hour and weekly usage, and reset times live in the status bar — no token goes unaccounted for
+- Context, 5-hour and weekly usage, and reset times live in the status bar — no token goes to waste
 - Every turn logs its duration, token spend, and cache hits
 
 ### Fast and personal
@@ -77,14 +77,14 @@ A native Tauri window, not another Electron shell.
 - Tens of megabytes resident — write all day on battery without your lap getting hot
 - Five themes, or drop in a wallpaper and let it pick the palette for you
 
-### Memory · Skills · MCP
+### Skills · Plugins · MCP
 
-In sync with Claude Code, plus a plugin marketplace.
+The plugin system stays in sync with Claude Code, plus a built-in marketplace.
 
-- Skills, plugins, and MCP each get their own tab, synced with Claude Code
 - Search and install from the marketplace; disable temporarily or uninstall for good, all in one place
 - Annotate each entry so a crowded list still tells you what everything does
 - The agent reports which memories it saved or cited and which Skills it used
+- Type `#` in a session to pull up your Skills — each one shows the note you gave it, so a long list never becomes a guessing game
 
 ## Interface
 
@@ -141,7 +141,7 @@ Node sidecar (sidecar/server.mjs)
 Claude Code harness (tools / permissions / hooks / MCP / sessions)
 ```
 
-Session data is persisted under `~/.ChatCode/` (older installs are moved there automatically).
+Session data is persisted under `~/.ChatCode/` (older `~/.chat-code/` installs are moved there automatically).
 
 ## Security
 
@@ -159,13 +159,12 @@ npm run tauri dev  # or run the Tauri window (the first Rust build is slow)
 
 ## Feedback
 
-Bug reports, feature requests, or just wanting to build something together — all welcome. Issues usually get a reply within a day.
+Bug reports, feature requests, or just wanting to build something together — all welcome.
 
-- [Open an issue](https://github.com/dengteng/ChatCode/issues)
-- Email dengteng2025@gmail.com
-- [Author's homepage](https://dengteng.xyz)
-
-Other projects by the author: [Lunaris Fortune Calendar](https://lunaris.dengteng.xyz/) (a calendar, schedule, and fortune manager living in the Mac menu bar) · [Stock Review](https://stock.dengteng.xyz/) (a daily stock review assistant)
+- Issues usually get a reply within a day. [Open an issue](https://github.com/dengteng/ChatCode/issues)
+- Contact the author: dengteng2025@gmail.com
+- Author's homepage: https://dengteng.xyz
+- Other projects: [Luna](https://lunaris.dengteng.xyz/) — a calendar, schedule, and fortune widget that lives in the Mac menu bar, with screenshots, screen recording, window management, quick web links, translation, currency conversion and more; best of all, it's under 5 MB and free
 
 ## License
 

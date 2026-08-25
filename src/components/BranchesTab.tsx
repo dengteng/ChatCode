@@ -463,6 +463,12 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
   const canPush = (l: RepoLane) => isCur && !!b && (l.ref ? pushable.has(l.ref) : true);
   const pushLanes = lanes.filter(canPush);
   const showPush = pushLanes.length > 0 && !pushFlow && !pushing;
+  // 远端领先本地就该往回拉。落后数只有上游那条 lane 有 —— git 只跟踪一个上游,
+  // 其余远端连 behind 都算不出来,不给它们画 pull。
+  const behind = b?.behind || 0;
+  const canPull = (l: RepoLane) => isCur && !!b && !!l.isUpstream && behind > 0;
+  const anyPull = lanes.some(canPull);
+  const showPull = anyPull && !pullFlow && !pushFlow && !pushing;
 
   const total = lanes.length * TAB_W + Math.max(0, lanes.length - 1) * TAB_GAP;
   const rowW = total + SIDE_W + TAB_GAP;                  // 整排宽 = tab 组 + 右侧「新建」槽
@@ -536,14 +542,22 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
         <div className="brz-fan" style={{ width: Math.max(rowW, cx + 8) }}>
           <svg className="brz-map-svg" width={Math.max(rowW, cx + 8)} height={FAN_H}>
             <line x1={cx} y1={0} x2={cx} y2={FORK_Y} className="brz-map-line" />
-            <circle cx={cx} cy={1} r={2.5} className="brz-map-dot" />
+            {/* 箭头指向数据实际要去的一端。平时是本地→远端(每条分叉末端朝下,落在 tab 上);
+                远端有本地还没有的提交时,这条线上真正会发生的是 pull,箭头就挪到主干顶端朝上。
+                两头都有(分叉状态)时两个箭头都画 —— 那时确实两边都得走一趟。 */}
+            {anyPull
+              ? <path d={`M ${cx - 4} 8 L ${cx} 0 L ${cx + 4} 8 Z`} className="brz-map-head" />
+              : <circle cx={cx} cy={1} r={2.5} className="brz-map-dot" />}
             {lanes.map((l, i) => {
               const x = tabX(i), dash = !l.isUpstream;
               const cls = `brz-map-line ${dash ? "dash" : ""}`;
+              const pullOnly = canPull(l) && !canPush(l);
               return (
                 <g key={l.remote}>
                   <path fill="none" className={cls} d={forkPath(x, FORK_Y)} />
-                  <path d={`M ${x - 4} ${tipY - 8} L ${x} ${tipY} L ${x + 4} ${tipY - 8} Z`} className={`brz-map-head ${dash ? "dash" : ""}`} />
+                  {pullOnly
+                    ? <circle cx={x} cy={tipY - 2} r={2.5} className={`brz-map-dot ${dash ? "dash" : ""}`} />
+                    : <path d={`M ${x - 4} ${tipY - 8} L ${x} ${tipY} L ${x + 4} ${tipY - 8} Z`} className={`brz-map-head ${dash ? "dash" : ""}`} />}
                 </g>
               );
             })}
@@ -563,14 +577,27 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
           {/* 主干上的 push 药丸:一次推到全部还有东西可推的远端。推送进行中撤掉 —— 按钮压在线上会截断光束。
               只有"全部 lane 都还能推"时才挂在主干上:推完其中一个远端后主干那颗还留着,读起来像"还要全推一次",
               可它实际只推剩下那条 —— 那种时候按钮该待在剩下那条分叉线上。 */}
-          {showPush && b && pushLanes.length === lanes.length && (
-            <button className="brz-push" style={{ left: cx, top: FORK_Y / 2 }}
-              title={pushLanes.length > 1
-                ? t("一次推到全部 {{n}} 个远端:{{list}}", { n: pushLanes.length, list: pushLanes.map((l) => l.remote).join("、") })
-                : t("推送到 {{r}}:{{cmd}}", { r: pushLanes[0].ref || pushLanes[0].remote, cmd: pushCmdFor(pushLanes[0]) })}
-              {...btnPress(() => { setBeamTo(pushLanes.map((l) => l.remote)); onPush(pushLanes.map(pushCmdFor).join(" && ")); })}>
-              <span>push</span>
-            </button>
+          {b && (showPull || (showPush && pushLanes.length === lanes.length)) && (
+            <div className="brz-ops" style={{ left: cx, top: FORK_Y / 2 }}>
+              {showPush && pushLanes.length === lanes.length && (
+                <button className="brz-push"
+                  title={pushLanes.length > 1
+                    ? t("一次推到全部 {{n}} 个远端:{{list}}", { n: pushLanes.length, list: pushLanes.map((l) => l.remote).join("、") })
+                    : t("推送到 {{r}}:{{cmd}}", { r: pushLanes[0].ref || pushLanes[0].remote, cmd: pushCmdFor(pushLanes[0]) })}
+                  {...btnPress(() => { setBeamTo(pushLanes.map((l) => l.remote)); onPush(pushLanes.map(pushCmdFor).join(" && ")); })}>
+                  <span>push</span>
+                </button>
+              )}
+              {/* 只有上游那条能 pull,所以不像 push 那样按 lane 各挂一个。不设 beamTo:
+                  光束那边 in 方向本来就只认上游 lane。 */}
+              {showPull && (
+                <button className="brz-push pull"
+                  title={t("从 {{r}} 拉取 {{n}} 个新提交（git pull）", { r: b.upstream, n: behind })}
+                  {...btnPress(() => onRun("git pull"))}>
+                  <span>pull</span>
+                </button>
+              )}
+            </div>
           )}
           {/* 分叉线上各挂一个 ↑:只推这一条。多远端时一直画 —— 主干那颗"全推"只在全都能推时才在,
               它一撤,这排就是唯一入口,位置也正好指出剩的是哪条。单远端时不画:和主干药丸重复。 */}

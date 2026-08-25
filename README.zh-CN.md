@@ -26,13 +26,14 @@ ChatCode 是封装了终端内核的对话式编程客户端，轻量、好用�
 
 ## 快速开始
 
-所有模型都由 [Claude Code CLI](https://docs.claude.com/en/docs/claude-code/overview)（v2+）执行，因此能直接用上它整套 harness 工具。已经装过的，ChatCode 自己就能找到；没装的，引导页有「一键安装」（在国内会自动探测并改用 npmmirror 镜像源）。
+所有模型都由 [Claude Code CLI](https://docs.claude.com/en/docs/claude-code/overview)（v2+）执行，因此能直接用上它整套 harness 工具。国内用户也可以安装，首次启动的引导页有「一键安装」（在国内会自动探测并改用 npmmirror 镜像源）。
 
 ```sh
 claude --version   # 装过的话这里会打印 v2.x
 ```
 
-Claude 走订阅 OAuth，不用填 API Key；其余模型在「设置 → 模型」里配好 key 随时切。
+如果用Claude模型写代码，是走订阅OAuth，不用填 API Key；  
+如果用其他模型，请在「设置 → 模型」里配好对应的API Key，即可随时在会话里切换所用模型。
 
 ## 功能
 
@@ -76,14 +77,14 @@ Tauri 打包的原生窗口，不是又一个套壳 Electron。
 - 常驻内存几十兆，插着电写一天不烫手
 - 五套主题，还能丢一张壁纸进来自动取色
 
-### 记忆 · 技能 · MCP
+### Skills · 插件 · MCP
 
-和 Claude Code 同步，还有插件市场。
+插件体系和 Claude Code 同步，还内置了一套插件市场。
 
-- Skills、插件、MCP 各成一栏，与 Claude Code 同步
 - 市场即搜即装，临时停用、长期卸载都在这儿
 - 每项能加备注，装多了也不会忘了它干嘛的
 - 本次记了/引用了哪条记忆、用了哪个 Skill，Agent 自己报备
+- 在会话中输入#，即可快速显示引用skill，引用时能看到给skill加的备注，避免skill太多记不住用途
 
 ## 界面
 
@@ -158,13 +159,11 @@ npm run tauri dev  # 或者跑 Tauri 窗口（首次会编译 Rust，较慢）
 
 ## 反馈
 
-反馈 Bug、提需求、想一起做点什么，都欢迎。Issue 通常一天内回。
-
-- [提 Issue](https://github.com/dengteng/ChatCode/issues)
-- 邮件 dengteng2025@gmail.com
-- [作者主页](https://dengteng.xyz)
-
-作者的其他项目：[Lunaris Fortune Calendar](https://lunaris.dengteng.xyz/)（常驻 Mac 菜单栏的日历日程运势管理工具）· [Stock Review](https://stock.dengteng.xyz/)（每日股票复盘助手）
+反馈 Bug、提需求、想一起做点什么，都欢迎。  
+- Issue 通常一天内回。[提 Issue](https://github.com/dengteng/ChatCode/issues)
+- 联系作者：邮件dengteng2025@gmail.com
+- 作者主页：https://dengteng.xyz
+- 其他项目：[Luna](https://lunaris.dengteng.xyz/)（常驻 Mac 菜单栏的日历日程运势小工具，还有截图、录屏、窗口管理、网页直达、翻译、汇率换算等实用功能，最关键的是体积不到5M，还免费）
 
 ## License
 
