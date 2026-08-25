@@ -483,7 +483,11 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 .ask-q-tag { display: inline-block; font-size: 11px; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); padding: 1px 7px; border-radius: 5px; margin-right: 8px; }
 .ask-opts { display: flex; flex-direction: column; gap: 6px; }
 .ask-opt { display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); cursor: pointer; }
-.ask-opt.hi { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+/* 键盘光标位置不填背景,只在左边压一道竖条 —— 填了背景就和「已选中」撞脸:
+   森林主题的 --accent 是 #15803d,和 --green 同色系,点一下取消选中后 .on 走了、.hi 还在,
+   看上去跟没取消一样(勾没了但底色边框都还在)。留给 .on 的信号是「底色 + 边框 + ✅」,
+   .hi 只负责指出光标在哪。 */
+.ask-opt.hi { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
 .ask-opt.on { background: rgba(88,200,120,.1); border-color: var(--green); }
 .ask-opt-n { flex-shrink: 0; width: 18px; height: 18px; border-radius: 5px; background: var(--panel); border: 1px solid var(--border); font-size: 11px; display: flex; align-items: center; justify-content: center; color: var(--muted); }
 .ask-opt.hi .ask-opt-n { border-color: var(--accent); color: var(--text); }
@@ -2248,8 +2252,11 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
 /* 左内边距归零:行号列在表格里是 position:absolute、从 .d2h-wrap 左边缘起算,
    图例留 10px 就对不上了。字体也跟着行号走 Menlo,两列宽度才严丝合缝。 */
 .d2h-legend { display: flex; align-items: center; padding: 5px 10px 5px 0; font-size: 11px; color: var(--muted); border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--text) 4%, transparent); }
-.d2h-lg-num { flex: none; box-sizing: border-box; width: 3.5em; padding: 0 .5em; text-align: right; font-family: Menlo, monospace; }
-.d2h-lg-rest { margin-left: 8px; }
+/* 居中而非跟着行号右对齐:行号是数字、右对齐才能按位数对齐,表头是两个汉字,压在列中线上才看得出管的是哪列 */
+.d2h-lg-num { flex: none; box-sizing: border-box; width: 3.5em; padding: 0 .5em; text-align: center; font-family: Menlo, monospace; }
+/* 补 .5em:行号列总宽 7.5em,两个 3.5em 一左浮一右浮,中间空的就是这 .5em —— 不补,第二个表头整体偏左半个字 */
+.d2h-lg-num + .d2h-lg-num { margin-left: .5em; }
+.d2h-lg-rest { margin-left: 20px; }
 .d2h-legend .d2h-lg-ins { color: #3fb950; } .d2h-legend .d2h-lg-del { color: #f85149; }
 .d2h-legend .d2h-lg-clip { color: #d29922; }
 .d2h-wrap .d2h-file-header, .d2h-wrap .d2h-file-list-header { display: none; } /* 文件头/列表另有 UI,省掉 */

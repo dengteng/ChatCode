@@ -20,6 +20,24 @@
   `src-tauri/target/release/bundle/macos/ChatCode.app`
 - 签名身份**不写进 `tauri.conf.json` / `package.json`**（会把开发者真名 + 证书 ID 提交进仓库）。
 
+## 产品介绍图出完就上传（重要）
+- 用 `product-intro-pic` skill 出完一期图后**自动上传**，不用等用户开口：
+  ```sh
+  node scripts/publish-pics.mjs           # 传全部期(未改动的自动跳过)
+  node scripts/publish-pics.mjs 13-功能特性横版   # 只传这一期
+  node scripts/publish-pics.mjs drop chatcode/12-   # 标删一批(前缀匹配)
+  ```
+- 传到 tt-knowledge 的 `dengtengly@gmail.com` 空间，vault 路径 `chatcode/<期目录>/<文件>`。
+  **前缀只留一层 `chatcode/`**：客户端文件列表是单行截断的，前缀长了每行都是相同的那截，
+  看不出是哪一期哪张图（一开始写成 `packages/chatcode/product-intro/`，列表里全糊成一样）。
+- 客户端没有通用文件夹折叠 —— `knowledge.tsx` 里只硬编码了 `images/` 前缀折叠成
+  「文章采集的图片」，其余一律平铺。要真正的分组得改 tt-knowledge 那个项目。
+- 和 fortune-signal-app 的 `publish-apk.mjs` 同一套：`scripts/vault.mjs` 是从那边原样搬来的，
+  凭据共用 `~/.chatcode-publish.json`（已登录，别重登 —— refresh token 是轮换式的，
+  重登会把另一端顶下线）。
+- 增量靠 `out/.published.json` 记 `mtime:size`，跟着产物走、在 `.gitignore` 里。
+  图改了重跑即可，不会全量重传。
+
 ## 架构速记
 - 前端 Tauri webview（`src/`）连 `ws://127.0.0.1:PORT`（开发 8975 / 打包 8976）。
 - 后端 sidecar（`sidecar/server.mjs`）：每会话一个 SDK `query`，走 `@anthropic-ai/claude-agent-sdk`。
