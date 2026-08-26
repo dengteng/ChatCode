@@ -428,14 +428,19 @@ const pick = (fn: () => void) => (e: React.MouseEvent) => { if (e.button !== 0) 
 
 // WKWebView 复用 .timeline 这个滚动层,"编程式"改 scrollTop 常常不触发重绘 —— 内容其实已经在、
 // 滚动条也到位了,却停在一片空白,要手动滚一下(产生真实滚动事件)才上色。
-// 下一帧真实滚 1px 再钉回目标位,等价于替用户滚了一下,逼它立刻重绘。到顶时改成往下滚,保证真有位移。
-// 凡是编程式跳转滚动位置的地方都得跟一脚 —— 漏掉哪条路径,哪条路径就白屏(切会话、往前翻历史都踩过)。
-const pokeRepaint = (el: HTMLElement, top: () => number, ok: () => boolean = () => true) =>
-  requestAnimationFrame(() => {
+// 做法:下一帧真实滚 1px,再下一帧钉回目标位,等价于替用户滚了一下。到顶时改成往下滚,保证真有位移。
+// 两次位移必须分在两帧 —— 同一帧内滚开又滚回,合成时看到的净位移是 0,等于没滚过,照样不重绘
+// (原来两句写在一个 rAF 里,所以有的路径补了这一脚还是白)。
+// 凡是编程式跳转滚动位置的地方都得跟一脚 —— 漏掉哪条路径,哪条路径就白屏(切会话、往前翻历史、
+// 回到底部、历史回放都踩过)。返回取消器。
+const pokeRepaint = (el: HTMLElement, top: () => number, ok: () => boolean = () => true) => {
+  let raf = requestAnimationFrame(() => {
     if (!ok()) return;
     el.scrollTop += el.scrollTop > 0 ? -1 : 1;
-    el.scrollTop = top();
+    raf = requestAnimationFrame(() => { el.scrollTop = top(); });
   });
+  return () => cancelAnimationFrame(raf);
+};
 
 // 每个会话的浏览位置。只活在内存里 —— 关掉 ChatCode 就忘,重开一律回到最新消息。
 // ts/off 是"视口顶那一行是谁、离视口顶多远":光记 scrollTop 不够,人在别的会话时这边可能还在长新消息,
@@ -542,9 +547,20 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
   // 得发条消息触发重渲染才上色(切会话、往前翻历史踩过同一个坑,见 pokeRepaint 注释)。
   const jumpBottom = () => {
     const el = timelineRef.current;
-    if (el) { el.scrollTop = el.scrollHeight; pokeRepaint(el, () => el.scrollHeight); }
     stick.current = true;
+    if (el) pinBottom(el);
     setShowJump(false);
+  };
+  // 所有「编程式钉到底部」都走这儿:钉完必须补重绘那一脚,少一处那一处就白屏。
+  // 同一时刻只留一个待执行的 poke —— ResizeObserver 在流式回复时每帧都会叫好几次,
+  // 不去重就攒出一堆 rAF 做同一件事。
+  const pokeRaf = useRef<() => void>(() => {});
+  const pinBottom = (el: HTMLElement) => {
+    el.scrollTop = el.scrollHeight;
+    pokeRaf.current();
+    // ok 守卫:这一脚落在下一帧,期间用户已手动往上翻(stick=false)就别硬拽回底部
+    pokeRaf.current = pokeRepaint(el, () => el.scrollHeight, () => stick.current);
+    return pokeRaf.current;
   };
   // 切会话:同步(paint 前)定位。有上次的浏览位置就回到那儿,没有(或当时就贴着底)才钉到底。
   // 之前用 useEffect + sentinel.scrollIntoView 有两个毛病:① useEffect 在 paint 之后跑,
@@ -569,20 +585,17 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
       setShowJump(el.scrollHeight - landed - el.clientHeight > 300);
       // 守卫用"落点没被别人挪过",不能用 stick —— 恢复的位置若正好离底 80px 内,
       // 紧跟着的 scroll 事件会把 stick 置回 true,拿 stick 当条件就会把这一脚重绘跳过去(白屏)。
-      const raf = pokeRepaint(el, () => landed, () => Math.abs(el.scrollTop - landed) < 2);
-      return () => cancelAnimationFrame(raf);
+      return pokeRepaint(el, () => landed, () => Math.abs(el.scrollTop - landed) < 2);
     }
     stick.current = true;
     setShowJump(false);
-    el.scrollTop = el.scrollHeight;
-    // 编程式定位到底部同样不触发重绘,补一脚(见 pokeRepaint)。
-    // ok 守卫:期间用户已手动往上翻(stick=false)就别硬拽回底部。
-    const raf = pokeRepaint(el, () => el.scrollHeight, () => stick.current);
-    return () => cancelAnimationFrame(raf);
+    return pinBottom(el);
   }, [session.id]);
+  // 历史是切过来之后分批回放进来的,钉底发生在这儿、不在上面那个切会话的 effect 里 ——
+  // 这条路径以前没补重绘那一脚,所以每次切到还没加载过的会话都是"滚动条对、内容一片空白"。
   useEffect(() => {
     const el = timelineRef.current;
-    if (stick.current && el) el.scrollTop = el.scrollHeight;
+    if (stick.current && el) pinBottom(el);
   }, [session.timeline]);
   // 流式回复时 agent 卡片高度是"逐帧长大"的(markdown/工具卡/图片异步撑高),单靠 timeline 变更的 effect
   // 在那一拍 paint 时高度还没长完就钉不到真底,用户得手动往下拉。用 ResizeObserver 盯每个子元素的尺寸变化,
@@ -590,7 +603,7 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
   useEffect(() => {
     const el = timelineRef.current;
     if (!el) return;
-    const pin = () => { if (stick.current) el.scrollTop = el.scrollHeight; };
+    const pin = () => { if (stick.current) pinBottom(el); };
     const ro = new ResizeObserver(pin);
     const sync = () => { ro.disconnect(); for (const c of el.children) ro.observe(c); };
     sync();
@@ -605,7 +618,7 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
     if (session.status === "running" && prevStatus.current !== "running") {
       stick.current = true;
       const el = timelineRef.current;
-      if (el) el.scrollTop = el.scrollHeight;
+      if (el) pinBottom(el);
     }
     prevStatus.current = session.status;
   }, [session.status]);
