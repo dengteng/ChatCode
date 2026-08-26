@@ -1152,7 +1152,7 @@ function AgentTurnCard({ items, running, showFull, cwd, liveInput, settle, bgWai
   const memories = usedMemories(items); // 本轮触达的记忆(引用 / 更新)
   const memRefs = memories.filter((m) => m.action === "read");
   const memUpdates = memories.filter((m) => m.action !== "read");
-  const md = makeMdComponents(cwd);
+  const md = useMemo(() => makeMdComponents(cwd), [cwd]); // 稳定 components 身份:否则每次轮询重渲染都换新组件函数,react-markdown 整树重挂,hover 菜单被卸载
   // 一轮里的正文常被工具调用切成好几段(每段一条 agent_text),而且下一段往往直接续着上一段的句子写
   // (…确保 Mermaid → [跑一下] → 图能渲染。)。只渲染最后一条 = 正文缺一大截、还从半截句子开头,所以全都要,按顺序拼。
   //
@@ -1486,7 +1486,7 @@ const jumpToMemory = (file: string) => window.dispatchEvent(new CustomEvent("cc-
 function MemoryRefs({ memories, kind, cwd }: { memories: MemRef[]; kind: "ref" | "update"; cwd: string }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const md = makeMdComponents(cwd);
+  const md = useMemo(() => makeMdComponents(cwd), [cwd]);
   const label = kind === "update" ? t("更新了 {{n}} 条记忆", { n: memories.length }) : t("{{n}} 条记忆引用", { n: memories.length });
   return (
     <div className={`mem-refs ${kind === "update" ? "mem-update" : ""}`}>

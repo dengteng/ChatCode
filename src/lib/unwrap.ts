@@ -20,6 +20,10 @@ const FULL_RATIO = 0.8;  // 达到栏宽这个比例才算「被截断」,明显
 const BLOCK_START = /^\s*(?:[-*+]\s|\d+[.)]\s|\d+、|[一二三四五六七八九十]+、|[（(]\d+[）)]|[①-⑳]|#{1,6}\s|>|\||[a-z][a-z0-9+.-]*:\/\/|\/[^\s/])/i;
 // 行尾像代码或 URL、或挂着行尾注释(# / //),都不是被排版截断的句子
 const CODE_TAIL = /(?:[;{},\\|]|&&|\|\||=>|->|:\/\/\S+|(?:^|\s)(?:#|\/\/)[^\n]*)\s*$/;
+// 行尾是句末标点(. ! ? 。！？ 省略号,后面可再跟收尾引号/括号)= 这行是写完的整句,不是被栏宽截断的续行。
+// 栏宽折行只会断在词间(行尾是半截词),几乎不会正好断在句号后 —— 起因:从编辑器整行复制的多条独立句子
+// ("…$419.21." / "…$521.62." / "Response states…") 恰好某行够长撑满栏宽,把下一句误吸成一行。
+const SENTENCE_END = /[.!?。！？…]["'”’)\]）】]*\s*$/;
 // 行内出现"多空格对齐"(命令 + 对齐的注释、表格样式的列)= 代码/表格,不是排版折行
 const COLUMNS = /\S {2,}\S/;
 // 视觉宽度:中日韩全角算 2,其余 1(纯长度会把中文行误判成"太短")
@@ -47,7 +51,7 @@ export function unwrapSoftBreaks(src: string): string {
   for (const line of lines) {
     const prev = out[out.length - 1];
     const joinable = prev !== undefined && !!last.trim() && !!line.trim()
-      && !BLOCK_START.test(line) && !CODE_TAIL.test(last) && visWidth(last.trim()) >= column * FULL_RATIO
+      && !BLOCK_START.test(line) && !CODE_TAIL.test(last) && !SENTENCE_END.test(last) && visWidth(last.trim()) >= column * FULL_RATIO
       && !COLUMNS.test(last) && !COLUMNS.test(line);
     last = line;
     if (!joinable) { out.push(line); continue; }
