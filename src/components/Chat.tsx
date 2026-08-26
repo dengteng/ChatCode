@@ -278,6 +278,22 @@ function PasteBtn({ text }: { text: string }) {
   );
 }
 
+// 起手落在表格单元格里时,把选区夹在这一格内。WebKit 的 <table> 选择:光标一旦跨出起始格,
+// 就从"选文字"切成"选整格/整行"(见用户反馈:想框一格文案,一拉就选中好几行)。没有 CSS 开关能关掉,
+// 只能在拖动过程中把 focus 端夹回起始格边界。跨格选文本本就少用,整表另有复制按钮兜底。
+const cellOf = (n: Node | null): HTMLElement | null => {
+  const el = n?.nodeType === 3 ? n.parentElement : (n as HTMLElement | null);
+  return el?.closest?.("td,th") ?? null;
+};
+function clampSelToCell(cell: HTMLElement) {
+  const sel = window.getSelection();
+  const f = sel?.focusNode;
+  if (!sel || !f || cell.contains(f)) return; // focus 还在格内,不动
+  // focus 落在起始格之前 → 夹到格首;否则(之后/包住本格)夹到格尾。extend 只挪 focus、保留 anchor。
+  const before = cell.compareDocumentPosition(f) & Node.DOCUMENT_POSITION_PRECEDING;
+  sel.extend(cell, before ? 0 : cell.childNodes.length);
+}
+
 // 清掉选区后逼 WKWebView 把消息区重画一遍。removeAllRanges() 本身不算样式变更,WebKit 就不重绘 ——
 // 旧的高亮底色原地留在屏上(markdown 表格最明显:整个单元格的绿底能一直挂着,看着像"选中了没选的内容")。
 // 动一下 opacity 是能触发重绘里最轻的:0.999 肉眼无差,不动布局、不动滚动位置。
@@ -293,10 +309,13 @@ function SelectionActions({ containerRef }: { containerRef: React.RefObject<HTML
   const { t } = useTranslation();
   const [box, setBox] = useState<{ x: number; y: number; text: string } | null>(null);
   useEffect(() => {
+    let anchorCell: HTMLElement | null = null; // 本次划选起手所在的表格单元格(在其外起手则 null)
+    const onSelChange = () => { if (anchorCell) clampSelToCell(anchorCell); };
     const onUp = () => {
       const sel = window.getSelection();
       const text = sel?.toString() ?? "";
       const cont = containerRef.current;
+      anchorCell = null;
       if (!text.trim() || !sel || !sel.rangeCount || !cont || !cont.contains(sel.anchorNode)) { setBox(null); return; }
       const r = sel.getRangeAt(0).getBoundingClientRect();
       if (!r.width && !r.height) { setBox(null); return; }
@@ -314,10 +333,13 @@ function SelectionActions({ containerRef }: { containerRef: React.RefObject<HTML
         const sel = window.getSelection();
         if (sel && !sel.isCollapsed) { sel.removeAllRanges(); repaintSelection(containerRef.current); }
       }
+      const cont = containerRef.current;
+      anchorCell = t && cont?.contains(t) ? cellOf(t) : null;
     };
     document.addEventListener("mouseup", onUp);
     document.addEventListener("mousedown", onDown);
-    return () => { document.removeEventListener("mouseup", onUp); document.removeEventListener("mousedown", onDown); };
+    document.addEventListener("selectionchange", onSelChange);
+    return () => { document.removeEventListener("mouseup", onUp); document.removeEventListener("mousedown", onDown); document.removeEventListener("selectionchange", onSelChange); };
   }, [containerRef]);
   if (!box) return null;
   return createPortal(

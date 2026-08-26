@@ -1768,6 +1768,7 @@ function spawnAgent(ws, sess, { id, resume }) {
         if (msg.type === "result") {
           if (sess.userInterrupted) msg = { ...msg, aborted: true };
           else { const title = loadIndex().find((e) => e.id === id)?.title || tr("会话"); pushOverlay(tr("任务完成"), tr("{{title}} 已完成", { title })); } // 用户主动中断不推
+          clearTimeout(sess.interruptWatch); // interrupt() 已经把 result 逼出来了,不用再走强制重启看门狗
           sess.running = false;
           sess.freshDone = !msg.aborted; // 完成过一轮(非中断)→ 列表绿✅
           sess.userInterrupted = false;
@@ -1812,6 +1813,7 @@ function spawnAgent(ws, sess, { id, resume }) {
 // running 就一直挂着:前端 status 卡在「运行中」,打断按钮点了没反应,待发队列也永远放不出去。
 // 所以凡是绕过 result 结束一轮的路径(重启 / 打断兜底)都要显式收尾并通知前端。
 function endTurn(id, sess) {
+  clearTimeout(sess.interruptWatch); // 轮次收尾了,撤掉打断看门狗
   sess.running = false;
   sess.userInterrupted = false;
   broadcastIndex();
@@ -2286,15 +2288,21 @@ wss.on("connection", (ws) => {
         // 服务端这轮其实早结束了(点得晚了 / 前端 status 漏更新卡在运行中):
         // 别静默 break —— 那正是「按钮点了没反应」的样子。回一条收尾让前端自愈。
         if (!sess?.running) { broadcast({ type: "turn_ended", sessionId: m.sessionId }); break; }
-        // 第二次点:上一次的 interrupt 没能让 CLI 吐出 result(卡死),硬拔重启 query。
+        // 强制重启:上一次的 interrupt 没能让 CLI 吐出 result(卡死),硬拔重启 query。
         // resume 回原 sdkSessionId,上下文不丢;restartAgent 内部会 endTurn 通知前端。
-        if (sess.userInterrupted) {
+        // 两条路会走到这:①用户手快又点了一下(userInterrupted 已置);②看门狗超时自动升级。
+        const forceRestart = () => {
+          clearTimeout(sess.interruptWatch);
           broadcast({ type: "system_note", sessionId: m.sessionId, text: tr("⛔ 打断没生效,已强制重启 agent(上下文保留)") });
           restartAgent(ws, sess, m.sessionId).catch(() => endTurn(m.sessionId, sess));
-          break;
-        }
+        };
+        if (sess.userInterrupted) { forceRestart(); break; }
         sess.userInterrupted = true; // 让随后那条 result 显示成"用户终止运行"
         sess.q?.interrupt?.()?.catch?.(() => {}); // CLI 已死时会 reject,别掀翻 sidecar
+        // 看门狗:interrupt() 常常逼不出 result(CLI 卡在某个工具里),之前要靠用户再点一下才硬重启 ——
+        // 用户不知道要点第二下,只会觉得"打断按钮没用"。这里到点还没停就自动升级成强制重启,一次点击必然生效。
+        clearTimeout(sess.interruptWatch);
+        sess.interruptWatch = setTimeout(() => { if (sess.running && sess.userInterrupted) forceRestart(); }, 4000);
         break;
       }
       case "get_models": {
