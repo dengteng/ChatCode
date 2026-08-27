@@ -291,6 +291,16 @@ function BtwBtn({ text }: { text: string }) {
   );
 }
 
+// 命令跑着时的「运行中… 3.2s」。原来只有一句不动的"运行中…":遇上 git push 这种要等好几秒的,
+// 分不出是命令本身慢、还是界面卡住了没收到回包。数字在走 = 命令还在跑;数字从 0 直接跳到 10 = 是界面卡了。
+function TermRunning({ since }: { since?: number }) {
+  const { t } = useTranslation();
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => { const h = setInterval(() => setNow(Date.now()), 200); return () => clearInterval(h); }, []);
+  // 200ms 一跳而不是每帧:这行只显示到 0.1s,再快也看不出来,白烧渲染
+  return <div className="term-cwd-line muted">{t("运行中…")} {(Math.max(0, now - (since || now)) / 1000).toFixed(1)}s</div>;
+}
+
 // 起手落在表格单元格里时,把选区夹在这一格内。WebKit 的 <table> 选择:光标一旦跨出起始格,
 // 就从"选文字"切成"选整格/整行"(见用户反馈:想框一格文案,一拉就选中好几行)。没有 CSS 开关能关掉,
 // 只能在拖动过程中把 focus 端夹回起始格边界。跨格选文本本就少用,整表另有复制按钮兜底。
@@ -1847,7 +1857,7 @@ function TermRows({ item, cwd }: { item: Extract<TimelineItem, { kind: "terminal
           <div className="msg-name">{host}</div>
           <div className="line line-term-out bubble">
             <BubbleActs text={item.command + (hasOut ? "\n" + item.output : "")} />
-            {item.pending ? <div className="term-cwd-line muted">{t("运行中…")}</div> : <>
+            {item.pending ? <TermRunning since={item.ts} /> : <>
               {hasOut && <TermOut text={item.output} cwd={cwd} />}
               {item.cwdChanged && <div className="term-cwd-line"><Folder size={13} /> {t("现在在 {{dir}}", { dir: shortCwd })}</div>}
               {!hasOut && !item.cwdChanged && item.exitCode === 0 && <div className="term-cwd-line muted">{t("（无输出）")}</div>}
@@ -1991,7 +2001,7 @@ function Item({ item, cwd, onPermission, onAgentClick, agentLabel }: { item: Tim
             {/* 悬停显形的复制按钮:一键复制命令 + 输出;文本本身也可鼠标框选 */}
             <BubbleActs text={item.command + (hasOut ? "\n" + item.output : "")} />
             <div className="term-cmd" title={item.cwd}>{item.command}{item.exitCode !== 0 && <span className="term-ec"> <X size={11} />{item.exitCode}</span>}</div>
-            {item.pending ? <div className="term-cwd-line muted">{t("运行中…")}</div> : <>
+            {item.pending ? <TermRunning since={item.ts} /> : <>
               {hasOut && <TermOut text={item.output} cwd={cwd} />}
               {item.cwdChanged && <div className="term-cwd-line"><Folder size={13} /> {t("现在在 {{dir}}", { dir: shortCwd })}</div>}
               {!hasOut && !item.cwdChanged && item.exitCode === 0 && <div className="term-cwd-line muted">{t("（无输出）")}</div>}

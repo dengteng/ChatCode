@@ -592,8 +592,14 @@ function execOut(bin, args, cwd, env, timeout = 12000) {
 // 每仓库最多 30s fetch 一次,不阻塞 git_info(下一轮 15s 轮询就能读到新 ahead/behind)。
 // GIT_TERMINAL_PROMPT=0:需要认证的私库直接快速失败,不弹交互卡死。
 const lastFetch = new Map();
+// 用户自己发的 shell 命令跑着的时候不要另起后台 fetch。git_info 在每条命令跑完后都会被刷一次
+// (见 terminal_result),于是「commit 完 → 立刻点 push」这条最常走的路上,后台 fetch 正好压在 push 头上:
+// 同一个远端两条连接抢网络,收尾还要抢 packed-refs 锁。后台 fetch 晚一轮(15s 轮询)没有任何代价,
+// 用户干等没法解释。不写 lastFetch —— 这次是跳过不是跑过,下一轮该补上。
+let userCmdsRunning = 0;
 function maybeFetch(repo) {
   const now = Date.now();
+  if (userCmdsRunning > 0) return;
   if (now - (lastFetch.get(repo) || 0) < 30000) return;
   lastFetch.set(repo, now);
   // --prune:远端已删的分支,本地 refs/remotes 会一直留着(git fetch 默认不删),
@@ -2469,7 +2475,9 @@ wss.on("connection", (ws) => {
         // termCwd 为空(如刚断开 SSH 被清空)时回落到会话项目目录,而不是家目录 —— 否则命令跑在 ~/,PWD 回传后 dir-bar 被切到根目录
         const cwd0 = sess?.termCwd || sess?.agentCwd || resolveCwd(m.sessionId);
         const script = `${m.command}\n__ec=$?; printf '\\0%s\\0%s' "$PWD" "$__ec"`;
+        userCmdsRunning++; // 跑着期间挡掉后台 fetch,别跟用户的 push/pull 抢同一个远端(见 maybeFetch)
         execFile("bash", ["-lc", script], { cwd: cwd0, timeout: 30000, maxBuffer: 4 << 20, env: safeEnv() }, (err, stdout, stderr) => {
+          userCmdsRunning--;
           let output = stdout || "", newCwd = cwd0, ec = err?.code ?? 0;
           const parts = output.split("\0");
           if (parts.length >= 3) { output = parts[0]; newCwd = parts[1].trim() || cwd0; ec = Number(parts[2]) || 0; }
