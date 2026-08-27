@@ -634,6 +634,7 @@ interface Api {
   requestGitFileDiff: (id: string, from: string, to: string, file: string) => void;
   compareBranches: (id: string, base: string, head: string) => void;
   suggestCommit: (id: string, force?: boolean) => Promise<string>; // commit 弹窗:总结待提交改动;无新对话复用缓存,force 强制重跑
+  askBtw: (id: string, text: string) => Promise<string>; // 抽屉侧问:走 CLI 的 side_question,任务跑着也能问,不排队、不进主线上下文
   deleteSession: (id: string) => void;
   renameSession: (id: string, title: string) => void;
   setAutoAllow: (id: string, on: boolean) => void; // 会话级"自动同意"
@@ -676,6 +677,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   stateRef.current = state;
   // commit 自动总结的待响应 promise(按 sessionId 存,一个会话同时最多一个弹窗)
   const commitWaiters = useRef(new Map<string, { resolve: (s: string) => void; reject: (e: Error) => void }>());
+  // 侧问的待响应 promise。按 rid 存而不是按 sessionId:侧问不占主线,同一会话可以连着问好几条,
+  // 后一条不该把前一条的回答顶掉(commit 总结那种"一个弹窗一条"的按会话存法在这里不成立)。
+  const btwWaiters = useRef(new Map<string, { resolve: (s: string) => void; reject: (e: Error) => void }>());
   // 启动预取只做一次:连上后首个 index 到达时,异步暖各会话 git 分支状态 + 5h/周用量。断线重连会重置。
   const prefetched = useRef(false);
   // 空态输入框"发消息即建会话":会话 id 由 sidecar 生成、异步回来,先把首条消息暂存,等 session_created 到了再补发。
@@ -745,6 +749,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           case "commit_suggest": {
             const w = commitWaiters.current.get(m.sessionId);
             if (w) { commitWaiters.current.delete(m.sessionId); m.ok ? w.resolve(m.message) : w.reject(new Error(m.error || i18n.t("生成失败"))); }
+            break;
+          }
+          case "btw_reply": {
+            const w = btwWaiters.current.get(m.rid);
+            if (w) { btwWaiters.current.delete(m.rid); m.error ? w.reject(new Error(m.error)) : w.resolve(m.text || ""); }
             break;
           }
           case "git_file_diff": dispatch({ type: "git_file_diff", id: m.sessionId, data: { from: m.from, to: m.to, file: m.file, patch: m.patch, error: m.error } }); break;
@@ -1054,6 +1063,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         commitWaiters.current.get(id)?.reject(new Error(i18n.t("已被新的请求取代"))); // 旧的未决请求作废
         commitWaiters.current.set(id, { resolve, reject });
         send({ type: "commit_suggest", sessionId: id, force: !!force });
+      });
+    },
+    askBtw(id, text) {
+      return new Promise<string>((resolve, reject) => {
+        const rid = crypto.randomUUID();
+        btwWaiters.current.set(rid, { resolve, reject });
+        send({ type: "btw", sessionId: id, rid, text });
+        // 兜底:sidecar 重启/断线时那条回包永远不来,气泡会一直转圈。到点作废,用户可重问。
+        setTimeout(() => { if (btwWaiters.current.delete(rid)) reject(new Error(i18n.t("等待回答超时"))); }, 120000);
       });
     },
     deleteSession(id) {

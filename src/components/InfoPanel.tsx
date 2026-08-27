@@ -9,13 +9,14 @@ import { PermissionCard, SkillMcpTags, usedSkillsMcp } from "./Chat";
 import { CommitDialog } from "./CommitDialog";
 import { BranchesTab } from "./BranchesTab";
 import { MemoryTab } from "./MemoryTab";
+import { BtwTab } from "./BtwTab";
 import { isEditable } from "./FileEditor";
 import { openEditorWindow } from "../popout";
 import { onEdgeGlow } from "../lib/edgeGlow";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { useTranslation } from "react-i18next";
 
-type Tab = "project" | "branches" | "files" | "memory";
+type Tab = "project" | "branches" | "files" | "memory" | "btw";
 
 // 从会话时间线里挑出两类端口,用于把"脱离工作目录、cwd 过滤抓不到"的进程(如 ssh -L 隧道)找回来:
 //  - startedPorts:本会话亲手起的 —— agent 跑的命令里 `ssh -L <本地口>:host:port` 的本地转发口(最可靠)
@@ -102,8 +103,10 @@ export function InfoPanel({ session, initialTab, memoryTarget, onClose }: { sess
         <button className={tab === "files" ? "selected" : ""} onMouseDown={(e) => { if (e.button !== 0) return; e.preventDefault(); setTab("files"); }}>{t("文件")}</button>
         {!session.casual && <button className={tab === "memory" ? "selected" : ""} onMouseDown={(e) => { if (e.button !== 0) return; e.preventDefault(); setTab("memory"); }}>{t("记忆")}</button>}
         <button className={tab === "project" ? "selected" : ""} onMouseDown={(e) => { if (e.button !== 0) return; e.preventDefault(); setTab("project"); }}>{t("活动")}</button>
+        <button className={`tab-btw${tab === "btw" ? " selected" : ""}`} onMouseDown={(e) => { if (e.button !== 0) return; e.preventDefault(); setTab("btw"); }}>{t("btw顺便问问")}</button>
       </div>
     </div>
+    {tab === "btw" && <BtwTab sessionId={session.id} />}
     {tab === "project" && <div className="info-scroll">
       {/* 工作目录一栏去掉:聊天页顶栏常驻显示同一个路径,抽屉里再列一遍是重复。首页面板那份留着 —— 那里没有顶栏。 */}
       <InfoSection title={t("会话进程（{{num}}）", { num: procs.length })}

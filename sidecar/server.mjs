@@ -998,6 +998,7 @@ const EN_DICT = {
   "🔀 已切换到 {{label}}(换 provider 会开启全新对话)": "🔀 Switched to {{label}} (switching provider starts a new conversation)",
   // ---- 审批 / 推送 ----
   "用户拒绝了此操作": "The user declined this action",
+  "当前会话没有可用的 agent 进程,无法顺便问": "No live agent process for this session — side questions need one",
   "需要审批": "Approval needed",
   "任务完成": "Task finished",
   "点击查看": "Tap to view",
@@ -2303,6 +2304,22 @@ wss.on("connection", (ws) => {
         // 用户不知道要点第二下,只会觉得"打断按钮没用"。这里到点还没停就自动升级成强制重启,一次点击必然生效。
         clearTimeout(sess.interruptWatch);
         sess.interruptWatch = setTimeout(() => { if (sess.running && sess.userInterrupted) forceRestart(); }, 4000);
+        break;
+      }
+      case "btw": {
+        // 侧问(抽屉「btw 顺便问问」):走 CLI 控制通道的 side_question,**不进 msgQueue** ——
+        // 那条队列会把用户消息按住到本轮跑完,而侧问的意义正是"任务跑着的时候也能问"。
+        // CLI 侧对 side_question 是 maxTurns:1 + canUseTool 全拒 + skipTranscript,只答不做事、不污染主线上下文。
+        // 9 家 provider 都吃得下:它们复用同一个 CLI 进程,只是 ANTHROPIC_BASE_URL 不同,
+        // 落到上游的就是一次普通的 /v1/messages。
+        const sess = sessions.get(m.sessionId);
+        const ask = sess?.q?.askSideQuestion; // SDK 0.3.226 有实现但没写进 .d.ts,取不到就如实回错,别静默
+        const reply = (o) => send(ws, { type: "btw_reply", sessionId: m.sessionId, rid: m.rid, ...o });
+        if (typeof ask !== "function") { reply({ error: tr("当前会话没有可用的 agent 进程,无法顺便问") }); break; }
+        ask.call(sess.q, String(m.text || "")).then(
+          (r) => reply({ text: r?.response ?? "", synthetic: !!r?.synthetic }),
+          (e) => reply({ error: String(e?.message || e) }),
+        );
         break;
       }
       case "get_models": {

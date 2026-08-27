@@ -1,5 +1,5 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, isValidElement, type ReactNode } from "react";
-import { GitFork, GitBranch, ChevronRight, ChevronDown, Folder, Server, Puzzle, Plug, ArrowDown, Wrench, Check, Copy, X, CircleHelp, Lock, Image as ImageIcon, MessageSquare, Ban, Pin, Pencil, TriangleAlert, Loader2, Brain, RotateCcw, CornerDownRight, Paperclip } from "lucide-react";
+import { GitFork, GitBranch, ChevronRight, ChevronDown, Folder, Server, Puzzle, Plug, ArrowDown, Wrench, Check, Copy, X, CircleHelp, Lock, Image as ImageIcon, MessageSquare, Ban, Pin, Pencil, TriangleAlert, Loader2, Brain, RotateCcw, CornerDownRight, Paperclip, MessageCircleQuestion } from "lucide-react";
 import { createPortal } from "react-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -14,6 +14,7 @@ import { cleanMemory, stripLineNums } from "../lib/memtext";
 import { btnPress } from "../lib/utils";
 import { defaultRuleContent, destinationLabel, suggestionLabel } from "../permissions";
 import { Composer } from "./Composer";
+import { stashBtwDraft } from "./BtwTab";
 import { CommitDialog } from "./CommitDialog";
 import { GitMapDialog } from "./GitMapDialog";
 import { openImageWindow, openEditorWindow } from "../popout";
@@ -243,7 +244,7 @@ function pasteHtml(node: HTMLElement): string {
 // 气泡右上角那组按钮:贴到输入框 + 复制(顺序即左右)。绝对定位在这层,按钮本身走普通流,
 // 不用给"复制"算固定右偏移("已复制"文案会变宽,写死就会错位)。
 function BubbleActs({ text }: { text: string }) {
-  return <div className="term-acts"><PasteBtn text={text} /><CopyBtn text={text} /></div>;
+  return <div className="term-acts"><BtwBtn text={text} /><PasteBtn text={text} /><CopyBtn text={text} /></div>;
 }
 
 // 通用复制按钮:悬停显形,点后短暂显示"已复制"。stopPropagation 避免把卡片/抽屉一起点开。
@@ -275,6 +276,18 @@ function PasteBtn({ text }: { text: string }) {
       e.preventDefault(); e.stopPropagation();
       pasteToComposer(text);
     }}><Paperclip size={12} /></button>
+  );
+}
+
+// 气泡右上角的"顺便问问":整条内容塞进抽屉 btw tab 的输入框(和划选那条同一通路,见 stashBtwDraft)。
+// 放在最左边:它会开抽屉,是这组里唯一改变屏幕布局的动作,别挨着高频的"复制"免得误触。
+function BtwBtn({ text }: { text: string }) {
+  const { t } = useTranslation();
+  return (
+    <button className="term-copy term-paste" title={t("顺便问问")} onMouseDown={(e) => {
+      e.preventDefault(); e.stopPropagation();
+      stashBtwDraft(text);
+    }}><MessageCircleQuestion size={12} /></button>
   );
 }
 
@@ -347,6 +360,9 @@ function SelectionActions({ containerRef }: { containerRef: React.RefObject<HTML
       <button onMouseDown={(e) => { e.preventDefault(); copyText(box.text); setBox(null); }}><Copy size={12} /> {t("复制")}</button>
       <button onMouseDown={(e) => { e.preventDefault(); window.dispatchEvent(new CustomEvent("cc-insert-snippet", { detail: { text: box.text } }));
         window.getSelection()?.removeAllRanges(); repaintSelection(containerRef.current); setBox(null); }}>{t("贴到输入框")}</button>
+      {/* 顺便问问:选中的话不进主线输入框,而是塞进抽屉的 btw tab —— 那边走 side_question,任务跑着也能问 */}
+      <button onMouseDown={(e) => { e.preventDefault(); stashBtwDraft(box.text);
+        window.getSelection()?.removeAllRanges(); repaintSelection(containerRef.current); setBox(null); }}>{t("顺便问问")}</button>
     </div>, document.body);
 }
 
@@ -926,6 +942,7 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
                       {/* 复制整条回复:和用户气泡下方那排同一套样式(.msg-redo-row),只是靠右对齐到气泡右下角 */}
                       {turnText(g.agent) && (
                         <div className="msg-redo-row agent-actions">
+                          <button title={t("顺便问问:整条回复带进 btw 输入框")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); stashBtwDraft(turnCopyText(g.agent)); } }}><MessageCircleQuestion size={13} /></button>
                           <button title={t("贴到输入框:整条回复变成一个引用 chip")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); pasteToComposer(turnCopyText(g.agent)); } }}><Paperclip size={13} /></button>
                           {/* 富文本复制:HTML 取屏幕上那份渲染结果(表格粘到飞书/Word 还是表格),纯文本退回 Markdown 原文 */}
                           <button title={t("复制整条回复")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault();

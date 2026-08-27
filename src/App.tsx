@@ -107,7 +107,7 @@ export default function App() {
   const { t } = useTranslation();
   const { state } = useStore();
   const [showInfo, setShowInfo] = useState(false);
-  const [infoTab, setInfoTab] = useState<"project" | "branches" | "files" | "memory">("branches");
+  const [infoTab, setInfoTab] = useState<"project" | "branches" | "files" | "memory" | "btw">("branches");
   const [memoryTarget, setMemoryTarget] = useState<string | undefined>(); // 从气泡"记忆引用/更新"跳转时要高亮的记忆文件名
   const [turnAnchor, setTurnAnchor] = useState<number | null>(null); // 非 null = 抽屉开着,值为该轮起始用户消息 ts(0 = 会话开头那轮)
   const [showSearch, setShowSearch] = useState(false);
@@ -226,8 +226,11 @@ export default function App() {
       setMemoryTarget(undefined); // 先清再设,连点同一条也能重新触发高亮
       if (file) requestAnimationFrame(() => setMemoryTarget(file));
     };
+    // 划选后点「顺便问问」→ 打开抽屉的 btw tab(选中的文本由 BtwTab 自己取,见 stashBtwDraft)
+    const onOpenBtw = () => { setInfoTab("btw"); setShowInfo(true); };
     window.addEventListener("cc-open-memory", onOpenMem);
-    return () => window.removeEventListener("cc-open-memory", onOpenMem);
+    window.addEventListener("cc-open-btw", onOpenBtw);
+    return () => { window.removeEventListener("cc-open-memory", onOpenMem); window.removeEventListener("cc-open-btw", onOpenBtw); };
   }, []);
 
   return (
