@@ -2,7 +2,7 @@
 
 [English](https://github.com/dengteng/ChatCode/blob/main/README.md) · **简体中文**
 
-<img src="docs/logo-rounded.png" width="88" alt="ChatCode">
+<img src="public/logo-rounded.png" width="88" alt="ChatCode">
 
 # ChatCode
 
