@@ -6,6 +6,7 @@ import { useStore } from "./store";
 import { Sidebar } from "./components/Sidebar";
 import { Chat } from "./components/Chat";
 import { EmptyComposer } from "./components/EmptyComposer";
+import { BrandIntro } from "./components/BrandIntro";
 import { InfoPanel, TurnDrawer } from "./components/InfoPanel";
 import { SearchPanel } from "./components/SearchPanel";
 import { Settings } from "./components/Settings";
@@ -251,7 +252,7 @@ export default function App() {
         ) : (
           <div className="empty-wrap">
             <div className="empty">
-              <h2>ChatCode</h2>
+              <BrandIntro />
               {!state.connected && <p className="warn"><TriangleAlert size={14} /> {t("sidecar 未连接 — 请先 npm run sidecar")}</p>}
             </div>
             <EmptyComposer />

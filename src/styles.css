@@ -128,18 +128,67 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 .main { flex: 1; display: flex; flex-direction: column; min-width: 600px; } /* 聊天面板最小宽度,再窄不缩 */
 .empty-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .empty { margin: auto; text-align: center; color: var(--muted); }
-/* 首页标题 ShinyText 扫光:底色暗、一条亮带横扫。底色取背景图主色、亮带取点缀亮色(无自定义图回退 accent) */
-.empty h2 {
-  font-size: 4em;
-  --st-base: var(--custom-accent, var(--accent));
-  --st-shine: var(--custom-glow, #fff);
-  background: linear-gradient(120deg, var(--st-base) 0%, var(--st-base) 35%, var(--st-shine) 50%, var(--st-base) 65%, var(--st-base) 100%);
-  background-size: 200% auto; background-clip: text; -webkit-background-clip: text;
-  color: transparent; -webkit-text-fill-color: transparent;
-  animation: shiny-sweep 3s linear infinite;
+/* ============ 首页品牌区 BrandIntro ============
+   时间轴:0-.5s logo 弹进来(停在整体正中) / .5-1.6s </> 变笑脸说话 / 1.6-2.15s 变回
+   2.15-2.7s logo 左移让位 / 2.5-3.0s 字母逐个出现。
+   --slide(logo 让位距离) 由 BrandIntro.tsx 量出来写进来。 */
+/* position:relative 是必须的:BrandIntro 用 offsetLeft 量坐标,.brand 不是定位元素的话
+   offsetParent 会跑到外层容器上,量出来的是「离主区左边多远」,--slide 直接翻倍。 */
+.brand { position: relative; display: inline-flex; align-items: center; gap: .32em; font-size: 4em; }
+.brand-logo {
+  flex: none; width: 1.55em; height: 1.55em;
+  opacity: 0; translate: var(--slide) 0;
+  animation:
+    brand-logo-in .5s cubic-bezier(.34,1.56,.64,1) both,
+    brand-logo-slide .55s cubic-bezier(.65,0,.35,1) 2.15s both;
 }
-@keyframes shiny-sweep { from { background-position: 150% center; } to { background-position: -50% center; } }
-@media (prefers-reduced-motion: reduce) { .empty h2 { animation: none; } }
+.brand-logo svg { display: block; width: 100%; height: 100%; }
+/* 用独立的 translate / scale 属性,不用 transform:两条动画同时挂在一个元素上,
+   都写 transform 的话后一条会把前一条整个盖掉,弹跳和左移只能活一个。 */
+@keyframes brand-logo-in { from { opacity: 0; scale: .72; } to { opacity: 1; scale: 1; } }
+@keyframes brand-logo-slide { to { translate: 0 0; } }
+
+/* stroke 19 / 24 是拿 public/logo.png 逐行扫白色像素量出来的,别拍脑袋调粗:
+   符号本来就比气泡细一档,两者都写 30 的话 < 和 / 会糊成一坨。 */
+.brand-eye-l, .brand-eye-r, .brand-mouth {
+  fill: none; stroke: #fff; stroke-width: 19; stroke-linecap: round; stroke-linejoin: round;
+}
+/* 这三根线的变形不在这儿:CSS 的 d:path() 动画只有 Chromium 认,WebKit 不认,
+   进 Tauri 就成了死图。改走 BrandIntro.tsx 里的 SMIL <animate>。 */
+.brand-bubble {
+  fill: none; stroke: #fff; stroke-width: 24; stroke-linecap: round; stroke-linejoin: round;
+  transform-origin: 256px 300px;
+  animation: brand-bubble-talk 2.15s ease-in-out both;   /* 跟着说话轻轻鼓一鼓,只做 2D 缩放 */
+}
+@keyframes brand-bubble-talk {
+  0%, 35%, 82%, 100% { transform: scale(1); }
+  45%, 65%           { transform: scale(1.035); }
+  55%, 75%           { transform: scale(1); }
+}
+
+.brand-word { position: relative; font-weight: 800; letter-spacing: -.5px; white-space: nowrap; }
+/* 字色取背景图主色,无自定义图回退 accent */
+.brand-word span {
+  display: inline-block; opacity: 0;
+  color: var(--custom-accent, var(--accent));
+  animation: brand-letter-in .34s cubic-bezier(.34,1.56,.64,1) both;
+}
+@keyframes brand-letter-in {
+  from { opacity: 0; transform: translateY(.16em) scale(.8); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* 本次会话已经播过进场了(从会话切回空态):直接落到终态 */
+.brand[data-skip] .brand-logo { animation: none; opacity: 1; translate: 0 0; }
+.brand[data-skip] .brand-bubble { animation: none; }
+.brand[data-skip] .brand-word span { opacity: 1; animation: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .brand-logo, .brand-word span,
+  .brand-bubble, .brand-eye-l, .brand-eye-r, .brand-mouth {
+    animation: none; opacity: 1; translate: 0 0;
+  }
+}
 /* 空态底部快捷输入:发消息即建会话;贴主区底,和真正的 .composer 位置一致 */
 .empty-composer { position: relative; padding: 10px 16px 16px; max-width: 760px; width: 100%; margin: 0 auto; }
 .empty-dir-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12px; }
