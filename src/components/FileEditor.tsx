@@ -40,6 +40,59 @@ const MIME: Record<string, string> = { svg: "image/svg+xml", jpg: "image/jpeg", 
 export const ext = (name: string) => name.split(".").pop()?.toLowerCase() || "";
 export const isEditable = (name: string) => EDITABLE.has(ext(name));
 
+// ---------- 点击源码 → 预览定位 ----------
+// 思路两边一致:渲染时把「这块内容来自源码第几行」写成属性,点击时取光标行号,
+// 找最后一个行号 ≤ 光标的元素(嵌套时天然落到最深那层)滚过去并闪一下。
+
+/** 给 html 每个开标签写上源码行号。script/style 的**内容**跳过 —— 里面的 `<div>` 是字符串,不是标签。 */
+function tagLines(src: string): string {
+  const starts: number[] = [];   // 每行起点偏移,二分反查行号(逐次 slice+split 是 O(n²),大文件会卡)
+  for (let i = 0; i < src.length; i++) if (src[i] === "\n") starts.push(i + 1);
+  const lineAt = (off: number) => {
+    let lo = 0, hi = starts.length;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (starts[m] <= off) lo = m + 1; else hi = m; }
+    return lo + 1;
+  };
+  const skip: [number, number][] = [];
+  for (const m of src.matchAll(/<(script|style)\b[^>]*>([\s\S]*?)<\/\1>/gi)) {
+    skip.push([m.index! + m[0].indexOf(">") + 1, m.index! + m[0].length]);   // 只跳内容,开标签本身还要打行号
+  }
+  for (const m of src.matchAll(/<!--[\s\S]*?-->/g)) skip.push([m.index!, m.index! + m[0].length]);
+  // 属性值里可能有 `>`,所以属性段要按「引号成对」吃,不能简单 [^>]*
+  return src.replace(/<([a-zA-Z][\w-]*)((?:"[^"]*"|'[^']*'|[^>"'])*)>/g, (tag, name: string, attrs: string, off: number) => {
+    if (skip.some(([s, e]) => off >= s && off < e)) return tag;
+    if (/^(br|meta|base|title|html|head)$/i.test(name)) return tag;   // 不可见 / 滚不过去的,不占位
+    const self = attrs.endsWith("/");   // <img … /> 的斜杠必须留在最后,不然属性名会粘上它
+    return `<${name}${self ? attrs.slice(0, -1).trimEnd() : attrs} data-cc-line="${lineAt(off)}"${self ? " /" : ""}>`;
+  });
+}
+
+/** 注进 iframe 的定位脚本。父页面 postMessage 行号过来 —— sandbox 无 allow-same-origin,
+ *  iframe 处于不透明源,父页面碰不到它的 DOM,只能靠 postMessage 让它自己滚。 */
+const SCROLL_RUNTIME = `<script>
+addEventListener("message", function (e) {
+  var line = e.data && e.data.ccLine; if (!line) return;
+  var hit = null;
+  document.querySelectorAll("[data-cc-line]").forEach(function (el) {
+    if (+el.getAttribute("data-cc-line") <= line) hit = el;
+  });
+  if (!hit) return;
+  hit.scrollIntoView({ block: "center", behavior: "smooth" });
+  var old = hit.style.outline, off = hit.style.outlineOffset;
+  hit.style.outline = "2px solid #4a9eff"; hit.style.outlineOffset = "2px";
+  setTimeout(function () { hit.style.outline = old; hit.style.outlineOffset = off; }, 900);
+});
+</script>`;
+
+/** md:把 remark 的行号透到 DOM 上。react-markdown 原样透传 data-*,不用逐个组件包一层。 */
+const rehypeLine = () => (tree: any) => {
+  const walk = (n: any) => {
+    if (n.type === "element" && n.position) (n.properties ||= {})["data-cc-line"] = n.position.start.line;
+    n.children?.forEach(walk);
+  };
+  walk(tree);
+};
+
 // 文件扩展名 → CodeMirror 语言扩展(语法高亮、括号匹配、缩进感知)。查不到的类型走纯文本。
 function langOf(name: string) {
   switch (ext(name)) {
@@ -130,7 +183,8 @@ export function FileEditor({ path, name, onClose, windowed }: { path: string; na
       const r = localRef(tag, attr);
       return r && assets[r] !== undefined ? { r, data: assets[r] } : null;
     };
-    return previewText
+    // 行号必须先注入:后面几步会把外链换成内联内容,文本长度一变,偏移就对不上源码了
+    return tagLines(previewText)
       .replace(LINK_RE, (tag) => {
         if (!/rel\s*=\s*["']?stylesheet/i.test(tag)) return tag;
         const hit = got(tag, "href");
@@ -153,7 +207,7 @@ export function FileEditor({ path, name, onClose, windowed }: { path: string; na
         if (!hit) return tag;
         const e = ext(hit.r);
         return tag.replace(/(\bsrc\s*=\s*["'])[^"']*(["'])/i, `$1data:${MIME[e] || `image/${e}`};base64,${hit.data}$2`);
-      });
+      }) + SCROLL_RUNTIME;
   }, [isHtml, previewText, assets]);
 
   // 预览分栏方向。窄窗口写代码时左右挤,宽屏读长文时上下挤 —— 交给用户自己按内容切。
@@ -223,12 +277,44 @@ export function FileEditor({ path, name, onClose, windowed }: { path: string; na
   };
   // CodeMirror 的滚动发生在内部 .cm-scroller 上(scroll 事件不冒泡),React 的 onScroll 挂外层拿不到,
   // 所以挂载时直接给 scrollDOM 绑原生监听。
+  // 点击源码某行 → 预览滚到那块内容。html 隔着不透明源,只能 postMessage 让 iframe 自己滚;
+  // md 就在本文档里,直接算容器内偏移(不用 scrollIntoView —— 它会连带把外面的浮窗一起滚跑)。
+  const frameRef = useRef<HTMLIFrameElement>(null);
+  const jumpTo = (line: number) => {
+    if (isHtml) { frameRef.current?.contentWindow?.postMessage({ ccLine: line }, "*"); return; }
+    const root = prevRef.current;
+    if (!isMd || !root) return;
+    let hit: HTMLElement | null = null;
+    root.querySelectorAll<HTMLElement>("[data-cc-line]").forEach((el) => {
+      if (+el.getAttribute("data-cc-line")! <= line) hit = el;   // 文档序递增,最后一个命中的就是最深那层
+    });
+    if (!hit) return;
+    const el = hit as HTMLElement;
+    root.scrollTo({
+      top: root.scrollTop + el.getBoundingClientRect().top - root.getBoundingClientRect().top - root.clientHeight / 3,
+      behavior: "smooth",
+    });
+    el.style.outline = "2px solid var(--accent)"; el.style.outlineOffset = "2px";
+    window.setTimeout(() => { el.style.outline = ""; el.style.outlineOffset = ""; }, 900);
+  };
+  // onCreate 只在挂载时跑一次,里面的闭包会锁住首帧的 jumpTo —— 用 ref 转发最新那个(和 saveRef 同一套)
+  const jumpRef = useRef(jumpTo);
+  jumpRef.current = jumpTo;
+
   const onCreate = (view: EV) => {
     cmScrollerRef.current = view.scrollDOM;
     view.scrollDOM.addEventListener("scroll", () => align("src"));
     view.scrollDOM.addEventListener("mouseenter", () => (driver.current = "src"));
     // 打字把光标顶出可视区时浏览器会自己滚,那时鼠标可能正停在右栏 —— 键入也算"在滚左栏"
     view.dom.addEventListener("keydown", () => (driver.current = "src"), true);
+    // 行号按鼠标坐标现算,不读 view.state.selection —— 简单点击时 CodeMirror 让浏览器原生落光标,
+    // 再靠 selectionchange 异步读回,而那个事件排在 mouseup 之后:读 selection 会拿到上一次的位置,
+    // 表现成"预览慢一拍,要再点一下才跟上"。precise=false 让行尾空白/边距也夹到最近位置,不会是 null。
+    // 派 driver=src 是必须的:定位引起的预览滚动会触发对面的 align,不占住方向就会被它反推回来。
+    view.dom.addEventListener("mouseup", (e) => {
+      driver.current = "src";
+      jumpRef.current(view.state.doc.lineAt(view.posAtCoords({ x: e.clientX, y: e.clientY }, false)).number);
+    });
   };
 
   const panel = (
@@ -277,10 +363,10 @@ export function FileEditor({ path, name, onClose, windowed }: { path: string; na
             {isMd && (
               <div className="feditor-preview md" ref={prevRef}
                 onMouseEnter={() => (driver.current = "prev")} onScroll={() => align("prev")}>
-                <Markdown remarkPlugins={[remarkGfm]}>{text}</Markdown>
+                <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeLine]}>{text}</Markdown>
               </div>
             )}
-            {isHtml && <iframe className="feditor-preview-frame" title={t("HTML 预览")} sandbox="allow-scripts allow-forms allow-popups" srcDoc={htmlDoc} />}
+            {isHtml && <iframe ref={frameRef} className="feditor-preview-frame" title={t("HTML 预览")} sandbox="allow-scripts allow-forms allow-popups" srcDoc={htmlDoc} />}
           </div>
         )}
       </div>

@@ -7,7 +7,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { openPath, openUrl, revealPath } from "../native";
 import type { ApiRetry, PermissionSuggestion, ResumeChoice, ResumePrompt, Session, TimelineItem } from "../types";
 import { modelDisplayName } from "../types";
-import { useStore, fetchBlob, type RememberChoice } from "../store";
+import { useStore, fetchBlob, sessionBusy, PENDING_MAX, type RememberChoice } from "../store";
 import { applyEdgeGlow } from "../lib/edgeGlow";
 import { pushCmd } from "../lib/gitcmd";
 import { cleanMemory, stripLineNums } from "../lib/memtext";
@@ -846,16 +846,20 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
           groups.forEach((g, i) => { if ("agent" in g) agentGis.push(i); });
           const chipGis = new Set(agentGis.slice(-SUGGEST_KEEP));
           const onPerm = (rid: string, b: "allow" | "deny", msg?: string, remember?: RememberChoice) => respondPermission(session.id, rid, b, msg, remember);
-          // 点建议 chip = 等于自己敲这句话回车。agent 还在跑就进待发队列(和斜杠命令菜单同一道闸)
-          const sendChip = (text: string) => {
-            if (session.status === "running") {
-              if ((session.pending?.length ?? 0) >= 3) { toast(t("待发已满（最多 3 条）")); return; }
-              enqueuePending(session.id, { blocks: [{ type: "text", text }], text });
-              toast(t("已加入待发"));
+          // 点建议 chip / 点重试 = 等于自己敲这句话回车。轮次没了结就进待发队列,
+          // 闸走 sessionBusy(和 Composer 一字不差):只拦 status==="running" 会从后台任务续跑和
+          // 压缩中两个口子漏出去 —— 压缩期直发会把压缩整个打断。
+          const sendOrQueue = (blocks: any[], text: string) => {
+            if (sessionBusy(session)) {
+              // 满没满由 enqueuePending 现读实时队列判(渲染快照可能已经过期)
+              toast(enqueuePending(session.id, { blocks, text })
+                ? t("已加入待发")
+                : t("待发已满（最多 {{n}} 条）", { n: PENDING_MAX }));
               return;
             }
-            sendMessage(session.id, [{ type: "text", text }]);
+            sendMessage(session.id, blocks);
           };
+          const sendChip = (text: string) => sendOrQueue([{ type: "text", text }], text);
           // 某条 agent 回复由哪个模型产生:取该回合消息自带的 model(会话中途切模型时逐条不同),回退到当前模型。
           const groupModel = (items: TimelineItem[]): string | undefined => {
             for (const it of items) if ((it as any).model) return (it as any).model;
@@ -894,7 +898,7 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
                   {(
                     <div className={`msg-redo-row ${aborted ? "always" : ""}`}>
                       {/* onMouseDown 而非 onClick:WKWebView 首点常被吞(全仓一致处理) */}
-                      <button title={t("重试:重新发起这条消息")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); sendMessage(session.id, (g.user as any).blocks); } }}><RotateCcw size={13} /></button>
+                      <button title={t("重试:重新发起这条消息")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); sendOrQueue((g.user as any).blocks, uText); } }}><RotateCcw size={13} /></button>
                       {/* 有发送时的 composer 快照(本会话内发的)→ 图片+引用 chip 全还原;历史老消息只有 blocks → 图片可还原、引用退化为文本 */}
                       <button title={t("编辑:回填到输入框")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); const u = g.user as any; window.dispatchEvent(new CustomEvent("cc-fill-composer", { detail: u.composerHtml != null ? { html: u.composerHtml, imgs: u.composerImgs } : { blocks: u.blocks } })); } }}><Pencil size={13} /></button>
                       <button title={t("复制内容")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); copyText(uText).then((ok) => ok && toast(t("已复制"), "success")); } }}><Copy size={13} /></button>

@@ -7,6 +7,7 @@ import { useStore } from "../store";
 import type { VersionCheck } from "../version";
 import { onEdgeGlow } from "../lib/edgeGlow";
 import { ModelAvatar } from "./Avatar";
+import { replayBrandIntro } from "./BrandIntro";
 import type { IndexEntry, Session } from "../types";
 
 // 品牌 logo 内联 SVG:lucide v1 已移除品牌图标。单色 currentColor,尺寸与其它 lucide 图标一致(14)。
@@ -289,7 +290,8 @@ export function Sidebar({ onSearch, onOpenSettings, update, onShowUpdate }:
         <div className="search-row">
           <button className="sidebar-search" onClick={onSearch}><span className="search-l"><Search size={14} /> {t("搜索")}</span> <kbd><span className="kbd-cmd">⌘</span>K</kbd></button>
           <button className="new-session new-group" onClick={() => createGroup(t("新分组"))} title={t("新建分组")} aria-label={t("新建分组")}><FolderPlus size={16} /></button>
-          <button className="new-session" onClick={() => dispatch({ type: "go_home" })} title={t("新建会话")} aria-label={t("新建会话")}><Plus size={16} /></button>
+          {/* 只有这个入口重播 logo 进场:删完最后一个会话之类也会落到空态,那种不算「开新头」 */}
+          <button className="new-session" onClick={() => { replayBrandIntro(); dispatch({ type: "go_home" }); }} title={t("新建会话")} aria-label={t("新建会话")}><Plus size={16} /></button>
         </div>
       </div>
       {/* 列表本身也带一份:.sidebar 那份只在直接命中它时生效,而列表 flex:1 撑满,

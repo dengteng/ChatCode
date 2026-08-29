@@ -3,7 +3,7 @@ import { Folder, File, CornerLeftUp, RotateCw, ChevronDown, X, Sparkles } from "
 import { invoke } from "@tauri-apps/api/core";
 import type { Session } from "../types";
 import { BUILTIN_COMMANDS, modelLabel, modelName, contextWindowOf, canSendImage } from "../types";
-import { useStore, fetchBlob } from "../store";
+import { useStore, fetchBlob, sessionBusy, PENDING_MAX } from "../store";
 import { UsageBar } from "./UsageBar";
 import { openImageWindow } from "../popout";
 import { onEdgeGlow } from "../lib/edgeGlow";
@@ -629,12 +629,14 @@ export function Composer({ session }: { session: Session }) {
     if (runLocalCommand(cmd)) return;
     // agent 正在跑:必须排队,不能直接发。轮内追加的输入会被并进当前这一轮,而 Claude Code
     // 只在**新一轮 prompt** 上解析斜杠命令 —— /compact 会被当成普通文本读掉,压缩根本不执行。
-    // 三个条件与 submit() 那道闸一字不差:status 只在模型说话时是 running,后台任务续跑(bgWait)
-    // 和压缩中(compacting)时它已回到 idle,轮次却还没了结 —— 只拦 running 就会从这两个口子漏出去,
+    // 闸统一走 sessionBusy:status 只在模型说话时是 running,后台任务续跑(bgWait)和压缩中时
+    // 它已回到 idle,轮次却还没了结 —— 只拦 running 就会从这两个口子漏出去,
     // 表现为"压缩未成功:命令被并入了正在跑的那一轮"。
-    if (session.status === "running" || session.bgWait || compacting) {
-      if ((session.pending?.length ?? 0) >= 3) { toast(t("待发已满（最多 3 条）")); return; }
-      enqueuePending(session.id, { blocks: [{ type: "text", text: cmd }], text: cmd });
+    if (sessionBusy(session)) {
+      // 满没满由 enqueuePending 现读实时队列判(渲染快照可能已经过期),它说没进去才提示
+      if (!enqueuePending(session.id, { blocks: [{ type: "text", text: cmd }], text: cmd })) {
+        toast(t("待发已满（最多 {{n}} 条）", { n: PENDING_MAX }));
+      }
       return;
     }
     sendMessage(session.id, [{ type: "text", text: cmd }]);
@@ -823,10 +825,13 @@ export function Composer({ session }: { session: Session }) {
     const outBlocks = expandSkillTags(blocks, session.info.skills ?? []);
     const snap = snapshot(); // 快照编辑器(含图片/引用 chip 的 html),给"编辑"按钮完整还原
     // agent 正在工作、上一轮还挂着后台任务在续跑(轮次未彻底了结)、或正在压缩上下文:
-    // 都不打断,消息进待发区排队(最多 3),彻底完成后自动依次发出
-    if (session.status === "running" || session.bgWait || compacting) {
-      if ((session.pending?.length ?? 0) >= 3) { toast(t("待发已满（最多 3 条）")); return; }
-      enqueuePending(session.id, { blocks: outBlocks, text: snap.text, html: snap.html, imgs: snap.imgs });
+    // 都不打断,消息进待发区排队(最多 3),彻底完成后自动依次发出(闸见 sessionBusy)
+    if (sessionBusy(session)) {
+      // 没排上就别清编辑器 —— 用户写的东西还在框里,清一条待发就能直接再按一次
+      if (!enqueuePending(session.id, { blocks: outBlocks, text: snap.text, html: snap.html, imgs: snap.imgs })) {
+        toast(t("待发已满（最多 {{n}} 条）", { n: PENDING_MAX }));
+        return;
+      }
       pushHistory(snap); clearEditor();
       return;
     }

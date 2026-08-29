@@ -77,6 +77,8 @@ interface State {
   homeModels: ModelInfo[]; // 首页模型切换器的可选列表(无会话,走缓存的 Claude 列表 + 已配置 provider)
   homeModel: string;       // 首页选中的模型:新建会话即以此启动(持久化在 localStorage)
 }
+// 待发队列上限。再多屏上就排成一列看不清自己排了啥,而且排得越久越可能已经不是当时想问的了。
+export const PENDING_MAX = 3;
 const HOME_MODELS_ID = "__home__"; // 首页 get_models 的哨兵 sessionId
 const HOME_MODEL_KEY = "cc-home-model";
 const emptyUsage: AccountUsage = { session: { usedPct: null, resetAt: null }, weekly: { usedPct: null, resetAt: null }, fetchedAt: null, stale: false };
@@ -180,7 +182,7 @@ function reducer(s: State, a: Action): State {
       const next = upd(a.id, (x) => ({ ...x, timeline: [], todos: [], contextTokens: 0 }));
       return { ...next, index: next.index.map((e) => (e.id === a.id ? { ...e, lastUser: undefined } : e)) };
     }
-    case "enqueue_pending": return upd(a.id, (x) => ((x.pending?.length ?? 0) >= 3 ? x : { ...x, pending: [...(x.pending ?? []), a.item] })); // 上限 3
+    case "enqueue_pending": return upd(a.id, (x) => ((x.pending?.length ?? 0) >= PENDING_MAX ? x : { ...x, pending: [...(x.pending ?? []), a.item] }));
     case "remove_pending": return upd(a.id, (x) => ({ ...x, pending: (x.pending ?? []).filter((p) => p.pid !== a.pid) }));
     case "terminal_start":
       return upd(a.id, (x) => ({
@@ -229,8 +231,14 @@ function reducer(s: State, a: Action): State {
         // 后台任务把 CLI 唤醒续跑,就会被那一轮读走,记成 queued_command(commandMode:"prompt")当纯文本用掉。
         // 这个窗口在 CLI 那侧,前端的闸关不严。result 到达 = 干净的轮次边界,把它塞回待发队列重发一次
         // (队列的出队条件本就是"彻底空闲")。只重发一次,压缩真做成了才解锁,否则死循环。
-        const retry = missed && !x.compactRetried && (x.pending?.length ?? 0) < 3;
-        tl[i] = { ...t, running: false, ...(missed ? { error: i18n.t(retry ? "命令被并入了正在跑的那一轮，正在自动重发" : "命令被并入了正在跑的那一轮，未作为斜杠命令执行") } : {}) };
+        // 队列满了就重发不了(reducer 会把它吞掉)。这种时候必须在错误里说清楚,否则用户看到的是
+        // "没执行"而没有下文,不知道自己清一条待发就能重来。
+        const full = (x.pending?.length ?? 0) >= PENDING_MAX;
+        const retry = missed && !x.compactRetried && !full;
+        tl[i] = { ...t, running: false, ...(missed ? { error: i18n.t(
+          retry ? "命令被并入了正在跑的那一轮，正在自动重发"
+            : full ? "命令被并入了正在跑的那一轮；待发队列已满，没能自动重发 —— 清掉一条待发再试"
+            : "命令被并入了正在跑的那一轮，未作为斜杠命令执行") } : {}) };
         if (!retry) return { ...x, timeline: tl };
         return { ...x, timeline: tl, compactRetried: true,
           pending: [...(x.pending ?? []), { pid: "compact-retry", blocks: [{ type: "text", text: "/compact" }], text: "/compact" }] };
@@ -383,6 +391,12 @@ function runningCompactAt(tl: TimelineItem[]) {
   }
   return -1;
 }
+
+/** 这一轮还没了结吗?任何"发消息"的入口都得先问它一遍,忙就该进待发队列而不是直发。
+ *  三个口子缺一不可:status 只在模型说话时是 running,后台任务续跑(bgWait)和压缩中它都已回到 idle。
+ *  漏掉压缩那个尤其致命 —— 消息直打进 SDK 会把整个压缩中断掉(Request was aborted)。 */
+export const sessionBusy = (s: Session) =>
+  s.status === "running" || !!s.bgWait || runningCompactAt(s.timeline) >= 0;
 
 // 更新时间线里最后一个 streaming 的 agent_text
 function mapLastStreaming(tl: TimelineItem[], f: (t: any) => any): TimelineItem[] {
@@ -604,7 +618,8 @@ interface Api {
   restartSession: (id: string) => void;
   chooseResume: (id: string, choice: ResumeChoice) => void;
   sendMessage: (id: string, blocks: any[], meta?: { html?: string; imgs?: Record<string, { media_type: string; data: string }> }) => void;
-  enqueuePending: (id: string, item: { blocks: any[]; text: string; html?: string; imgs?: Record<string, { media_type: string; data: string }> }) => void;
+  // 返回 false = 队列已满、这条没进去。调用方必须据此提示用户并保住原文(别清输入框)。
+  enqueuePending: (id: string, item: { blocks: any[]; text: string; html?: string; imgs?: Record<string, { media_type: string; data: string }> }) => boolean;
   cancelPending: (id: string, pid: string) => void;
   respondPermission: (id: string, requestId: string, behavior: "allow" | "deny", message?: string, remember?: RememberChoice) => void;
   interrupt: (id: string) => void;
@@ -961,7 +976,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       send({ type: "user_message", sessionId: id, content: blocks });
     },
     enqueuePending(id, item) {
+      // 满没满在这里判(读实时 state),不让调用方拿渲染快照自己判 —— 快照过期时 reducer 会
+      // 静默吞掉这条,而调用方已经清空了输入框,用户写的东西就凭空没了。
+      if ((stateRef.current.sessions[id]?.pending?.length ?? 0) >= PENDING_MAX) return false;
       dispatch({ type: "enqueue_pending", id, item: { pid: String(nextTs(id)), ...item } });
+      return true;
     },
     cancelPending(id, pid) {
       dispatch({ type: "remove_pending", id, pid });

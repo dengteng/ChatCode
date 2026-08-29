@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useRef, useSyncExternalStore } from "react";
 
 const NAME = "ChatCode";
 
@@ -29,10 +29,28 @@ const morph = (values: string[], keyTimes: string) => (
 
 // 进场动画一次会话只播一次。空态每次从会话切回来都重新挂载,不记这一笔的话
 // 每回主区空下来都要再看 2.5s 的 logo 说话 + 逐字,很快就烦。
+// 例外见 replayBrandIntro:点「新建会话」是明确要开个新头,值得再放一次。
 let introPlayed = false;
+let seq = 0;
+const subs = new Set<() => void>();
+
+/** 点「新建会话」时调用:清掉播过的记号并换 key 重挂载 —— 本来就停在空态时光清记号不会重播。 */
+export function replayBrandIntro() {
+  introPlayed = false;
+  seq++;
+  subs.forEach((f) => f());
+}
+
+export function BrandIntro() {
+  const n = useSyncExternalStore(
+    (f) => { subs.add(f); return () => { subs.delete(f); }; },
+    () => seq,
+  );
+  return <Intro key={n} />;
+}
 
 /** 首页品牌区:logo 里的 </> 变成笑脸说话 → logo 左移让位 → 字母逐个出现。 */
-export function BrandIntro() {
+function Intro() {
   const ref = useRef<HTMLDivElement>(null);
   // reduced-motion 也走 skip 分支:CSS 那条 media query 管不到 SMIL,
   // 不在这儿拦掉的话减弱动效的用户照样看见嘴在动。
