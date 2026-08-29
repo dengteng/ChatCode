@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, isValidElement, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, isValidElement, type ComponentProps, type ReactNode } from "react";
 import { GitFork, GitBranch, ChevronRight, ChevronDown, Folder, Server, Puzzle, Plug, ArrowDown, Wrench, Check, Copy, X, CircleHelp, Lock, Image as ImageIcon, MessageSquare, Ban, Pin, Pencil, TriangleAlert, Loader2, Brain, RotateCcw, CornerDownRight, Paperclip, MessageCircleQuestion } from "lucide-react";
 import { createPortal } from "react-dom";
 import Markdown from "react-markdown";
@@ -7,11 +7,17 @@ import { invoke } from "@tauri-apps/api/core";
 import { openPath, openUrl, revealPath } from "../native";
 import type { ApiRetry, PermissionSuggestion, ResumeChoice, ResumePrompt, Session, TimelineItem } from "../types";
 import { modelDisplayName } from "../types";
-import { useStore, fetchBlob, sessionBusy, PENDING_MAX, type RememberChoice } from "../store";
+import { useStore, useApi, fetchBlob, sessionBusy, PENDING_MAX, type RememberChoice } from "../store";
 import { applyEdgeGlow } from "../lib/edgeGlow";
 import { pushCmd } from "../lib/gitcmd";
-import { cleanMemory, stripLineNums } from "../lib/memtext";
 import { btnPress } from "../lib/utils";
+// 时间线派生的纯函数(回合分组、活流、结算、待办、记忆引用、后台任务、建议行)全在 lib/timeline.ts,
+// 有 lib/timeline.check.ts 直接跑真断言。这里只管把它们的结果画出来。
+import {
+  aggregateRound, failedEdits, groupTurns, latestTodos, nextSteps, pendingBgTasks, permWaitMs,
+  stripSummary, summarizeInput, turnCopyText, turnText, usedMemories, usedSkillsMcp, workFeed,
+  type BgTask, type FeedLine, type MemRef, type TodoRow,
+} from "../lib/timeline";
 import { defaultRuleContent, destinationLabel, suggestionLabel } from "../permissions";
 import { Composer } from "./Composer";
 import { stashBtwDraft } from "./BtwTab";
@@ -359,10 +365,15 @@ function SelectionActions({ containerRef }: { containerRef: React.RefObject<HTML
       const cont = containerRef.current;
       anchorCell = t && cont?.contains(t) ? cellOf(t) : null;
     };
+    // 一滚就收:工具条是 fixed,坐标在划选那一刻按视口算死了,页面往下走它就悬在别的字上面。
+    // capture 阶段:scroll 不冒泡到 document,只有捕获才收得到消息区那个滚动容器的。
+    // 划到边缘触发自动滚动时它也会关掉,但那一下 mouseup 还没发生,box 本来就是 null,没影响。
+    const onScroll = () => setBox(null);
     document.addEventListener("mouseup", onUp);
     document.addEventListener("mousedown", onDown);
     document.addEventListener("selectionchange", onSelChange);
-    return () => { document.removeEventListener("mouseup", onUp); document.removeEventListener("mousedown", onDown); document.removeEventListener("selectionchange", onSelChange); };
+    document.addEventListener("scroll", onScroll, true);
+    return () => { document.removeEventListener("mouseup", onUp); document.removeEventListener("mousedown", onDown); document.removeEventListener("selectionchange", onSelChange); document.removeEventListener("scroll", onScroll, true); };
   }, [containerRef]);
   if (!box) return null;
   return createPortal(
@@ -488,6 +499,14 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
   const [pushing, setPushing] = useState(false); // 顶栏 push/pull 进行中:禁二次点击 + 菊花
   const [committing, setCommitting] = useState(false); // 顶栏 commit 进行中:同上,和 push 一套观感
   const [showJump, setShowJump] = useState(false); // 往上滚一定距离后,右下角显示"回到底部"
+  // 整条时间线切回合。这里 memo 不是为了省 groupTurns 那点 O(n) —— 是为了保住每一轮 items 数组的引用:
+  // 重渲染很多来自跟 timeline 无关的东西(用量条 15s、git 状态 15s、跑秒 1s、hover、切设置),
+  // 那些时候 timeline 没变,下游按 [items] memo 的活(usedSkillsMcp / usedMemories)就全能跳过。
+  // 每次重建数组的话它们的依赖永远是新引用,写了 memo 也不命中。
+  const turns = useMemo(() => groupTurns(session.timeline), [session.timeline]);
+  // 授权回调:每张卡片都收这个 prop。留在下面那个 IIFE 里的话每次渲染都是新函数,
+  // AgentTurnCard 的 memo 直接失效(props 不等)。
+  const onPerm = useCallback<OnPermission>((rid, b, msg, remember) => respondPermission(session.id, rid, b, msg, remember), [session.id, respondPermission]);
   // 长会话滚动卡顿:整条历史全渲染时 DOM 上万节点,WKWebView 每帧重排扛不住。
   // 只渲染最近 N 个回合,顶部"加载更早消息"按需往前翻。
   const HIST_STEP = 30;
@@ -834,7 +853,7 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
         {(() => {
           // 整条时间线按用户消息切回合。每个 agent 回合折叠成一张卡片,点开看详情;
           // 回合的结算行(result:本轮耗时)单独留在卡片下方,不塞进卡片。
-          const groups = groupTurns(session.timeline);
+          const groups = turns.slice(); // 下面会 push 一个空回合进去,不能改 memo 存着的那份
           const running = session.status === "running";
           // 「本轮 agent 组」= 最后一个 agent 组(它后面可能跟着用户跑的终端命令组,那不算新回合)。
           // 用它判进行中,而不是"最后一组",否则 commit/push 一插进来气泡就不再算 active。
@@ -845,7 +864,6 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
           const agentGis: number[] = [];
           groups.forEach((g, i) => { if ("agent" in g) agentGis.push(i); });
           const chipGis = new Set(agentGis.slice(-SUGGEST_KEEP));
-          const onPerm = (rid: string, b: "allow" | "deny", msg?: string, remember?: RememberChoice) => respondPermission(session.id, rid, b, msg, remember);
           // 点建议 chip / 点重试 = 等于自己敲这句话回车。轮次没了结就进待发队列,
           // 闸走 sessionBusy(和 Composer 一字不差):只拦 status==="running" 会从后台任务续跑和
           // 压缩中两个口子漏出去 —— 压缩期直发会把压缩整个打断。
@@ -918,18 +936,21 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
             // 还要 ∩ SDK 的 background_tasks_changed 电平(session.bgTasks):正则扫时间线只能看出"发起过",
             // 任务跑完的自动完成通知被 sidecar 当输入回显丢了,不交集就会永远显示"运行中"。
             const liveBg = new Set(session.bgTasks ?? []);
-            const bgWait = !running && gi === lastAgent ? pendingBgTasks(g.agent, t).filter((t) => liveBg.has(t.id)) : [];
-            // 本轮结算:把一整回合(可能含多次 SDK result:续跑/授权/压缩)聚合成一行,现放进气泡底部。
-            const settle = isActive ? null : aggregateRound(g.agent, anchor || g.agent[0]?.ts);
+            // 空数组用同一个常量:每轮现造一个 [] 的话,几十张历史卡片的 memo 全被这一个 prop 顶掉。
+            const bgWait = !running && gi === lastAgent ? pendingBgTasks(g.agent, t).filter((t) => liveBg.has(t.id)) : NO_BG;
             const turnModel = groupModel(g.agent); // 该回合实际所用模型(会话中途切模型时逐条不同)
             return (
               <div key={gi} className="msg-row msg-row-agent" data-ts={g.agent[0]?.ts ?? anchor}>
                 <ModelAvatar model={turnModel} running={isActive} />
                 <div className="msg-col agent-turn">
                   <div className="msg-name">{nameOf(turnModel)}</div>
+                  {/* 历史卡片这一支的每个 prop 都要能过 memo 的浅比较:items 由 turns memo 保住、
+                      bgWait 走 NO_BG 常量、onPerm/onShowTurn 是稳定函数、其余是字符串或数字。
+                      liveInput 只有 running 那支用得上(卡片里只喂给 WorkBody),历史卡片不传 —— 传了
+                      每次上下文一变就把整排卡片顶掉重渲。 */}
                   {isActive
-                    ? <ActiveAgentBubble items={g.agent} running showFull={false} cwd={session.termCwd || session.cwd} liveInput={session.contextTokens} settle={null} turnStart={anchor || undefined} retry={session.apiRetry} onClick={() => onShowTurn(anchor)} onPermission={onPerm} agentLabel={t("{{name}} 的回复", { name: nameOf(turnModel) })} />
-                    : <AgentTurnCard items={g.agent} running={false} showFull cwd={session.termCwd || session.cwd} liveInput={session.contextTokens} settle={settle} bgWait={bgWait} onClick={() => onShowTurn(anchor)} onPermission={onPerm} agentLabel={t("{{name}} 的回复", { name: nameOf(turnModel) })} />}
+                    ? <ActiveAgentBubble items={g.agent} running showFull={false} cwd={session.termCwd || session.cwd} liveInput={session.contextTokens} anchorTs={anchor} turnStart={anchor || undefined} retry={session.apiRetry} onShowTurn={onShowTurn} onPermission={onPerm} agentLabel={t("{{name}} 的回复", { name: nameOf(turnModel) })} />
+                    : <AgentTurnCard items={g.agent} running={false} showFull cwd={session.termCwd || session.cwd} anchorTs={anchor} bgWait={bgWait} onShowTurn={onShowTurn} onPermission={onPerm} agentLabel={t("{{name}} 的回复", { name: nameOf(turnModel) })} />}
                   {/* 建议 chips(左)和复制/贴回按钮(右)同占一行 —— 分两行时按钮被 chips 顶得离气泡老远 */}
                   {!isActive && (
                     <div className="turn-foot">
@@ -953,13 +974,16 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
                           ))}
                         </div>;
                       })()}
-                      {/* 复制整条回复:和用户气泡下方那排同一套样式(.msg-redo-row),只是靠右对齐到气泡右下角 */}
+                      {/* 复制整条回复:和用户气泡下方那排同一套样式(.msg-redo-row),只是靠右对齐到气泡右下角。
+                          说明文案走 data-tip 而非 title:原生 tooltip 在 WKWebView 里要悬停一秒多才弹、还不跟主题走,
+                          文案由 CSS ::after 画(见 styles.css 的 [data-tip]),title 留着会两个一起冒。
+                          aria-label 得单独给 —— 这仨是纯图标按钮,没有可读名字。 */}
                       {turnText(g.agent) && (
                         <div className="msg-redo-row agent-actions">
-                          <button title={t("顺便问问:整条回复带进 btw 输入框")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); stashBtwDraft(turnCopyText(g.agent)); } }}><MessageCircleQuestion size={13} /></button>
-                          <button title={t("贴到输入框:整条回复变成一个引用 chip")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); pasteToComposer(turnCopyText(g.agent)); } }}><Paperclip size={13} /></button>
+                          <button data-tip={t("顺便问问")} aria-label={t("顺便问问:整条回复带进 btw 输入框")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); stashBtwDraft(turnCopyText(g.agent)); } }}><MessageCircleQuestion size={13} /></button>
+                          <button data-tip={t("贴到输入框")} aria-label={t("贴到输入框:整条回复变成一个引用 chip")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); pasteToComposer(turnCopyText(g.agent)); } }}><Paperclip size={13} /></button>
                           {/* 富文本复制:HTML 取屏幕上那份渲染结果(表格粘到飞书/Word 还是表格),纯文本退回 Markdown 原文 */}
-                          <button title={t("复制整条回复")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault();
+                          <button data-tip={t("复制整条回复")} aria-label={t("复制整条回复")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault();
                             const body = e.currentTarget.closest(".msg-col")?.querySelector<HTMLElement>(".agent-turn-full");
                             copyRich(body, turnCopyText(g.agent)).then((ok) => ok && toast(t("已复制"), "success")); } }}><Copy size={13} /></button>
                         </div>
@@ -1119,18 +1143,6 @@ function useNow(on: boolean) {
   return now;
 }
 
-// 用户在授权/提问卡上花的"等选择"时间:卡片出现(ts)→ 作答(decidedTs)。还没答的按到 now 计(正在等)。
-// 这段是等人做决定、agent 空转,不该算进本轮耗时,统一从耗时里扣掉。
-function permWaitMs(items: TimelineItem[], now: number): number {
-  let w = 0;
-  for (const it of items) {
-    if (it.kind !== "permission") continue;
-    if (it.decidedTs) w += Math.max(0, it.decidedTs - it.ts);
-    else if (!it.decision) w += Math.max(0, now - it.ts); // 还挂着 = 此刻仍在等
-  }
-  return w;
-}
-
 // 曾经这里有个"宽度棘轮":running 时把见过的最大 offsetWidth 钉成 minWidth,防活流行长忽长忽短时卡片回缩。
 // 已删。.msg-row-agent > .msg-col 现在是 flex: 0 0 70%,气泡本来就恒宽,棘轮无事可做;
 // 反倒是它钉下的是**像素**值,窗口变窄 / 侧栏展开后那个死数还在,min-width 又压得过 max-width:70%,
@@ -1139,7 +1151,7 @@ function permWaitMs(items: TimelineItem[], now: number): number {
 
 // 用户发出消息后,agent 气泡不立刻出现:先在名字下方顶约 1.4s 的"思考中"小动画,再展开正在工作的气泡。
 // 只用于当前活跃回合;定时器随该回合的行挂载启动,回合切换(新 gi)自然重新计时。
-function ActiveAgentBubble(props: Parameters<typeof AgentTurnCard>[0]) {
+function ActiveAgentBubble(props: ComponentProps<typeof AgentTurnCard>) {
   const { t } = useTranslation();
   const [ready, setReady] = useState(false);
   useEffect(() => { const t = setTimeout(() => setReady(true), 1400); return () => clearTimeout(t); }, []);
@@ -1179,9 +1191,16 @@ const BAD_IMAGE = /image in the conversation could not be processed/i;
 
 // 一个 agent 回合折叠成一张卡片:标题随状态变化,点开进右侧看详情(流式)。
 // 执行中无待办 → "Agent 正在工作…";执行中有授权请求 → "Agent 正在工作,请求执行 xxx";已结束 → "Claude 的回复"。
-function AgentTurnCard({ items, running, showFull, cwd, liveInput, settle, bgWait, turnStart, retry, onClick, onPermission, agentLabel }: { items: TimelineItem[]; running: boolean; showFull?: boolean; cwd: string; liveInput?: number; settle?: (TimelineItem & { kind: "result" }) | null; bgWait?: BgTask[]; turnStart?: number; retry?: ApiRetry | null; onClick: () => void; onPermission: OnPermission; agentLabel?: string }) {
+// memo:一条长会话里这张卡片有几十份,而每次流式 chunk 都会重渲整个 <Chat>。
+// 历史轮的 props 全是稳定值(见调用处注释),浅比较一过就整棵子树跳过 —— 卡片里有 Markdown 整树渲染,
+// 这是聊天页最贵的一块。注意别再往它的 props 里塞每次新建的对象/数组/箭头函数,塞一个就全废。
+const AgentTurnCard = memo(function AgentTurnCard({ items, running, showFull, cwd, liveInput, anchorTs, bgWait, turnStart, retry, onShowTurn, onPermission, agentLabel }: { items: TimelineItem[]; running: boolean; showFull?: boolean; cwd: string; liveInput?: number; anchorTs: number; bgWait?: BgTask[]; turnStart?: number; retry?: ApiRetry | null; onShowTurn: (ts: number) => void; onPermission: OnPermission; agentLabel?: string }) {
   const { t } = useTranslation();
-  const { authAction } = useStore();
+  const { authAction } = useApi();
+  // 详情按钮。放这儿而不是让调用方传 () => onShowTurn(anchor):那样每轮都是新函数,memo 白做。
+  const onClick = () => onShowTurn(anchorTs);
+  // 本轮结算行(耗时/token)。跟着 items 走 —— 原来在调用处现算,每次都是新对象,同样顶掉 memo。
+  const settle = useMemo(() => running ? null : aggregateRound(items, anchorTs || items[0]?.ts), [running, items, anchorTs]);
   // 待授权请求就地放在卡片内部,不另起一张卡。AskUserQuestion 改在输入框处强制作答,不塞进卡片。
   const pendingPerms = items.filter((it): it is Extract<TimelineItem, { kind: "permission" }> => it.kind === "permission" && !it.decision && it.toolName !== "AskUserQuestion");
   const now = useNow(running);
@@ -1192,8 +1211,10 @@ function AgentTurnCard({ items, running, showFull, cwd, liveInput, settle, bgWai
   const elapsed = startTs ? Math.max(0, now - startTs - permWaitMs(items, now)) : 0; // 扣掉等用户选择的时间
   // 气泡右上角时间 = 本轮回复完成时刻(优先结算行 ts,回退到最后一个动作);运行中还没完成则不显示
   const doneTs = settle?.ts ?? items[items.length - 1]?.ts;
-  const { skills, mcps, activeSkills, activeMcps } = usedSkillsMcp(items);
-  const memories = usedMemories(items); // 本轮触达的记忆(引用 / 更新)
+  // 这两个都要把整轮 items 扫一遍(usedMemories 还带正则和字符串清洗),而每张历史卡片每次重渲染都在重扫。
+  // items 引用由上面那个 turns memo 保住:timeline 没动的重渲染(跑秒、用量轮询、hover)这里直接跳过。
+  const { skills, mcps, activeSkills, activeMcps } = useMemo(() => usedSkillsMcp(items), [items]);
+  const memories = useMemo(() => usedMemories(items), [items]); // 本轮触达的记忆(引用 / 更新)
   const memRefs = memories.filter((m) => m.action === "read");
   const memUpdates = memories.filter((m) => m.action !== "read");
   const md = useMemo(() => makeMdComponents(cwd), [cwd]); // 稳定 components 身份:否则每次轮询重渲染都换新组件函数,react-markdown 整树重挂,hover 菜单被卸载
@@ -1262,7 +1283,7 @@ function AgentTurnCard({ items, running, showFull, cwd, liveInput, settle, bgWai
       <button className="bubble-arrow" title={t("查看本轮详情")} onClick={onClick}><ChevronRight size={14} /></button>
     </div>
   );
-}
+});
 
 // 气泡底部结算行:本轮耗时 + token 输入/输出(含缓存命中率)
 function RoundMeta({ r, doneTs }: { r: TimelineItem & { kind: "result" }; doneTs?: number }) {
@@ -1274,49 +1295,6 @@ function RoundMeta({ r, doneTs }: { r: TimelineItem & { kind: "result" }; doneTs
   const prefix = r.aborted ? t("用户终止，耗时") : r.isError ? t("本轮出错，耗时") : t("本轮耗时");
   // 完成时间在"本轮耗时"左边(气泡内)
   return <div className={`bubble-meta ${r.aborted ? "aborted" : ""}`}>{doneTs && <span className="bubble-time">{fmtClock(doneTs)}</span>}{prefix}{fmtDuration(r.durationMs)}{t(" · 输入 {{n}} tokens", { n: fmtTok(inUncached) })}{inCached > 0 ? t("(+缓存{{n}})", { n: fmtTok(inCached) }) : ""}{t(" · 输出 {{n}} tokens", { n: fmtTok(outTok) })}</div>;
-}
-
-// 本轮"落空"检测:agent 发起过写文件工具(Edit/Write/…),但全部回了 is_error →
-// 改动多半没落地,却因为轮次整体仍标"成功"而不显眼(agent 常以为改了就往下走)。
-// 只在"发起过且全失败"时提示,避免误报;部分成功不算落空。
-const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
-function failedEdits(items: TimelineItem[]) {
-  let total = 0, failed = 0;
-  for (const it of items) {
-    if (it.kind !== "tool" || !EDIT_TOOLS.has(it.name || "") || it.result === undefined) continue;
-    total++;
-    if (it.isError) failed++;
-  }
-  return { failed, allFailed: total > 0 && failed === total };
-}
-
-// 后台任务检测:Bash(run_in_background) 和异步子 agent 都是"发起完本轮就结束、任务跑完 SDK 才回来续跑",
-// 于是气泡结算了、状态回 idle,但这条消息其实还会有下文。
-// 不看 input.run_in_background —— 子 agent 默认就是后台,那个字段常常压根不在 input 里。
-// 看工具自己回的固定标记最准:Bash 回 "Command running in background with ID: xxx",
-// 子 agent 回 "Async agent launched successfully ... agentId: xxx"。
-// 必须带真正的启动标记才算 —— 光看裸 "agentId:" 会误命中 agent 正文/报告里提到该词的工具结果
-// (分析类会话尤其常见),塞进一个永不被消费的假 id,提示就永远挂着。
-// shell 任务顺带给出输出文件路径(边跑边追加,是唯一能看到的真实进度);子 agent 只给 agentId。
-const BG_START = /running in background with ID:\s*([\w-]+)\.\s*Output is being written to:\s*(\S+?)\.?(?=\s|$)|Async agent launched[\s\S]*?agentId:\s*([\w-]+)/g;
-type BgTask = { id: string; kind: "shell" | "agent"; title: string; body: string; out?: string; ts?: number };
-function pendingBgTasks(items: TimelineItem[], t: (key: string) => string): BgTask[] {
-  const found: BgTask[] = [];
-  const done = new Set<string>();
-  for (const it of items) {
-    if (it.kind !== "tool") continue;
-    if (it.isError || it.result === undefined) continue; // 被拦下/报错的读取不算了结(它压根没跑)
-    // 本轮内又去读/停过它(Read tasks/<id>.output、TaskOutput、TaskStop…),说明已经了结,不算悬着
-    const inp = JSON.stringify(it.input ?? "");
-    for (const t of found) if (inp.includes(t.id)) done.add(t.id);
-    const res = typeof it.result === "string" ? it.result : JSON.stringify(it.result);
-    const cmd = String(it.input?.command ?? "");
-    // ts = 启动它的那次工具调用的时间,给 bar 上的"已跑 Xmin"当起点(后台任务本身不回时间)
-    for (const m of res.matchAll(BG_START)) found.push(m[1]
-      ? { id: m[1], kind: "shell", title: String(it.input?.description || cmd.split("\n")[0] || t("后台命令")), body: cmd, out: m[2], ts: it.ts }
-      : { id: m[3], kind: "agent", title: String(it.input?.description || it.input?.subagent_type || t("子 agent")), body: String(it.input?.prompt ?? ""), ts: it.ts });
-  }
-  return found.filter((t) => !done.has(t.id));
 }
 
 // 后台任务的输出文件边跑边追加,2s 拉一次。折叠着的 bar 和展开的弹窗都要读,抽出来共用。
@@ -1461,67 +1439,6 @@ export function SkillMcpTags({ skills, mcps, activeSkills, activeMcps }: { skill
 
 // 从一回合的工具调用里提取用到的 Skills 和 MCP 服务器。
 // 顺序 = 首次使用顺序(Set 保序);active* = 有工具还没回结果 = 此刻正在跑,给闪烁用。
-export function usedSkillsMcp(items: TimelineItem[]) {
-  const skills = new Set<string>(), mcps = new Set<string>();
-  const activeSkills = new Set<string>(), activeMcps = new Set<string>();
-  for (const it of items) {
-    if (it.kind !== "tool") continue;
-    const n = it.name || "";
-    const running = it.result === undefined; // 工具还没回结果 = 正在跑
-    if (n === "Skill" || n === "SlashCommand") {
-      const s = (it.input?.skill ?? it.input?.command ?? it.input?.name);
-      if (s) { const name = String(s).replace(/^\//, "").split(/\s+/)[0]; skills.add(name); if (running) activeSkills.add(name); }
-    } else if (n.startsWith("mcp__")) {
-      const server = n.split("__")[1];
-      if (server) { mcps.add(server); if (running) activeMcps.add(server); }
-    }
-  }
-  return { skills: [...skills], mcps: [...mcps], activeSkills, activeMcps };
-}
-
-// 记忆引用:agent 用 Read 读了 ~/.claude/projects/<项目>/memory/ 下的某条记忆文件 = 在本轮回复里"引用"了它。
-// MEMORY.md 是索引(每次都会翻),不算引用某条具体记忆,排除掉。
-const MEMORY_FILE_RE = /\/memory\/([^/]+\.md)$/i;
-function memoryFileOf(path: unknown): string | null {
-  if (typeof path !== "string" || !path.includes(".claude")) return null;
-  const m = MEMORY_FILE_RE.exec(path);
-  if (!m || /^MEMORY\.md$/i.test(m[1])) return null;
-  return m[1];
-}
-// 工具结果内容可能是字符串、{text}、或 [{type:"text",text}] 数组,统一抽成纯文本。
-function toolResultText(result: any): string {
-  if (result == null) return "";
-  if (typeof result === "string") return result;
-  if (Array.isArray(result)) return result.map((c) => (typeof c === "string" ? c : c?.text ?? "")).join("");
-  if (typeof result === "object") return result.text ?? "";
-  return String(result);
-}
-export type MemAction = "read" | "write" | "edit";
-export interface MemRef { file: string; title: string; body: string; action: MemAction }
-// 一轮里对记忆文件的所有动作:Read=引用,Write/Edit=更新。同一文件按"更新 > 引用"合并(既读又写算更新)。
-export function usedMemories(items: TimelineItem[]): MemRef[] {
-  const map = new Map<string, MemRef>();
-  const rank: Record<MemAction, number> = { read: 0, write: 1, edit: 1 };
-  for (const it of items) {
-    if (it.kind !== "tool") continue;
-    const action: MemAction | null = it.name === "Read" ? "read"
-      : it.name === "Write" ? "write"
-      : it.name === "Edit" || it.name === "MultiEdit" ? "edit" : null;
-    if (!action) continue;
-    const file = memoryFileOf(it.input?.file_path);
-    if (!file) continue;
-    const raw = action === "read" ? stripLineNums(toolResultText(it.result)).trim()
-      : action === "write" ? String(it.input?.content ?? "").trim() : ""; // edit 拿不到全文,留空,点开去编辑器看
-    const { title, body } = cleanMemory(raw, file); // 剥 system-reminder + frontmatter,顺带取标题
-
-    const prev = map.get(file);
-    if (!prev || rank[action] >= rank[prev.action]) {
-      map.set(file, { file, title: title || prev?.title || file, body: body || prev?.body || "", action });
-    }
-  }
-  return [...map.values()];
-}
-
 // 打开记忆中心并定位到某条(App 监听 cc-open-memory)
 const jumpToMemory = (file: string) => window.dispatchEvent(new CustomEvent("cc-open-memory", { detail: { file } }));
 
@@ -1564,39 +1481,15 @@ function MemoryRefs({ memories, kind, cwd }: { memories: MemRef[]; kind: "ref" |
   );
 }
 
-// 一整回合的正文:和气泡里 segments 的取法一致(正文常被工具调用切成好几段 agent_text)
-const turnText = (items: TimelineItem[]) =>
-  items.filter((it) => it.kind === "agent_text" && it.text.trim()).map((it) => (it as any).text.trim()).join("\n\n");
-
 // 建议 chips 往回保留几轮。再多屏上就全是按钮,再少就回到"发一条消息按钮全没了"。
+// "这一轮没挂后台任务"的定值。每次现写 [] 的话每张卡片都拿到新数组,memo 直接失效。
+const NO_BG: BgTask[] = [];
 const SUGGEST_KEEP = 10;
 // 压成一行再截断,给跨轮建议做定位摘要用(原文照旧在会话上下文里,这里只要够认出是哪一轮)
 const clipLine = (s: string, n: number) => {
   const one = s.replace(/\s+/g, " ").trim();
   return one.length > n ? one.slice(0, n) + "…" : one;
 };
-
-// agent 按系统提示(sidecar 的 NEXT_STEPS_INSTRUCTION)在回复末尾留的一行「本轮建议：A | B」。
-// 这行照常显示在正文里,这里只是把它再解析成一排可点的快捷指令 —— 不改 timeline 里的 text,
-// 免得撞上 agent_text_dedup 按 text 全等回查那套去重(改了文本气泡会出现两遍)。
-// 标签两侧各留一处 `\**`:`**本轮建议**：A | B` 这种(强调只包标签、冒号在外)也要认,
-// 少认这一种整排快捷指令就不出来。与 sidecar 的 SUMMARY_RE 同一套写法。
-const NEXT_RE = /^[\s>*#`\-]*本轮建议\**\s*[：:]\**\s*(.+?)\s*\**$/;
-// 「本轮小结」那行是给 commit 弹窗汇总用的(sidecar 从会话日志里读),对用户是噪音 —— 渲染时抹掉。
-// 只改渲染用的字符串,timeline 里的 text 原样保留:sidecar 的汇总照常工作,前端去重也不受影响。
-const SUMMARY_LINE_RE = /^[\s>*#`\-]*本轮小结\**\s*[：:]/;
-const stripSummary = (text: string) => text.split("\n").filter((l) => !SUMMARY_LINE_RE.test(l)).join("\n").trim();
-// 复制/贴回输入框用的正文:和屏幕上看到的一致(同样抹掉小结行)。
-// turnText 本身不能动 —— nextSteps 要从原文里认「本轮建议」那行,跨轮摘要也用它。
-const turnCopyText = (items: TimelineItem[]) => stripSummary(turnText(items));
-function nextSteps(items: TimelineItem[]): string[] {
-  const lines = turnText(items).split("\n");
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const m = lines[i].match(NEXT_RE);
-    if (m) return m[1].split(/[|｜]/).map((s) => s.replace(/[*`]/g, "").trim()).filter(Boolean).slice(0, 3);
-  }
-  return [];
-}
 
 // 今天的只给时分;昨天及更早补日期(跨年再补年份)—— 长会话翻上去全是 "12:47",
 // 分不清是刚才还是上周。日期只在需要时出现,今天的消息不平白变长。
@@ -1615,138 +1508,7 @@ function fmtClock(ts?: number) {
 
 // 正在工作气泡里的动态副标题:显示 agent 最近一次动静 —— 流式文本的最新一行、
 // 或正在跑的工具/终端命令。让"Agent 正在工作"能实时反映此刻在干嘛。
-// 把线性时间线按"用户消息"切成回合:每条用户消息独立成组,其后到下一条用户消息之间的
-// 所有 agent 动作(请求执行、回复、结果…)归到一个 agent 组,渲染时包进一个气泡。
-type Turn = { user: TimelineItem } | { agent: TimelineItem[] } | { solo: TimelineItem };
-export function groupTurns(items: TimelineItem[]): Turn[] {
-  const groups: Turn[] = [];
-  // agent 的当前回合:只有新的用户消息才算结束。中间插进来的终端命令(commit/push)、系统提示
-  // 单独成组显示,但不能把这一轮切成两半 —— 切了的话,正在跑的那组就不再是"最后一组",
-  // 气泡从"进行中"掉成一张还没内容的完成卡(看着像消息消失了),等 agent 再出声才另起一张。
-  let open: Extract<Turn, { agent: TimelineItem[] }> | null = null;
-  for (const item of items) {
-    if (item.kind === "user") { groups.push({ user: item }); open = null; continue; }
-    // 终端命令(InfoPanel git 按钮 / ! shell)是用户主动跑的,系统提示(清空上下文/切模型/git 对比)、
-    // 压缩上下文(/compact)也都不是 agent 的"回复",各自独立成组;否则会被并进 agent 卡里 ——
-    // 看不见正文,副标题还误显示"正在思考…"(卡片只认 agent 动作)。compact 自带进度/结果卡,单独渲染。
-    if (item.kind === "terminal" || item.kind === "system" || item.kind === "compact") { groups.push({ solo: item }); continue; }
-    if (open) { open.agent.push(item); continue; }
-    // 落单的 result(压缩、控制指令等静默轮次结束时也会发一条,前面没有任何 agent 动作)不能自成一张卡:
-    // 那样会渲染出一张空的"Claude 的回复 / 正在思考…"僵尸气泡,永远停在那。丢掉即可,它本就没有正文可展示。
-    if (item.kind === "result") continue;
-    open = { agent: [item] };
-    groups.push(open);
-  }
-  return groups;
-}
-
-// 把一回合内所有 SDK result 聚合成单条结算:总时长(prompt 到收尾的墙上时间)+ 累计 token。
-// 全 0 token 且非中断/报错 = 静默回合(压缩、控制指令等),返回 null 让调用方不渲染。
-function aggregateRound(items: TimelineItem[], startTs: number): (TimelineItem & { kind: "result" }) | null {
-  const results = items.filter((it): it is TimelineItem & { kind: "result" } => it.kind === "result");
-  if (!results.length) return null;
-  const usage = { input_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: 0, cache_read_output_tokens: 0, cache_creation_output_tokens: 0 };
-  let costUsd = 0, aborted = false, isError = false;
-  for (const r of results) {
-    const u = r.usage || {};
-    usage.input_tokens += u.input_tokens ?? 0;
-    usage.cache_read_input_tokens += u.cache_read_input_tokens ?? 0;
-    usage.cache_creation_input_tokens += u.cache_creation_input_tokens ?? 0;
-    usage.output_tokens += u.output_tokens ?? 0;
-    usage.cache_read_output_tokens += u.cache_read_output_tokens ?? 0;
-    usage.cache_creation_output_tokens += u.cache_creation_output_tokens ?? 0;
-    costUsd += r.costUsd ?? 0;
-    if (r.aborted) aborted = true;
-    if (r.isError) isError = true;
-  }
-  const totalIn = usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens;
-  if (totalIn + usage.output_tokens === 0 && !aborted && !isError) return null;
-  const lastTs = results[results.length - 1].ts;
-  // 墙上时间(prompt 到收尾)对实时会话准;回放历史时全部 ts 都是回放瞬间,差值≈0,
-  // 退回累加各 result 的 duration_ms(日志里保留了真实耗时)。取两者较大即可两头兼容。
-  const wall = startTs ? Math.max(0, lastTs - startTs) : 0;
-  const sumDur = results.reduce((a, r) => a + (r.durationMs || 0), 0);
-  const waitMs = permWaitMs(items, lastTs); // 扣掉等用户选择/授权的空等时间
-  const durationMs = Math.max(0, Math.max(wall, sumDur) - waitMs);
-  return { kind: "result", costUsd, durationMs, usage, isError, aborted, ts: lastTs };
-}
-
-const TODO_TOOLS = ["TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet"]; // todo 系记账工具,不算"在干活"
-
-// 右栏活流:把本回合的正文 + 每个工具动作的完整内容(命令 + 输出、改了哪些代码的增删行)按时间顺序
-// 抹平成带样式的多行日志。最新活动从底部冒出、把旧行往上挤;尾部封顶防长会话 DOM 爆炸,max-height 再裁一层。
-type FeedLine = { t: string; c?: string }; // c: head/add/del/out/cmd → 上色
 // 顶栏分支行那排按钮走 btnPress(mousedown 语义,见 lib/utils):click 在 WKWebView 里会被吞掉第一次。
-const shortPath = (p?: string) => (p || "").replace(/^\/Users\/[^/]+/, "~");
-function workFeed(items: TimelineItem[]): FeedLine[] {
-  const out: FeedLine[] = [];
-  // 单块正文按行拆。先按尾部截一刀再拆:整份 out 最后也只留 slice(-200),
-  // 而浏览器测试的一条 take_snapshot 结果能有 5 万字符,整份拆成行等于每次都白造上千个字符串再扔掉。
-  const body = (s: any): string[] => {
-    const str = String(s ?? "").replace(/\s+$/, "");
-    // 多截一点(200 行 × 保守 200 字符)再按行切,切完丢掉可能被拦腰截断的首行
-    const cut = str.length > 40_000 ? str.slice(-40_000).split("\n").slice(1) : str.split("\n");
-    return cut.length > 200 ? cut.slice(-200) : cut;
-  };
-  for (const it of items) {
-    if (it.kind === "agent_text" && it.text?.trim()) {
-      for (const l of it.text.trim().split("\n")) { if (!SUMMARY_LINE_RE.test(l)) out.push({ t: l }); }
-    } else if (it.kind === "tool" && !TODO_TOOLS.includes(it.name)) {
-      const run = it.result === undefined, pre = run ? "▶ " : "";
-      const file = it.input?.file_path, inp = it.input ?? {};
-      if (it.name === "Edit" && inp.old_string != null) {
-        out.push({ t: `${pre}Edit ${shortPath(file)}`, c: "head" });
-        for (const l of body(inp.old_string)) out.push({ t: `- ${l}`, c: "del" });
-        for (const l of body(inp.new_string)) out.push({ t: `+ ${l}`, c: "add" });
-      } else if (it.name === "Write" && inp.content != null) {
-        out.push({ t: `${pre}Write ${shortPath(file)}`, c: "head" });
-        for (const l of body(inp.content)) out.push({ t: `+ ${l}`, c: "add" });
-      } else if (it.name === "Read") {
-        const n = typeof it.result === "string" ? it.result.split("\n").length : 0;
-        out.push({ t: `${pre}Read ${shortPath(file)}${n ? ` · ${i18n.t("{{n}} 行", { n })}` : ""}`, c: "head" });
-      } else {
-        const name = it.name === "Task" ? i18n.t("子 agent") : it.name;
-        const detail = summarizeInput(it.name, it.input);
-        const cmd = detail.split("\n");
-        out.push({ t: `${pre}${name}${cmd[0] ? " " + cmd[0] : ""}`, c: "head" });
-        for (const l of cmd.slice(1)) out.push({ t: l, c: "cmd" }); // 多行命令的后续行
-        if (typeof it.result === "string" && it.result.trim()) for (const l of body(it.result)) out.push({ t: l, c: "out" });
-      }
-    } else if (it.kind === "terminal") {
-      out.push({ t: `$ ${it.command}`, c: "head" });
-      if (it.output.trim()) for (const l of body(it.output)) out.push({ t: l, c: "out" });
-    }
-  }
-  return out.slice(-200); // 尾部封顶
-}
-
-// 阶段清单:重放本回合的 TodoWrite / TaskCreate / TaskUpdate,得到最新任务快照。
-// TodoWrite 的 input.todos 是整份快照,直接覆盖;TaskCreate/Update 增量重放(SDK 的 taskId 从 1 起顺序分配)。
-type TodoRow = { content: string; status: string };
-function latestTodos(items: TimelineItem[], t: (key: string) => string): TodoRow[] {
-  let todos: TodoRow[] = [];
-  const idToIdx = new Map<string, number>();
-  let seq = 0;
-  for (const it of items) {
-    if (it.kind !== "tool") continue;
-    const input = it.input ?? {};
-    if (it.name === "TodoWrite" && Array.isArray(input.todos)) {
-      todos = input.todos.map((t: any) => ({ content: String(t.content ?? ""), status: String(t.status ?? "pending") }));
-      idToIdx.clear(); seq = 0;
-    } else if (it.name === "TaskCreate") {
-      todos.push({ content: String(input.subject ?? input.description ?? "").trim() || t("任务"), status: String(input.status ?? "pending") });
-      idToIdx.set(String(input.taskId ?? ++seq), todos.length - 1);
-    } else if (it.name === "TaskUpdate" && input.taskId != null) {
-      const idx = idToIdx.get(String(input.taskId));
-      if (idx !== undefined && todos[idx]) {
-        if (input.status) todos[idx].status = String(input.status);
-        const c = String(input.subject ?? "").trim();
-        if (c) todos[idx].content = c;
-      }
-    }
-  }
-  return todos;
-}
 
 // 活流:多行日志(读写文件/命令/正文),底部对齐。气泡高度随行数从 min 长到 max 后封顶,
 // 之后最新一行从底部冒出、把旧行往上挤出视口,顶部 mask 渐隐 —— 快速刷屏,像 agent 在飞速干活。
@@ -1772,7 +1534,7 @@ function WorkBody({ items, elapsed, liveInput }: { items: TimelineItem[]; elapse
   const todos = useMemo(() => latestTodos(items, t), [items, t]);
   const done = todos.filter((t) => t.status === "completed").length;
   const pct = todos.length ? Math.round((done / todos.length) * 100) : 0;
-  const feed = useMemo(() => workFeed(items), [items]); // 红框活流:正文行 + 读写/命令动作,按序抹平成日志行
+  const feed = useMemo(() => workFeed(items, t), [items, t]); // 红框活流:正文行 + 读写/命令动作,按序抹平成日志行
   const hasSteps = todos.length > 0;
   return (
     <>
@@ -2364,11 +2126,3 @@ function AskQuestionCard({ item, onSubmit, onCancel }: {
   );
 }
 
-function summarizeInput(name: string, input: any): string {
-  if (!input) return "";
-  if (name === "Bash") return input.command ?? "";
-  if (input.file_path) return input.file_path;
-  if (input.pattern) return input.pattern;
-  if (input.url) return input.url;
-  return "";
-}

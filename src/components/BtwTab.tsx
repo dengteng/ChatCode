@@ -8,7 +8,7 @@
 import { useEffect, useRef, useState } from "react";
 import { LoaderCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useStore } from "../store";
+import { useApi } from "../store";
 
 type Turn = { q: string; a?: string; err?: string };
 
@@ -27,7 +27,7 @@ export function stashBtwDraft(text: string) {
 
 export function BtwTab({ sessionId }: { sessionId: string }) {
   const { t } = useTranslation();
-  const { askBtw } = useStore();
+  const { askBtw } = useApi();
   const [turns, setTurns] = useState<Turn[]>(() => history.get(sessionId) ?? []);
   const [text, setText] = useState(takeDraft);
   const [busy, setBusy] = useState(false);

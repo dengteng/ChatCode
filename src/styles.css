@@ -1232,12 +1232,25 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
    现在它完全退出 flex 流,悬停显隐只动透明度,不再触发重排。 */
 /* 跟在气泡(或「本轮建议」chips)正下方靠右。别用绝对定位钉在列底 —— 那样有 chips 时按钮被甩到
    预留空白的最下沿,离气泡老远。按钮恒定占位(靠 opacity 显隐),走普通流也不会 hover 时跳版。 */
-.msg-redo-row.agent-actions { align-self: flex-end; padding-right: 5px; margin-left: auto; }
-/* chips 和按钮同一行:各占一行时按钮被 chips 整整顶开一行,离气泡老远。chips 换行也不影响 —— 按钮贴底。 */
-.turn-foot { display: flex; align-items: flex-end; gap: 8px; }
+/* margin-left:auto 把它顶到 .turn-foot 的右端 —— 前提是 turn-foot 撑满整列(见下面的 width:100%),
+   否则 turn-foot 只有 chips 那么宽,"最右"就是紧贴 chips。padding-right:0 让按钮右缘对齐气泡右缘。 */
+.msg-redo-row.agent-actions { padding-right: 0; margin-left: auto; }
+/* chips 和按钮同一行:各占一行时按钮被 chips 整整顶开一行,离气泡老远。
+   width:100% 是靠右的前提(msg-col 是 align-items:flex-start,不撑就是 fit-content)。
+   center 而非 flex-end:按钮那排要和左边的 chips 在这一行里居中对齐。 */
+.turn-foot { display: flex; align-items: center; gap: 8px; width: 100%; }
 .turn-foot .next-chips { margin-top: 0; }
 .msg-redo-row button { padding: 3px; border: none; background: transparent; color: var(--muted); border-radius: 6px; display: inline-flex; align-items: center; }
 .msg-redo-row button:hover { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+/* 图标按钮的 hover 说明。自己画而不是用 title:WKWebView 的原生 tooltip 要悬停一秒多才弹,
+   还是系统样式、四套主题下都突兀。right:0 而不是居中 —— 这排按钮贴着气泡右缘,居中的话文案会探出去。 */
+.msg-redo-row button[data-tip] { position: relative; }
+.msg-redo-row button[data-tip]:hover::after {
+  content: attr(data-tip); position: absolute; bottom: calc(100% + 6px); right: 0; z-index: 500;
+  padding: 4px 8px; border-radius: 6px; background: var(--panel); border: 1px solid var(--border);
+  color: var(--text); font-size: 11.5px; line-height: 1.4; white-space: nowrap;
+  box-shadow: 0 6px 20px rgba(0,0,0,.35); pointer-events: none;
+}
 /* 下一步建议 chip(agent 回合末尾,点一下即发)。常驻可见 —— 它是给人看的下一步,不是 hover 才露的次要工具。
    必须自带实底:这排 chip 挂在气泡**外面**,自定义主题下身后直接就是背景图。原先透明底 + --muted 文字
    压在照片上几乎看不见(同样的坑 .msg-name / .session-stats 早就各自补过底)。走 --panel + --text:

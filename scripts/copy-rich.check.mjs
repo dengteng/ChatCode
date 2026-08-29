@@ -9,18 +9,14 @@ import assert from "node:assert";
 const CHAT = readFileSync("src/components/Chat.tsx", "utf8");
 
 // ---------- 1. 复制的正文要和屏幕上一致:抹掉「本轮小结」那行 ----------
-const SUMMARY_LINE_RE = /^[\s>*#`\-]*本轮小结\**\s*[：:]/;
-const stripSummary = (text) => text.split("\n").filter((l) => !SUMMARY_LINE_RE.test(l)).join("\n").trim();
-assert.ok(CHAT.includes("const turnCopyText"), "Chat.tsx 的 turnCopyText 已漂移");
+// turnCopyText / stripSummary 本身搬去了 lib/timeline.ts,那边有真调用的断言(timeline.check.ts),
+// 这里不再复刻一份跑 —— 复刻迟早会和真身漂开。这儿只管接线:两个按钮都得走它。
+assert.ok(/export const turnCopyText/.test(readFileSync("src/lib/timeline.ts", "utf8")),
+  "turnCopyText 不见了(搬走了就把这条指到新位置)");
+assert.ok(/turnCopyText[,\s]/.test(CHAT.slice(0, CHAT.indexOf("\n\n"))) || /from "\.\.\/lib\/timeline"/.test(CHAT),
+  "Chat.tsx 要从 lib/timeline 拿 turnCopyText");
 assert.ok(/pasteToComposer\(turnCopyText\(/.test(CHAT) && /copyRich\(body, turnCopyText\(/.test(CHAT),
   "复制/贴回两个按钮都必须走 turnCopyText,不能再用原文");
-
-assert.equal(stripSummary("正文一\n\n本轮小结：改了 A。"), "正文一");
-assert.equal(stripSummary("正文\n**本轮小结**：改了 A。\n"), "正文");
-// 「本轮建议」那行照常显示在正文里,不能一起抹掉
-const kept = stripSummary("正文\n本轮建议：提交并推送 | 修第 3 条\n本轮小结：改了 A。");
-assert.ok(kept.includes("本轮建议"), "建议行是正文的一部分,不该被剥掉");
-assert.ok(!kept.includes("本轮小结"));
 
 // ---------- 2. 表格 → TSV(没有 HTML 通道时的纯文本兜底) ----------
 const toTsv = (rows) => rows.map((r) => r.map((c) => c.replace(/\s+/g, " ").trim()).join("\t")).join("\n");
@@ -36,4 +32,23 @@ assert.ok(CHAT.includes("return c.outerHTML"), "必须用 outerHTML —— inner
 assert.ok(CHAT.includes('c.querySelectorAll("button").forEach'), "界面自己的复制按钮必须剥掉,否则粘出来多几个「复制」");
 assert.ok(/return copyText\(text\);/.test(CHAT), "clipboard.write 失败必须退回纯文本,不能静默失败");
 
-console.log("✅ copy-rich: 小结剥除 / 建议保留 / TSV 抽取 / 双 flavor+兜底 全部通过");
+// ---------- 4. 划选工具条:一滚就收 ----------
+// 它是 fixed 定位、坐标在划选那一刻算死的,不收的话滚两下就悬在别的字上面,还挡着正文。
+assert.ok(/document\.addEventListener\("scroll", onScroll, true\)/.test(CHAT),
+  "划选工具条要监听 scroll(必须 capture:scroll 不冒泡到 document,收不到消息区那个容器的)");
+assert.ok(/removeEventListener\("scroll", onScroll, true\)/.test(CHAT), "scroll 监听要在 cleanup 里摘掉");
+
+// ---------- 5. agent 三按钮:自绘 tooltip + 靠右对齐 ----------
+const CSS = readFileSync("src/styles.css", "utf8");
+const actRow = /<div className="msg-redo-row agent-actions">[\s\S]*?<\/div>/.exec(CHAT);
+assert.ok(actRow, "没找到 agent 气泡下方那排按钮");
+assert.equal((actRow[0].match(/data-tip=/g) || []).length, 3, "三个按钮都得有 data-tip(hover 说明)");
+assert.ok(!/\btitle=/.test(actRow[0]), "别再挂 title:原生 tooltip 会和 data-tip 那份一起冒出来");
+assert.equal((actRow[0].match(/aria-label=/g) || []).length, 3, "纯图标按钮,可读名字只能靠 aria-label");
+assert.ok(/\.msg-redo-row button\[data-tip\]:hover::after/.test(CSS), "data-tip 得有对应的 ::after,否则文案根本不画");
+assert.ok(/\.turn-foot \{[^}]*width: 100%/.test(CSS),
+  "turn-foot 要撑满整列 —— 不撑就只有 chips 那么宽,按钮的 margin-left:auto 顶不到气泡右缘");
+assert.ok(/\.msg-redo-row\.agent-actions \{[^}]*margin-left: auto/.test(CSS), "按钮排要靠右");
+assert.ok(/\.turn-foot \{[^}]*align-items: center/.test(CSS), "按钮要和左边的 chips 在这行里居中对齐");
+
+console.log("✅ copy-rich: 小结剥除 / 建议保留 / TSV 抽取 / 双 flavor+兜底 / 划选一滚就收 / 三按钮 tooltip+靠右 全部通过");

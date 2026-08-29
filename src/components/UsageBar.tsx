@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { LimitUsage, Session, Spend, Wallet } from "../types";
 import { contextWindowOf, sessionProvider } from "../types";
-import { useStore } from "../store";
+import { useStore, useApi } from "../store";
 import { PERMISSION_PRESETS, presetOf, type PermissionMode } from "../permissions";
 
 // c: 用量条
@@ -75,7 +75,7 @@ function Meter({ label, pct, detail, warn, title }: { label: string; pct: number
 function LimitMeter({ label, limit, fetchedAt, stale }:
   { label: string; limit: LimitUsage; fetchedAt: number | null; stale: boolean }) {
   const { t } = useTranslation();
-  const { refreshUsage } = useStore();
+  const { refreshUsage } = useApi();
   const [nudge, setNudge] = useState(0); // 定时器越过重置点后自增,强制本 effect 重跑,切进兜底轮询
   // "剩 2h30m"/"更新于 x 前"要自己走;tick 还当调度 effect 的心跳:长 setTimeout 会被后台节流/系统睡眠
   // 暂停,倒计时(按 Date.now 重渲)已归零它却没响 → 不刷新。每 30s(含睡眠唤醒后)重跑 effect 重判过点。

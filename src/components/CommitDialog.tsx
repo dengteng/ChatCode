@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Button } from "./ui/button";
-import { useStore } from "../store";
+import { useApi } from "../store";
 
 // 最近 5 条提交说明(localStorage),弹窗里点一条即可回填 —— 提交信息高度重复,省得每次重打。
 // 按 git 项目(scope=项目根目录)分桶存:不同仓库的提交描述天差地别,混在一起点错的概率比省的事还多。
@@ -18,7 +18,7 @@ const remember = (scope: string, msg: string) =>
 // scope = 当前 git 项目根目录,历史提交描述按它独立存储。
 export function CommitDialog({ scope, sessionId, onSubmit, onCancel }: { scope: string; sessionId: string; onSubmit: (message: string) => void; onCancel: () => void }) {
   const { t } = useTranslation();
-  const { suggestCommit } = useStore();
+  const { suggestCommit } = useApi();
   const [value, setValue] = useState("");
   const [suggesting, setSuggesting] = useState(true);   // 打开即自动总结,先转圈
   const touched = useRef(false);                         // 用户一旦手动改过输入框,就别再被自动总结覆盖

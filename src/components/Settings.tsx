@@ -6,7 +6,7 @@ import { setLang, resetLang, selectedLang, getLang } from "../i18n";
 import { X, RotateCw, Plus, Check, GitBranch, Pencil, Copy, Search, Trash2, Download, Loader2, Power, PowerOff, ExternalLink, ChevronLeft } from "lucide-react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { useStore, DOCK_BOUNCE_KEY, dockBounceOn, SOUND_KEY, soundOn, playDing } from "../store";
+import { useStore, useApi, DOCK_BOUNCE_KEY, dockBounceOn, SOUND_KEY, soundOn, playDing } from "../store";
 import { toast } from "./Toast";
 import { THEMES, type SshHost, type ThemeId, type CustomArt } from "../types";
 import { loadExtensions, loadMarketplace, marketplaceNames, installPlugin, uninstallPlugin, enablePlugin, disablePlugin, addMarketplace, removeMarketplace, installSkillGit, setSkillOn, removeSkill, setMcpOn, removeMcp, loadExtNotes, saveExtNote, SEED_MARKETPLACES, type Exts, type MarketPlugin } from "../extensions";
@@ -132,7 +132,7 @@ function BackBtn({ label, onBack }: { label: string; onBack: () => void }) {
 // 选中"自定义"时,直接进背景图设置子页。
 function AppearanceTab({ theme, onPick, customBg, customBlur, customBrightness, onSetCustomBg, onSetCustomBlur, onSetCustomBrightness }: { theme: ThemeId; onPick: (id: ThemeId) => void; customBg: string; customBlur: number; customBrightness: number; onSetCustomBg: (url: string, artJson?: string) => void; onSetCustomBlur: (v: number) => void; onSetCustomBrightness: (v: number) => void }) {
   const { t } = useTranslation();
-  const { syncUiLang } = useStore();
+  const { syncUiLang } = useApi();
   const langSel = selectedLang();
   const changeLang = (l: "zh" | "en" | "auto") => {
     if (l === "auto") resetLang(); else setLang(l);

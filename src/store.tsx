@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useReducer, useRef, useState, type MutableRefObject, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useReducer, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import type { AccountUsage, AuthStatus, GitDiffData, GitInfo, GitLogData, IndexEntry, LimitUsage, ModelInfo, PermissionSuggestion, ResumeChoice, SearchResult, Session, SessionGroup, SessionInfo, Spend, SshHost, TimelineItem, Wallet } from "./types";
@@ -644,8 +644,9 @@ function notify(title: string, body: string) {
 }
 
 // ---------- context ----------
+// 只放方法(state 走 StateCtx)。这里每一个都必须只吃 ref / dispatch / setState 这类稳定引用 ——
+// 一旦有谁直接闭包捕获了 state,下面那个 useMemo([]) 就会把它冻在首帧的旧值上。要读实时状态走 stateRef。
 interface Api {
-  state: State;
   dispatch: (a: Action) => void;
   createSession: (cwd: string, resume?: string | null, title?: string, inheritFrom?: string | null, casual?: boolean, model?: string) => void;
   // 空态输入框:建会话并把首条消息暂存,等 session_created 回来自动发出。cwd 为空 = 闲聊会话。
@@ -697,29 +698,40 @@ interface Api {
   renameGroup: (id: string, name: string) => void;
   deleteGroup: (id: string) => void; // 删组:组内会话回落到未分组
 }
-const Ctx = createContext<Api>(null!);
-export const useStore = () => useContext(Ctx);
+// 状态和方法分两个 context。方法那半身份永远不变(见下面 api 的 useMemo),所以只调方法的组件
+// 用 useApi() 订阅它,就彻底不跟着 state 走了 —— 以前它俩挤在一个 context 里,
+// 想要一个 authAction 也得连着整个 state 一起订上,任何一次 dispatch(用量 15s 一拍、别的会话在流式、
+// 钱包 60s 一拍)都把这些组件重渲一遍。
+const StateCtx = createContext<State>(null!);
+const ApiCtx = createContext<Api>(null!);
+// 既要 state 又要方法:照旧。返回的对象每次新建不要紧,重渲染只由 useContext 的订阅决定。
+export const useStore = () => ({ ...useContext(ApiCtx), state: useContext(StateCtx) });
+// 只要方法:用这个。少订一个 context,state 再怎么变也不惊动。
+export const useApi = () => useContext(ApiCtx);
 
 // ---------- 历史图片按需取 ----------
 // 历史里的图片只有引用(见 ContentBlock 的 cc_blob),真数据留在 sidecar。这里给非 React 处
 // (ImgTag 的 hover/点击)一条不经 context 的取数通道:模块级持有 ws 的 send + 一张 promise 缓存,
 // 同一张图取多少次都只发一次请求、只在内存留一份 dataURL。
 let blobSend: ((o: any) => void) | null = null;
-const blobCache = new Map<string, Promise<string | null>>();
+const blobCache = new Map<string, Promise<string | null>>();       // 只放缩略图:一张几 KB,命中频繁(滚动来回划),留着划算
+let fullHit: { id: string; p: Promise<string | null> } | null = null; // 原图一张能到几 MB,全缓下来内存只涨不降 —— 只留最近看的那张
 const blobWaiters = new Map<string, (v: string | null) => void>();
+const dropBlob = (id: string, full: boolean) => { if (full) { if (fullHit?.id === id) fullHit = null; } else blobCache.delete(id); };
 
 export function fetchBlob(key: string, mediaType: string, full: boolean): Promise<string | null> {
   const id = `${key}:${full ? "full" : "thumb"}`;
-  const hit = blobCache.get(id);
+  // 原图这一格同时兼作"飞行中"去重:连点两下不会发两次请求
+  const hit = full ? (fullHit?.id === id ? fullHit.p : undefined) : blobCache.get(id);
   if (hit) return hit;
   const p = new Promise<string | null>((resolve) => {
     if (!blobSend) { resolve(null); return; }
     blobWaiters.set(id, resolve);
     blobSend({ type: "blob_get", key, mediaType, full });
     // 兜底:sidecar 没回(重启/断线)就当取不到,别让 hover 一直转圈。缓存也一并清掉,下次可重试。
-    setTimeout(() => { if (blobWaiters.delete(id)) { blobCache.delete(id); resolve(null); } }, 20000);
+    setTimeout(() => { if (blobWaiters.delete(id)) { dropBlob(id, full); resolve(null); } }, 20000);
   });
-  blobCache.set(id, p);
+  if (full) fullHit = { id, p }; else blobCache.set(id, p);
   return p;
 }
 
@@ -956,8 +968,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   };
   blobSend = send; // 给 fetchBlob 用(ImgTag 在 context 外调)
 
-  const api: Api = {
-    state, dispatch,
+  // 依赖数组空的:下面这些方法只碰 send / dispatch / stateRef / 各 waiters ref / setDupAsk,全是稳定引用。
+  // 身份一变就白拆 context 了(消费者照样每次重渲染),所以这里宁可 disable 掉 exhaustive-deps
+  // 也不让 state 溜进依赖 —— 要读实时状态一律走 stateRef.current。
+  const api = useMemo<Api>(() => ({
+    dispatch,
     createSession(cwd, resume, title, inheritFrom, casual, model) {
       // resume = 要接续的 SDK 会话(恢复上下文);inheritFrom = 母会话条目 id(仅用于列表树形归属)
       const fire = () => send({ type: "create_session", cwd, resume, title, inheritFrom, casual, model });
@@ -1132,6 +1147,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       });
     },
     deleteSession(id) {
+      try { localStorage.removeItem(ctxKey(id)); } catch {} // 会话没了,缓存的上下文体积跟着走(id 不复用,留着永远读不到)
       dispatch({ type: "remove_session", id }); // 乐观移除,sidecar 再广播确认
       send({ type: "delete_session", sessionId: id });
     },
@@ -1152,7 +1168,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       dispatch({ type: "groups", groups: stateRef.current.groups.filter((g) => g.id !== id) });
       send({ type: "delete_group", id });
     },
-  };
+  }), []); // eslint-disable-line react-hooks/exhaustive-deps -- 见上:身份必须永远不变
 
   // 待发队列自动出队:某会话变空闲(agent 完成上一轮)、没有后台任务、且上一轮已彻底了结(含后台续跑)时,发出队首。
   // bgWait = 上一轮还挂着后台任务,轮次未完全了结 —— 不能放队列出去,否则会在后台任务续跑前把下一条消息切进来。
@@ -1210,7 +1226,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (blocks) api.sendMessage(id, blocks);
   };
 
-  return <Ctx.Provider value={api}>
+  // ApiCtx 在外、StateCtx 在内:api 的 value 永不变,state 变时 React 只需要重跑内层那个 Provider。
+  return <ApiCtx.Provider value={api}><StateCtx.Provider value={state}>
     {children}
     {dupAsk && <ConfirmDialog
       title={i18n.t("该目录已有 {{count}} 个会话", { count: dupAsk.count })}
@@ -1219,7 +1236,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       cancelLabel={i18n.t("打开已有")} confirmLabel={i18n.t("仍要新建")} danger={false}
       onCancel={() => openExisting(dupAsk.existing.id)}
       onConfirm={() => { setDupAsk(null); dupAsk.proceed(); }} />}
-  </Ctx.Provider>;
+  </StateCtx.Provider></ApiCtx.Provider>;
 }
 
 export { emptySession };

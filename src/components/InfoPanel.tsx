@@ -4,8 +4,9 @@ import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { openPath, openUrl, revealPath } from "../native";
 import type { Session, TimelineItem } from "../types";
-import { useStore, type RememberChoice } from "../store";
-import { PermissionCard, SkillMcpTags, usedSkillsMcp } from "./Chat";
+import { useStore, useApi, type RememberChoice } from "../store";
+import { PermissionCard, SkillMcpTags } from "./Chat";
+import { usedSkillsMcp } from "../lib/timeline";
 import { CommitDialog } from "./CommitDialog";
 import { BranchesTab } from "./BranchesTab";
 import { MemoryTab } from "./MemoryTab";
@@ -309,7 +310,7 @@ function StartProc({ cwd, onDone }: { cwd: string; onDone: () => void }) {
 // 回合详情抽屉:从右侧盖在整个界面上,只展示被点那一轮的 agent 回复,随 timeline 更新流式刷新
 export function TurnDrawer({ session, anchor, onClose }: { session: Session; anchor: number; onClose: () => void }) {
   const { t } = useTranslation();
-  const { respondPermission } = useStore();
+  const { respondPermission } = useApi();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState<number | null>(null); // 最多撑开一组
   const execution = turnExecution(session.timeline, anchor);
