@@ -593,10 +593,48 @@ function handleSdkMessage(dispatch: (a: Action) => void, id: string, msg: any, l
       // 用户中断(aborted)时必清闩锁:SDK 可能先回 result 再发后台任务清空信号,不清的话闩锁会卡死队列。
       const hasBg = (stateRef?.current.sessions[id]?.bgTasks?.length ?? 0) > 0;
       dispatch({ type: "patch", id, patch: { status: "idle", freshDone: !msg.aborted, apiRetry: null, ...(msg.aborted || !hasBg ? { bgWait: false } : {}) } });
-      if (!msg.aborted) { notify(i18n.t("任务完成"), i18n.t("花费 ${{cost}}", { cost: (msg.total_cost_usd ?? 0).toFixed(4) })); invoke("bounce_dock").catch(() => {}); } // d: 完成提醒 + dock 跳动(不在前台时才跳)
+      if (!msg.aborted) { notify(i18n.t("任务完成"), i18n.t("花费 ${{cost}}", { cost: (msg.total_cost_usd ?? 0).toFixed(4) })); alertUser(); } // d: 完成提醒 + dock 跳动(不在前台时才跳) + 提示音
     }
   }
 }
+
+// dock 跳动提醒(窗口在前台时系统本来就不跳)。用户可在设置里关掉,默认开 ——
+// 只有显式存过 "0" 才算关,不然第一次启动读到 null 就成了默认关。
+// 所有跳动都必须走 bounceDock:直接 invoke 会绕开这个开关,新增提醒点时最容易漏(自检盯着这条)。
+export const DOCK_BOUNCE_KEY = "ChatCode-dock-bounce";
+export const dockBounceOn = () => localStorage.getItem(DOCK_BOUNCE_KEY) !== "0";
+const bounceDock = () => { if (dockBounceOn()) invoke("bounce_dock").catch(() => {}); };
+
+// 提示音。WebAudio 现场合成两声「叮」,不带音频文件 —— 少一个要打进包、要管路径的资产。
+// 不需要任何系统权限(放音不是录音,TCC 不管),也不受「系统设置 › 通知」里那个播放声音开关摆布,
+// 所以它比挂在桌面通知上的声音更听话:用户在这儿关了就是关了。
+// 前台也响,正好补上 dock 跳动的空档 —— 窗口在最前时 macOS 根本不跳。
+export const SOUND_KEY = "ChatCode-alert-sound";
+export const soundOn = () => localStorage.getItem(SOUND_KEY) !== "0";
+let actx: AudioContext | null = null;
+export const playDing = () => {
+  if (!soundOn()) return;
+  try {
+    actx ??= new AudioContext();
+    // 用户还没碰过界面时 AudioContext 是 suspended,这会儿排的音会攒着、等 resume 的瞬间一起炸响。
+    // 所以先 resume 再排音;已经 running 的话这个 promise 立即 resolve,不多花一帧。
+    actx.resume().then(() => {
+      const at = actx!.currentTime;
+      [[880, at], [1320, at + 0.09]].forEach(([f, t0]) => {
+        const o = actx!.createOscillator(), g = actx!.createGain();
+        o.frequency.value = f;                                  // sine 是默认波形
+        g.gain.setValueAtTime(0.0001, t0);                      // 指数斜坡碰不得 0,从极小值起
+        g.gain.exponentialRampToValueAtTime(0.18, t0 + 0.01);   // 1ms 太冲会「啪」,10ms 起音干净
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.35);
+        o.connect(g).connect(actx!.destination);
+        o.start(t0); o.stop(t0 + 0.36);
+      });
+    }).catch(() => {});
+  } catch { /* WebAudio 不可用就安静点,不值得为提示音报错 */ }
+};
+
+// 提醒统一出口:再加提醒点时调这一个,不会漏掉任何一路开关(同 sessionBusy 那次的教训)。
+const alertUser = () => { bounceDock(); playDing(); };
 
 function notify(title: string, body: string) {
   try {
@@ -870,7 +908,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             }
             dispatch({ type: "patch", id: m.sessionId, patch: { status: "waiting" } });
             notify(i18n.t("需要你确认"), i18n.t("{{tool}} 等待授权", { tool: m.toolName }));
-            invoke("bounce_dock").catch(() => {}); // 会话待处理,dock 跳动提醒
+            alertUser(); // 会话待处理,dock 跳动 + 提示音
             break;
           }
           case "auto_approve": // sidecar 广播的开关状态(任一端切换都同步过来)

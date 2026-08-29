@@ -14,6 +14,7 @@ import { html } from "@codemirror/lang-html";
 import { json } from "@codemirror/lang-json";
 import { javascript } from "@codemirror/lang-javascript";
 import { useTranslation } from "react-i18next";
+import { Eye, EyeOff } from "lucide-react";
 
 // app 内可编辑的文本类型;md 额外支持实时渲染预览。CodeMirror 6 对无对应语言包的类型也能纯文本编辑,
 // 所以这里放开到常见代码/文本文件,统一走同一套编辑体验。
@@ -118,6 +119,16 @@ const detectDark = () => {
   return localStorage.getItem("ChatCode-theme") !== "light";
 };
 
+/** 分栏比例夹到合法区间。size = 分栏轴上的可用像素(横向取宽、纵向取高)。
+ *  两条约束同时管两边:谁也不能窄于 SPLIT_MIN_PX,谁也不能吃掉 90% 以上 ——
+ *  面板窄于 500px 时 50px 比 10% 还大,那就是 50px 说了算。
+ *  面板窄到 100px 以下两条约束会打架(下限反超上限),这种时候退回五五开,别乱夹。 */
+const SPLIT_MIN_PX = 50;
+export const clampFrac = (f: number, size: number) => {
+  const lo = Math.max(0.1, SPLIT_MIN_PX / size), hi = Math.min(0.9, 1 - SPLIT_MIN_PX / size);
+  return lo > hi ? 0.5 : Math.min(hi, Math.max(lo, f));
+};
+
 // 文件编辑器:左编辑(CodeMirror 6 语法高亮 + 行号)右预览(md)/纯编辑(其他)。⌘S 保存,点"关闭"按钮退出。
 // windowed = 它自己就是一个独立的原生窗口(见 popout.tsx):铺满窗口、不要遮罩、不用自己实现拖动(交给系统标题栏)。
 export function FileEditor({ path, name, onClose, windowed }: { path: string; name: string; onClose: () => void; windowed?: boolean }) {
@@ -128,7 +139,15 @@ export function FileEditor({ path, name, onClose, windowed }: { path: string; na
   const [status, setStatus] = useState(""); // "已保存"/"保存中…"
   const isMd = ext(name) === "md";
   const isHtml = ext(name) === "html" || ext(name) === "htm";
-  const preview = isMd || isHtml;   // 右栏预览:md 渲染 / html iframe 实时预览
+  const canPreview = isMd || isHtml;   // 这类文件有没有预览可看:md 渲染 / html iframe 实时预览
+  // 用户手动开关。记进 localStorage:关掉的人多半是想专心写源码,每开一个文件再关一次很烦(同 vert)。
+  // 默认开 —— 只有显式存过 "0" 才算关。
+  const [previewOn, setPreviewOn] = useState(() => localStorage.getItem("ChatCode-feditor-preview") !== "0");
+  const togglePreview = () => setPreviewOn((v) => {
+    localStorage.setItem("ChatCode-feditor-preview", v ? "0" : "1");
+    return !v;
+  });
+  const preview = canPreview && previewOn;   // 真的要分栏吗(下游的分栏/拖动条/同步滚动全看它)
   const [dark, setDark] = useState(detectDark);
   // 主题实时切换时跟着换 CodeMirror 配色(data-theme 变化用 MutationObserver 监听)
   useEffect(() => {
@@ -156,14 +175,15 @@ export function FileEditor({ path, name, onClose, windowed }: { path: string; na
   // useDeferredValue 让打字优先,空下来再刷预览。
   const previewText = useDeferredValue(text);
   const refs = useMemo(() => {
-    if (!isHtml || !previewText) return [] as string[];
+    // 关了预览就别扫了:下面那个 effect 会照着 refs 挨个读盘,内联上兆 base64 全是白干
+    if (!preview || !isHtml || !previewText) return [] as string[];
     const out = [
       ...(previewText.match(LINK_RE) || []).filter((t) => /rel\s*=\s*["']?stylesheet/i.test(t)).map((t) => localRef(t, "href")),
       ...(previewText.match(SCRIPT_RE) || []).map((t) => localRef(t, "src")),
       ...(previewText.match(IMG_RE) || []).map((t) => localRef(t, "src")),
     ];
     return [...new Set(out.filter(Boolean) as string[])];
-  }, [isHtml, previewText]);
+  }, [preview, isHtml, previewText]);
   const [assets, setAssets] = useState<Record<string, string>>({});
   // 依赖用 join 出来的字符串而不是 refs 本身:数组每次正文变化都是新引用,直接当依赖会变成每敲一键读一次盘。
   const refKey = refs.join("|");
@@ -178,7 +198,7 @@ export function FileEditor({ path, name, onClose, windowed }: { path: string; na
   }, [refKey, dir]);
 
   const htmlDoc = useMemo(() => {
-    if (!isHtml || previewText === null) return "";
+    if (!preview || !isHtml || previewText === null) return "";
     const got = (tag: string, attr: "href" | "src") => {
       const r = localRef(tag, attr);
       return r && assets[r] !== undefined ? { r, data: assets[r] } : null;
@@ -208,7 +228,7 @@ export function FileEditor({ path, name, onClose, windowed }: { path: string; na
         const e = ext(hit.r);
         return tag.replace(/(\bsrc\s*=\s*["'])[^"']*(["'])/i, `$1data:${MIME[e] || `image/${e}`};base64,${hit.data}$2`);
       }) + SCROLL_RUNTIME;
-  }, [isHtml, previewText, assets]);
+  }, [preview, isHtml, previewText, assets]);
 
   // 预览分栏方向。窄窗口写代码时左右挤,宽屏读长文时上下挤 —— 交给用户自己按内容切。
   // 记进 localStorage:同一个人的习惯基本不变,每开一个文件都要重切一次很烦。
@@ -217,6 +237,40 @@ export function FileEditor({ path, name, onClose, windowed }: { path: string; na
     localStorage.setItem("ChatCode-feditor-vert", v ? "0" : "1");
     return !v;
   });
+
+  // 分栏比例(源码区占的份额)。和 vert 一样记进 localStorage —— 每开一个文件都要重拖一次太烦。
+  const [split, setSplit] = useState(() => clampFrac(Number(localStorage.getItem("ChatCode-feditor-split")) || 0.5, Infinity));
+  useEffect(() => { localStorage.setItem("ChatCode-feditor-split", String(split)); }, [split]);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const startSplit = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const el = bodyRef.current;
+    if (!el) return;
+    document.body.style.cursor = vert ? "row-resize" : "col-resize";
+    document.body.style.userSelect = "none";
+    // html 预览是 iframe:鼠标划过去时 mousemove 归它自己的文档,外面收不到,拖动断在半路。
+    // 拖的这一小会儿让它不收指针事件就行。
+    document.body.classList.add("feditor-dragging");
+    const move = (ev: MouseEvent) => {
+      const r = el.getBoundingClientRect();
+      const size = vert ? r.height : r.width;
+      setSplit(clampFrac((vert ? ev.clientY - r.top : ev.clientX - r.left) / size, size));
+    };
+    const up = () => {
+      document.body.style.cursor = ""; document.body.style.userSelect = "";
+      document.body.classList.remove("feditor-dragging");
+      window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up);
+    };
+    window.addEventListener("mousemove", move); window.addEventListener("mouseup", up);
+  };
+  // 浮窗拖角缩放会改可用宽高,存着的比例可能把某一边压到 50px 以下 —— 跟着回夹一次
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el || !preview) return;
+    const ro = new ResizeObserver(() => setSplit((f) => clampFrac(f, vert ? el.clientHeight : el.clientWidth)));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [preview, vert]);
 
   // 浮窗位置(初始居中);宽高交给 CSS resize 拖角缩放,不受控免打架
   const [pos, setPos] = useState(() => ({ x: Math.max(20, (window.innerWidth - 1100) / 2), y: Math.max(20, (window.innerHeight - 760) / 2) }));
@@ -324,6 +378,15 @@ export function FileEditor({ path, name, onClose, windowed }: { path: string; na
           <span className="feditor-path" title={path}>{path}</span>
           <div className="feditor-actions">
             {status && <span className="muted">{status}</span>}
+            {/* 预览开关。只在有预览可看的类型上出现(md/html);关掉后整个右栏连同拖动条一起消失,
+                源码栏铺满。这个状态是记住的 —— 图标画当前状态(眼睛开/闭),和下面那个方向按钮不同,
+                因为"预览现在是开是关"一眼要能看出来。 */}
+            {canPreview && (
+              <button className="ghost feditor-layout" title={previewOn ? t("关闭预览") : t("开启预览")}
+                onMouseDown={(e) => { if (e.button !== 0) return; e.preventDefault(); e.stopPropagation(); togglePreview(); }}>
+                {previewOn ? <Eye size={13} /> : <EyeOff size={13} />}
+              </button>
+            )}
             {/* 分栏方向切换。图标画的是切过去之后的样子(两块并排 / 两块上下),不是当前状态 ——
                 按钮上画"你会得到什么"比画"你现在是什么"少一层脑内转换。 */}
             {preview && (
@@ -346,8 +409,8 @@ export function FileEditor({ path, name, onClose, windowed }: { path: string; na
         {text === null && !err ? (
           <div className="feditor-body"><div className="muted" style={{ padding: 16 }}>{t("加载中…")}</div></div>
         ) : text !== null && (
-          <div className={`feditor-body ${preview ? "split" : ""} ${preview && vert ? "vert" : ""}`}>
-            <div className="feditor-input-wrap">
+          <div ref={bodyRef} className={`feditor-body ${preview ? "split" : ""} ${preview && vert ? "vert" : ""}`}>
+            <div className="feditor-input-wrap" style={preview ? { flex: `0 0 ${split * 100}%` } : undefined}>
               <CodeMirror
                 value={text}
                 onChange={setText}
@@ -360,13 +423,14 @@ export function FileEditor({ path, name, onClose, windowed }: { path: string; na
                 className="feditor-cm"
               />
             </div>
-            {isMd && (
+            {preview && <div className="feditor-split-bar" onMouseDown={startSplit} title={t("拖动调节两栏比例")} />}
+            {preview && isMd && (
               <div className="feditor-preview md" ref={prevRef}
                 onMouseEnter={() => (driver.current = "prev")} onScroll={() => align("prev")}>
                 <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeLine]}>{text}</Markdown>
               </div>
             )}
-            {isHtml && <iframe ref={frameRef} className="feditor-preview-frame" title={t("HTML 预览")} sandbox="allow-scripts allow-forms allow-popups" srcDoc={htmlDoc} />}
+            {preview && isHtml && <iframe ref={frameRef} className="feditor-preview-frame" title={t("HTML 预览")} sandbox="allow-scripts allow-forms allow-popups" srcDoc={htmlDoc} />}
           </div>
         )}
       </div>

@@ -6,7 +6,7 @@ import { setLang, resetLang, selectedLang, getLang } from "../i18n";
 import { X, RotateCw, Plus, Check, GitBranch, Pencil, Copy, Search, Trash2, Download, Loader2, Power, PowerOff, ExternalLink, ChevronLeft } from "lucide-react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { useStore } from "../store";
+import { useStore, DOCK_BOUNCE_KEY, dockBounceOn, SOUND_KEY, soundOn, playDing } from "../store";
 import { toast } from "./Toast";
 import { THEMES, type SshHost, type ThemeId, type CustomArt } from "../types";
 import { loadExtensions, loadMarketplace, marketplaceNames, installPlugin, uninstallPlugin, enablePlugin, disablePlugin, addMarketplace, removeMarketplace, installSkillGit, setSkillOn, removeSkill, setMcpOn, removeMcp, loadExtNotes, saveExtNote, SEED_MARKETPLACES, type Exts, type MarketPlugin } from "../extensions";
@@ -18,7 +18,7 @@ import { modelLogo } from "./Avatar";
 import { ProfilePane } from "./ProfilePane";
 import { checkVersion, APP_VERSION, SDK_VERSION, ApiError, type VersionCheck } from "../version";
 
-type Tab = "appearance" | "account" | "profile" | "github" | "ssh" | "extensions" | "about";
+type Tab = "appearance" | "account" | "profile" | "github" | "ssh" | "extensions" | "notify" | "about";
 
 // provider logo:有官方图(Claude/DeepSeek)显示图,和会话头像/侧栏共用同一份;没有的退回字母底
 function ProviderLogo({ name, cls, ini }: { name: string; cls: string; ini: string }) {
@@ -51,7 +51,7 @@ export function Settings({ onClose, initialTab, theme, onPickTheme, customBg, cu
         <div className="settings-body">
           <nav className="settings-nav">
             {/* 这个 tab 装的是 个人资料 + 账号/登录/同步(SHOW_ACCOUNT 关掉时就只剩头像昵称,名字随之改回「个人资料」) */}
-            {([["profile", "个人资料"],["account", "大模型"], ["github", "GitHub连接"], ["ssh", "SSH连接"], ["extensions", "插件/MCP/Skills"], ["appearance", "语言与主题"], ["about", "关于"]] as [Tab, string][]).map(([k, label]) => (
+            {([["profile", "个人资料"],["account", "大模型"], ["github", "GitHub连接"], ["ssh", "SSH连接"], ["extensions", "插件/MCP/Skills"], ["appearance", "语言与主题"], ["notify", "通知提醒"], ["about", "关于"]] as [Tab, string][]).map(([k, label]) => (
               <button key={k} type="button" className={tab === k ? "sel" : ""} onMouseDown={(e) => { e.preventDefault(); setTab(k); }}>{t(label)}</button>
             ))}
           </nav>
@@ -62,6 +62,7 @@ export function Settings({ onClose, initialTab, theme, onPickTheme, customBg, cu
             {tab === "github" && <GithubTab />}
             {tab === "ssh" && <SshTab />}
             {tab === "extensions" && <ExtensionsTab />}
+            {tab === "notify" && <NotifyTab />}
             {tab === "about" && <AboutTab />}
           </div>
         </div>
@@ -214,6 +215,30 @@ function AppearanceTab({ theme, onPick, customBg, customBlur, customBrightness, 
           </button>
         ))}
       </div>
+    </section>
+  );
+}
+
+// 任务完成提醒。跳动 + 提示音两项,都不需要系统权限 —— 桌面通知才归系统管,这里不重复造它的开关。
+function NotifyTab() {
+  const { t } = useTranslation();
+  const [bounce, setBounce] = useState(dockBounceOn);
+  const [sound, setSound] = useState(soundOn);
+  const toggleBounce = (v: boolean) => { localStorage.setItem(DOCK_BOUNCE_KEY, v ? "1" : "0"); setBounce(v); };
+  // 打开时立刻响一声当试听 —— 省掉一个「试听」按钮,顺带在这次用户手势里把 AudioContext 解锁了。
+  const toggleSound = (v: boolean) => { localStorage.setItem(SOUND_KEY, v ? "1" : "0"); setSound(v); if (v) playDing(); };
+  return (
+    <section className="settings-section">
+      <h4>{t("任务完成提醒")}</h4>
+      <label className="profile-kb">
+        <input type="checkbox" checked={bounce} onChange={(e) => toggleBounce(e.target.checked)} />
+        {t("完成时让 Dock 图标跳动")}
+      </label>
+      <label className="profile-kb">
+        <input type="checkbox" checked={sound} onChange={(e) => toggleSound(e.target.checked)} />
+        {t("完成时播放提示音")}
+      </label>
+      <p className="settings-note">{t("任务跑完、或者会话等你授权时,Dock 里的图标会跳一下、并响一声。窗口正在前台时系统本来就不跳,但提示音照响。两项都不需要系统通知权限;桌面通知另归系统管,不受这里影响。")}</p>
     </section>
   );
 }
