@@ -2091,16 +2091,21 @@ function AskQuestionCard({ item, onSubmit, onCancel }: {
       {questions.length > 1 && (
         <div className="ask-nav">
           {questions.map((qq, i) => (
+            // 走 btnPress:点标签时焦点多半在下面那个自定义回复的 textarea 里,而 WKWebView 会把
+            // 这种情况下的第一次 click 吞掉只拿去移焦点(见 lib/utils)—— 表现就是"点了没换题"。
+            // btnPress 的 preventDefault 顺带把移焦点也拦了,所以自己把焦点收回卡片:←→ 切题、
+            // ↑↓ 选项都挂在卡片的 onKeyDown 上,焦点留在 textarea 里这些键全被输入框吃掉。
             <span key={i} className={`ask-tab ${i === qIdx ? "cur" : ""} ${answered(i) ? "done" : ""}`}
-              onClick={() => { setQIdx(i); setOptIdx(0); }}>{qq.header || t("问题{{n}}", { n: i + 1 })}{answered(i) ? <> <Check size={11} /></> : ""}</span>
+              {...btnPress(() => { setQIdx(i); setOptIdx(0); cardRef.current?.focus(); })}>{qq.header || t("问题{{n}}", { n: i + 1 })}{answered(i) ? <> <Check size={11} /></> : ""}</span>
           ))}
         </div>
       )}
       <div className="ask-q">{q.header && <span className="ask-q-tag">{q.header}</span>}{q.question}{q.multiSelect && <span className="muted">{t(" · 可多选")}</span>}</div>
       <div className="ask-opts">
         {q.options.map((opt, j) => (
+          // 同 .ask-tab:在 textarea 里打过字之后点选项,第一次 click 会被吞,得走 mousedown
           <div key={j} className={`ask-opt ${custom[qIdx].trim() === "" && j === optIdx ? "hi" : ""} ${isSelected(qIdx, j) ? "on" : ""}`}
-            onClick={() => { setOptIdx(j); choose(j); }}>
+            {...btnPress(() => { setOptIdx(j); choose(j); cardRef.current?.focus(); })}>
             <span className="ask-opt-n">{j + 1}</span>
             <div className="ask-opt-body"><b>{opt.label}</b>{opt.description && <div className="muted">{opt.description}</div>}</div>
             {isSelected(qIdx, j) && <span className="ask-check"><Check size={13} /></span>}

@@ -523,7 +523,13 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 .ask-card:focus { border-color: var(--accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent); }
 .ask-card.done { background: transparent; border-color: var(--border); }
 .ask-answer { color: #b9e7c8; font-size: 13px; white-space: pre-wrap; }
-.ask-nav { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+/* 选题标签必须一直看得见 —— 它既是导航也是进度(哪题答过了带 ✓)。卡片限高后是**整张卡**在滚
+   (见 .ask-dock .ask-card),tab 排在内容最上面,选项一多就先滚出视野:剩下的只有 ←→ 盲切,
+   还不知道盲切到了第几题。和脚栏对称地钉住。
+   top 给 -12px 而不是 0:要连卡片自己那 12px 上内边距一起压住,否则那道缝里能看见选项从 tab 底下
+   滑过去。左右负 margin 同理,让它横贯到卡片边沿。background: inherit 见 .ask-foot 那条的原因。 */
+.ask-nav { display: flex; flex-wrap: wrap; gap: 6px;
+  position: sticky; top: -12px; margin: -12px -14px 10px; padding: 12px 14px 8px; background: inherit; }
 .ask-tab { font-size: 12px; padding: 2px 9px; border-radius: 999px; background: var(--panel); border: 1px solid var(--border); cursor: pointer; color: var(--muted); }
 .ask-tab.cur { border-color: var(--accent); color: var(--text); }
 .ask-tab.done { color: var(--green); }
