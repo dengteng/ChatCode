@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getAvatar, getUserName, setAvatar, setUserName, fileToAvatar } from "./Avatar";
+import { btnPress } from "../lib/utils";
 
 // 头像 + 昵称,只落本地 localStorage,不上传任何地方。
 export function ProfilePane() {
@@ -27,8 +28,8 @@ export function ProfilePane() {
           {src ? <img src={src} alt={t("我")} /> : <span className="avatar-fallback">{name ? name.slice(0, 1).toUpperCase() : t("我")}</span>}
         </span>
         <div className="profile-avatar-actions">
-          <button className="primary" onClick={() => fileRef.current?.click()}>{t("上传头像")}</button>
-          {src && <button className="ghost" onClick={() => setAvatar(null)}>{t("移除")}</button>}
+          <button className="primary" {...btnPress(() => fileRef.current?.click())}>{t("上传头像")}</button>
+          {src && <button className="ghost" {...btnPress(() => setAvatar(null))}>{t("移除")}</button>}
           <input ref={fileRef} type="file" accept="image/*" hidden onChange={pick} />
         </div>
       </div>

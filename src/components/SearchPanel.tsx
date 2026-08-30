@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
 import { useStore } from "../store";
 import { brandName } from "./Avatar";
+import { btnPress } from "../lib/utils";
 
 // 搜索结果横跨多天,只给 HH:mm 分不清哪天;今天的省掉日期,其余带 MM-DD
 function fmtWhen(iso?: string) {
@@ -42,7 +43,7 @@ export function SearchPanel({ onClose }: { onClose: () => void }) {
   const results = useMemo(() => query.trim() ? state.search : [], [query, state.search]);
   return <div className="search-shade" onMouseDown={onClose}>
     <div className="search-panel" onMouseDown={(e) => e.stopPropagation()}>
-      <div className="search-top"><b>{t("搜索对话记录")}</b><button className="ghost" onClick={onClose}><X size={16} /></button></div>
+      <div className="search-top"><b>{t("搜索对话记录")}</b><button className="ghost" {...btnPress(onClose)}><X size={16} /></button></div>
       <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("搜索提问、回复、工具调用…")} />
       <div className="search-filters">
         <select value={scope} onChange={(e) => setScope(e.target.value)} title={t("限定会话")}>
@@ -56,13 +57,13 @@ export function SearchPanel({ onClose }: { onClose: () => void }) {
         </select>
       </div>
       <div className="search-results">{query.trim() && !results.length && <div className="muted">{t("没有找到匹配记录")}</div>}
-        {results.map((r, i) => <button key={`${r.sessionId}-${i}`} className="search-result" onClick={() => {
+        {results.map((r, i) => <button key={`${r.sessionId}-${i}`} className="search-result" {...btnPress(() => {
           if (!state.sessions[r.sessionId]) reopenSession(r.sessionId); else dispatch({ type: "activate", id: r.sessionId });
           // 光切会话不够,还得滚到那条消息:Chat 接住这个事件,按 ts 定位并高亮(会话还在回放历史时它会重试)
           const ts = r.ts ? +new Date(r.ts) : 0;
           if (ts) window.dispatchEvent(new CustomEvent("cc-focus-msg", { detail: { id: r.sessionId, ts } }));
           onClose();
-        }}>
+        })}>
           <span className="search-kind">{r.kind === "user" ? t("你") : r.kind === "agent" ? (state.sessions[r.sessionId]?.info.model ? brandName(state.sessions[r.sessionId].info.model!) : t("Agent")) : t("工具")}</span>
           <b>{r.title}</b>
           <span className="search-when">{fmtWhen(r.ts)}</span>

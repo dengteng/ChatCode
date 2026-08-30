@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
 import { Button } from "./ui/button";
+import { btnPress } from "../lib/utils";
 
 // 把一个尚未纳入 git 的本地目录,关联到一个"已经存在"的远程仓库(暂不支持在这里新建远程仓库)。
 // 只做映射,不改动工作区文件:调用方拿到 URL 后跑 git init + git remote add origin + git fetch。
@@ -26,8 +27,8 @@ export function GitMapDialog({ onSubmit, onCancel }: { onSubmit: (url: string) =
           value={url} onChange={(e) => setUrl(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); done(); } }} />
         <DialogFooter>
-          <Button variant="ghost" onClick={onCancel}>{t("取消")}</Button>
-          <Button disabled={!valid} onClick={done}>{t("关联")}</Button>
+          <Button variant="ghost" {...btnPress(onCancel)}>{t("取消")}</Button>
+          <Button disabled={!valid} {...btnPress(done)}>{t("关联")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

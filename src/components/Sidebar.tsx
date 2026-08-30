@@ -6,6 +6,7 @@ import { LoaderCircle, CircleCheck, CircleAlert, Circle, Plus, Search, Settings 
 import { useStore } from "../store";
 import type { VersionCheck } from "../version";
 import { onEdgeGlow } from "../lib/edgeGlow";
+import { btnPress } from "../lib/utils";
 import { ModelAvatar } from "./Avatar";
 import { replayBrandIntro } from "./BrandIntro";
 import type { IndexEntry, Session } from "../types";
@@ -120,11 +121,19 @@ export function Sidebar({ onSearch, onOpenSettings, update, onShowUpdate }:
     if (!menu) return;
     const close = () => { setMenu(null); setSubmenuId(null); };
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
-    window.addEventListener("click", close);
+    // 听 mousedown 而不是 click:菜单项本身已经是按下即执行(见 menuItem),关闭也得跟上同一拍 ——
+    // 听 click 的话点菜单外面要等到 mouseup 才消失,而下层(会话行也是 mousedown 激活)早就响应完了,
+    // 菜单会明显地"慢一步才消失"。菜单自己那块由容器的 onMouseDown 拦掉,点空白处不会误关。
+    window.addEventListener("mousedown", close);
     window.addEventListener("keydown", onKey);
-    return () => { window.removeEventListener("click", close); window.removeEventListener("keydown", onKey); };
+    return () => { window.removeEventListener("mousedown", close); window.removeEventListener("keydown", onKey); };
   }, [menu]);
 
+  // 右键菜单项。走 btnPress 是为了按下即执行 —— click 在 WKWebView 里会被吞掉第一次(见 lib/utils),
+  // 菜单里表现就是"点一下没反应,再点才行"。按下即执行也正是原生右键菜单的行为。
+  // 每项自己 setMenu(null),不靠 window 那个 click 兜底(容器的 stopPropagation 本来也挡着它)。
+  // role/tabIndex 得自己补:这些是 div 不是 button,不给 tabIndex 就聚不了焦,btnPress 的键盘分支收不到事件。
+  const menuItem = (fn: () => void) => ({ role: "menuitem", tabIndex: 0, ...btnPress(fn) });
   const startRename = (e: IndexEntry) => { setEditId(e.id); setMenu(null); };
   const commitRename = () => {
     if (skipCommit.current) { skipCommit.current = false; setEditId(null); return; }
@@ -170,7 +179,7 @@ export function Sidebar({ onSearch, onOpenSettings, update, onShowUpdate }:
 
 
   // 关闭一律先弹窗确认(删历史不可撤销)。有没有活跃进程只改弹窗里给几个选项,不改这条路径。
-  const onClose = (ev: React.MouseEvent, e: IndexEntry) => { ev.stopPropagation(); setKillPrompt({ e, procs: procCount(e.id) }); };
+  // 调用点直接写在行内的 × 上(btnPress 自带 stopPropagation,不会连带把会话切过去)。
   const procCount = (id: string) => {
     const rt = state.git[id]?.runtime;
     return (rt?.processes.length || 0) + (rt?.ports.length || 0);
@@ -267,7 +276,7 @@ export function Sidebar({ onSearch, onOpenSettings, update, onShowUpdate }:
           <div className="session-cwd">{lastPreview(e) || e.cwd.replace(/^\/Users\/[^/]+/, "~")}</div>
         </div>
         <div className="session-actions">
-          <button className="ghost close" title={t("关闭会话")} onClick={(ev) => onClose(ev, e)}><X size={14} /></button>
+          <button className="ghost close" title={t("关闭会话")} {...btnPress(() => setKillPrompt({ e, procs: procCount(e.id) }))}><X size={14} /></button>
         </div>
       </div>
     );
@@ -288,10 +297,10 @@ export function Sidebar({ onSearch, onOpenSettings, update, onShowUpdate }:
         </div>
         {/* 搜索框与新建按钮并排:搜索框 flex 伸缩,新建按钮定宽 —— 拖动侧栏只有搜索框变 */}
         <div className="search-row">
-          <button className="sidebar-search" onClick={onSearch}><span className="search-l"><Search size={14} /> {t("搜索")}</span> <kbd><span className="kbd-cmd">⌘</span>K</kbd></button>
-          <button className="new-session new-group" onClick={() => createGroup(t("新分组"))} title={t("新建分组")} aria-label={t("新建分组")}><FolderPlus size={16} /></button>
+          <button className="sidebar-search" {...btnPress(onSearch)}><span className="search-l"><Search size={14} /> {t("搜索")}</span> <kbd><span className="kbd-cmd">⌘</span>K</kbd></button>
+          <button className="new-session new-group" {...btnPress(() => createGroup(t("新分组")))} title={t("新建分组")} aria-label={t("新建分组")}><FolderPlus size={16} /></button>
           {/* 只有这个入口重播 logo 进场:删完最后一个会话之类也会落到空态,那种不算「开新头」 */}
-          <button className="new-session" onClick={() => { replayBrandIntro(); dispatch({ type: "go_home" }); }} title={t("新建会话")} aria-label={t("新建会话")}><Plus size={16} /></button>
+          <button className="new-session" {...btnPress(() => { replayBrandIntro(); dispatch({ type: "go_home" }); })} title={t("新建会话")} aria-label={t("新建会话")}><Plus size={16} /></button>
         </div>
       </div>
       {/* 列表本身也带一份:.sidebar 那份只在直接命中它时生效,而列表 flex:1 撑满,
@@ -329,7 +338,7 @@ export function Sidebar({ onSearch, onOpenSettings, update, onShowUpdate }:
                         if ((ev.target as HTMLElement).closest(".group-actions, .group-rename")) return;
                         toggleCollapse(g.id);
                       }}>
-                      <button className="group-caret" onClick={(ev) => { ev.stopPropagation(); toggleCollapse(g.id); }} title={isCol ? t("展开") : t("折叠")}>
+                      <button className="group-caret" {...btnPress(() => toggleCollapse(g.id))} title={isCol ? t("展开") : t("折叠")}>
                         {isCol ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
                       </button>
                       {editGroupId === g.id ? (
@@ -348,7 +357,7 @@ export function Sidebar({ onSearch, onOpenSettings, update, onShowUpdate }:
                         </span>
                       )}
                       <span className="group-actions">
-                        <button className="ghost group-del" title={t("删除分组(会话回到未分组)")} onClick={(ev) => { ev.stopPropagation(); deleteGroup(g.id); }}><Trash2 size={13} /></button>
+                        <button className="ghost group-del" title={t("删除分组(会话回到未分组)")} {...btnPress(() => deleteGroup(g.id))}><Trash2 size={13} /></button>
                       </span>
                     </div>
                     {!isCol && (
@@ -407,27 +416,27 @@ export function Sidebar({ onSearch, onOpenSettings, update, onShowUpdate }:
         const e = state.index.find((x) => x.id === menu.id);
         if (!e) return null;
         return (
-          <div className="ctx-menu" style={{ left: menu.x, top: menu.y }} onClick={(ev) => ev.stopPropagation()}>
-            <div className="ctx-item" onClick={() => startRename(e)}>{t("重命名")}</div>
-            {e.sdkSessionId && <div className="ctx-item" onClick={() => { setMenu(null); createSession(e.cwd, e.sdkSessionId, t("续·{{title}}", { title: e.title }), e.id); }}>{t("开启子会话")}</div>}
+          <div className="ctx-menu" role="menu" style={{ left: menu.x, top: menu.y }} onMouseDown={(ev) => ev.stopPropagation()}>
+            <div className="ctx-item" {...menuItem(() => startRename(e))}>{t("重命名")}</div>
+            {e.sdkSessionId && <div className="ctx-item" {...menuItem(() => { setMenu(null); createSession(e.cwd, e.sdkSessionId, t("续·{{title}}", { title: e.title }), e.id); })}>{t("开启子会话")}</div>}
             {/* 移动到分组:非拖拽的备选路径,后台会话也能归类 */}
             {!e.inheritFrom && (
               <div className="ctx-item has-sub" onMouseEnter={() => setSubmenuId(e.id)} onMouseLeave={() => setSubmenuId(null)}>
                 {t("移动到分组")} <ChevronRight size={13} />
                 {submenuId === e.id && (
-                  <div className="ctx-submenu">
-                    <div className="ctx-item" onClick={() => { setMenu(null); moveSession(e.id, null, null); }}>{t("移出分组")}</div>
+                  <div className="ctx-submenu" role="menu">
+                    <div className="ctx-item" {...menuItem(() => { setMenu(null); moveSession(e.id, null, null); })}>{t("移出分组")}</div>
                     {state.groups.length > 0 && <div className="ctx-sep" />}
                     {state.groups.length === 0 && <div className="ctx-item muted-item">{t("先用顶部 📁 新建分组")}</div>}
                     {state.groups.map((g) => (
                       <div key={g.id} className={`ctx-item ${rootGroup(e) === g.id ? "checked" : ""}`}
-                        onClick={() => { setMenu(null); moveSession(e.id, g.id, null); }}>{g.name}</div>
+                        {...menuItem(() => { setMenu(null); moveSession(e.id, g.id, null); })}>{g.name}</div>
                     ))}
                   </div>
                 )}
               </div>
             )}
-            <div className="ctx-item danger" onClick={() => { setMenu(null); setKillPrompt({ e, procs: procCount(e.id) }); }}>{t("关闭会话…")}</div>
+            <div className="ctx-item danger" {...menuItem(() => { setMenu(null); setKillPrompt({ e, procs: procCount(e.id) }); })}>{t("关闭会话…")}</div>
           </div>
         );
       })()}
@@ -455,12 +464,12 @@ export function Sidebar({ onSearch, onOpenSettings, update, onShowUpdate }:
                 <div className="workspace-recent-list">
                   {recentDirs.map((d) => (
                     <button key={d} type="button" className="recent-chip" title={d}
-                      onClick={() => setCwd(d)}>{d.split("/").pop() || d}</button>
+                      {...btnPress(() => setCwd(d))}>{d.split("/").pop() || d}</button>
                   ))}
                 </div>
               </div>
             )}
-            <div className="workspace-actions"><button onClick={() => setWorkspaceOpen(false)}>{t("取消")}</button><button className="primary" disabled={!casual && !cwd.trim()} onClick={createWorkspaceSession}>{t("开始会话")}</button></div>
+            <div className="workspace-actions"><button {...btnPress(() => setWorkspaceOpen(false))}>{t("取消")}</button><button className="primary" disabled={!casual && !cwd.trim()} {...btnPress(createWorkspaceSession)}>{t("开始会话")}</button></div>
           </div>
         </div>, document.body)}
       {killPrompt && createPortal(
@@ -473,10 +482,10 @@ export function Sidebar({ onSearch, onOpenSettings, update, onShowUpdate }:
               : t("关闭后该会话的历史将被删除，且无法恢复。")}</p>
             <div className="kill-dialog-ops">
               {killPrompt.procs > 0 ? <>
-                <button className="kill-yes" onClick={() => doClose(killPrompt.e, true)}>{t("结束进程并关闭")}</button>
-                <button onClick={() => doClose(killPrompt.e, false)}>{t("保留进程，仅关闭")}</button>
-              </> : <button className="kill-yes" onClick={() => doClose(killPrompt.e, false)}>{t("确认关闭")}</button>}
-              <button className="ghost" onClick={() => setKillPrompt(null)}>{t("取消")}</button>
+                <button className="kill-yes" {...btnPress(() => doClose(killPrompt.e, true))}>{t("结束进程并关闭")}</button>
+                <button {...btnPress(() => doClose(killPrompt.e, false))}>{t("保留进程，仅关闭")}</button>
+              </> : <button className="kill-yes" {...btnPress(() => doClose(killPrompt.e, false))}>{t("确认关闭")}</button>}
+              <button className="ghost" {...btnPress(() => setKillPrompt(null))}>{t("取消")}</button>
             </div>
           </div>
         </div>, document.body)}

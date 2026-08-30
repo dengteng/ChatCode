@@ -7,6 +7,7 @@ import { revealPath } from "../native";
 import { scanMemories, type MemoryEntry, type MemoryScan, type MemoryType } from "../memory";
 import { openEditorWindow } from "../popout";
 import { useTranslation } from "react-i18next";
+import { btnPress } from "../lib/utils";
 
 const TYPE_LABEL: Record<MemoryType, string> = { user: "用户", feedback: "偏好", project: "项目", reference: "参考", other: "其它" };
 const TYPE_ORDER: MemoryType[] = ["user", "feedback", "project", "reference", "other"];
@@ -59,7 +60,7 @@ export function MemoryTab({ cwd, highlight }: { cwd: string; highlight?: string 
     <div className="info-scroll mem-tab" ref={listRef}>
       <div className="mem-head">
         <div className="mem-head-l"><Brain size={15} /> <b>{t("本项目记忆")}</b> <span className="muted">{t("共 {{num}} 条", { num: total })}</span></div>
-        <button className="mem-refresh" title={t("重新扫描")} onClick={load}><RefreshCw size={13} /></button>
+        <button className="mem-refresh" title={t("重新扫描")} {...btnPress(load)}><RefreshCw size={13} /></button>
       </div>
 
       {total === 0 && <div className="muted mem-empty">{t("这个项目还没有记忆。agent 在对话里记下的事实会出现在这里。")}</div>}
@@ -100,7 +101,7 @@ export function MemoryTab({ cwd, highlight }: { cwd: string; highlight?: string 
               </div>
             </div>
           ))}
-          <button className="mem-note-edit" onClick={() => openEditorWindow(`${scan.dir}/MEMORY.md`, "MEMORY.md")}><Pencil size={12} /> {t("编辑 MEMORY.md 索引")}</button>
+          <button className="mem-note-edit" {...btnPress(() => openEditorWindow(`/MEMORY.md`, "MEMORY.md"))}><Pencil size={12} /> {t("编辑 MEMORY.md 索引")}</button>
         </section>
       )}
     </div>
@@ -134,8 +135,8 @@ function MemoryCard({ m, expanded, onToggle }: { m: MemoryEntry; expanded: boole
       )}
       {/* 折叠时也留着:文件名和两个操作是这条记忆的身份,不该藏在展开里 */}
       <div className="mem-card-actions">
-        <button onClick={() => openEditorWindow(m.path, m.file)}><Pencil size={12} /> {t("编辑")}</button>
-        <button onClick={() => revealPath(m.path)}><FolderOpen size={12} /> {t("打开目录")}</button>
+        <button {...btnPress(() => openEditorWindow(m.path, m.file))}><Pencil size={12} /> {t("编辑")}</button>
+        <button {...btnPress(() => revealPath(m.path))}><FolderOpen size={12} /> {t("打开目录")}</button>
       </div>
       {/* 文件名自己一行(不再挤在按钮右边被截成半截),交互和「文件」tab 里的文件行一致:
           左键打开、右键出「打开目录」 */}

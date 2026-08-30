@@ -178,12 +178,13 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
   const menuBody = () => {
     if (!menu) return null;
     const { ref, remote } = menu;
-    // 一律 onMouseDown 而非 onClick:WKWebView 里输入框(contenteditable)聚焦时,落在别处的第一次
+    // 一律 btnPress(按下即执行)而非 onClick:WKWebView 里输入框(contenteditable)聚焦时,落在别处的第一次
     // 点击只用来挪光标/切焦点,不派发 click —— 表现就是"菜单里的操作要点两次才生效"。
     // 按下即执行也正是原生菜单的行为。(Composer 的 chip 早前踩过同一个坑)
-    const item = (label: string, onMouseDown: () => void) => <button className="bmenu-item" onMouseDown={onMouseDown}>{label}</button>;
+    // 从手写的 onMouseDown 收进 btnPress,顺带补上键盘 Enter/Space —— 这些是真 <button>,能聚焦。
+    const item = (label: string, run: () => void) => <button className="bmenu-item" role="menuitem" {...btnPress(run)}>{label}</button>;
     const dItem = (_key: string, label: string, cmd: string) =>
-      <button className="bmenu-item danger" onMouseDown={() => danger(label, cmd)}>{label}</button>;
+      <button className="bmenu-item danger" role="menuitem" {...btnPress(() => danger(label, cmd))}>{label}</button>;
     // 输入类操作(改名/新建/设上游)统一走居中弹窗,不再挤在点击位置的小菜单里
     const openPrompt = (kind: "rename" | "newbranch" | "upstream") =>
       { setPrompt({ kind, ref, val: kind === "rename" ? ref : "", target: kind === "newbranch" ? "local" : undefined }); setMenu(null); };
@@ -301,7 +302,7 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
 
           {/* ② 竖脊:聚焦的本地分支 → 扇出到每个远端 → 落到下面的仓库 tab(同时是拓扑的切换器) */}
           <section className="sync-zone">
-            {compareFrom && <div className="branches-pick-hint">{t("选择要与")} <b>{compareFrom}</b> {t("对比的另一个分支节点…")} <button className="ghost" onClick={() => setCompareFrom(null)}><X size={12} /> {t("取消")}</button></div>}
+            {compareFrom && <div className="branches-pick-hint">{t("选择要与")} <b>{compareFrom}</b> {t("对比的另一个分支节点…")} <button className="ghost" {...btnPress(() => setCompareFrom(null))}><X size={12} /> {t("取消")}</button></div>}
             <BranchSpine local={git.local} remote={git.remote} remoteSha={git.remoteSha} remotes={git.remotes}
               current={current} focus={focusName} repo={graphRepo} dirty={dirty} picking={compareFrom}
               onChip={onChip} onFocus={setFocus} onRepo={setRepo} onRun={run}
@@ -333,7 +334,7 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
       {menu && createPortal(
         <>
           <div className="bmenu-backdrop" onMouseDown={closeMenu} onContextMenu={(e) => { e.preventDefault(); closeMenu(); }} />
-          <div className="bmenu" style={{ left: Math.min(menu.x, window.innerWidth - 220), top: Math.min(menu.y, window.innerHeight - 320) }} onMouseDown={(e) => e.stopPropagation()}>
+          <div className="bmenu" role="menu" style={{ left: Math.min(menu.x, window.innerWidth - 220), top: Math.min(menu.y, window.innerHeight - 320) }} onMouseDown={(e) => e.stopPropagation()}>
             {menuBody()}
           </div>
         </>, document.body)}
@@ -375,8 +376,8 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
               </select>
             </>}
             <div className="commit-modal-actions">
-              <button type="button" onClick={() => setPrompt(null)}>{t("取消")}</button>
-              <button type="button" className="hi" disabled={!prompt.val.trim() || (prompt.kind === "remoteadd" && !(prompt.val2 || "").trim())} onClick={submitPrompt}>{t("确定")}</button>
+              <button type="button" {...btnPress(() => setPrompt(null))}>{t("取消")}</button>
+              <button type="button" className="hi" disabled={!prompt.val.trim() || (prompt.kind === "remoteadd" && !(prompt.val2 || "").trim())} {...btnPress(submitPrompt)}>{t("确定")}</button>
             </div>
           </div>
         </div>, document.body)}
@@ -385,7 +386,7 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
       {wtFile && createPortal(
         <div className="wtdiff-shade" onClick={() => setWtFile(null)}>
           <div className="wtdiff-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="wtdiff-head"><b title={wtFile}>{wtFile}</b><button className="ghost" title={t("关闭")} onClick={() => setWtFile(null)}><X size={15} /></button></div>
+            <div className="wtdiff-head"><b title={wtFile}>{wtFile}</b><button className="ghost" title={t("关闭")} {...btnPress(() => setWtFile(null))}><X size={15} /></button></div>
             <div className="wtdiff-body">
               {!wtReady ? <div className="muted branches-empty">{t("加载中…")}</div>
                 : fileDiff!.error ? <div className="branches-diff-err">{t("无法读取:{{error}}", { error: fileDiff!.error })}</div>

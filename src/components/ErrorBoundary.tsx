@@ -3,6 +3,7 @@
 // 这里把错误和堆栈显示出来,并给一个"重新加载"按钮,让用户至少能自己恢复。
 import { Component, type ReactNode } from "react";
 import i18n from "../i18n";
+import { btnPress } from "../lib/utils";
 
 interface Props { children: ReactNode }
 interface State { error: Error | null; stack: string }
@@ -32,8 +33,8 @@ export class ErrorBoundary extends Component<Props, State> {
         </p>
         <pre className="crash-detail">{text}</pre>
         <div className="crash-acts">
-          <button className="primary" onClick={() => location.reload()}>{i18n.t("重新加载")}</button>
-          <button onClick={() => navigator.clipboard?.writeText(text).catch(() => {})}>{i18n.t("复制错误详情")}</button>
+          <button className="primary" {...btnPress(() => location.reload())}>{i18n.t("重新加载")}</button>
+          <button {...btnPress(() => { navigator.clipboard?.writeText(text).catch(() => {}); })}>{i18n.t("复制错误详情")}</button>
         </div>
       </div>
     );

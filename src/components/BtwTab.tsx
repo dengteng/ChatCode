@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import { LoaderCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useApi } from "../store";
+import { btnPress } from "../lib/utils";
 
 type Turn = { q: string; a?: string; err?: string };
 
@@ -94,7 +95,7 @@ export function BtwTab({ sessionId }: { sessionId: string }) {
         rows={2}
         spellCheck={false}
       />
-      <button className="hi" disabled={!text.trim() || busy} onClick={ask}>{busy ? <LoaderCircle size={12} className="ico-spin" /> : t("问")}</button>
+      <button className="hi" disabled={!text.trim() || busy} {...btnPress(ask)}>{busy ? <LoaderCircle size={12} className="ico-spin" /> : t("问")}</button>
     </div>
   </div>;
 }

@@ -4,6 +4,7 @@ import { Check, X, ExternalLink } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "../native";
+import { btnPress } from "../lib/utils";
 
 type Dep = { name: string; ok: boolean; path: string };
 
@@ -120,7 +121,7 @@ export function DepGate({ children }: { children: React.ReactNode }) {
                         源默认跟 probe_registry 的结果走,国内连不上官方源时自动是镜像。 */}
                     {d.name === "claude" && (
                       <div className="depgate-install">
-                        <button className="depgate-go" disabled={installing} onClick={install}>
+                        <button className="depgate-go" disabled={installing} {...btnPress(install)}>
                           {installing ? t("安装中…") : t("一键安装")}
                         </button>
                         <select value={registry} onChange={(e) => setRegistry(e.target.value)} disabled={installing}>
@@ -140,20 +141,20 @@ export function DepGate({ children }: { children: React.ReactNode }) {
                       </div>
                     )}
                     {g.cmd && <div className="depgate-cmd"><code>{g.cmd}</code>
-                      <button onClick={() => navigator.clipboard?.writeText(g.cmd!)}>{t("复制")}</button></div>}
+                      <button {...btnPress(() => { navigator.clipboard?.writeText(g.cmd!); })}>{t("复制")}</button></div>}
                     {/* 国内直连 npm 官方源常年慢/断,给一条镜像命令,别让人卡在第一步 */}
                     {g.cmdCN && <div className="depgate-cmd"><code>{g.cmdCN}</code>
-                      <button onClick={() => navigator.clipboard?.writeText(g.cmdCN!)}>{t("复制(国内镜像)")}</button></div>}
-                    <button className="link" onClick={() => openUrl(g.url)}>{t("官方安装指南")} <ExternalLink size={12} /></button>
+                      <button {...btnPress(() => { navigator.clipboard?.writeText(g.cmdCN!); })}>{t("复制(国内镜像)")}</button></div>}
+                    <button className="link" {...btnPress(() => openUrl(g.url))}>{t("官方安装指南")} <ExternalLink size={12} /></button>
                     {/* 官网下载在国内时快时慢,给一条镜像下载页兜底 */}
-                    {g.urlCN && <button className="link" onClick={() => openUrl(g.urlCN!)}>{t("国内镜像下载")} <ExternalLink size={12} /></button>}
+                    {g.urlCN && <button className="link" {...btnPress(() => openUrl(g.urlCN!))}>{t("国内镜像下载")} <ExternalLink size={12} /></button>}
                   </div>
                 )}
               </li>
             );
           })}
         </ul>
-        <button className="depgate-recheck" disabled={checking} onClick={check}>
+        <button className="depgate-recheck" disabled={checking} {...btnPress(check)}>
           {checking ? t("检测中…") : t("重新检测")}
         </button>
       </div>

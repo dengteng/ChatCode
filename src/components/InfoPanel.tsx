@@ -16,6 +16,7 @@ import { openEditorWindow } from "../popout";
 import { onEdgeGlow } from "../lib/edgeGlow";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { useTranslation } from "react-i18next";
+import { btnPress } from "../lib/utils";
 
 type Tab = "project" | "branches" | "files" | "memory" | "btw";
 
@@ -97,27 +98,27 @@ export function InfoPanel({ session, initialTab, memoryTarget, onClose }: { sess
     <div className="info-drawer-backdrop" onMouseDown={onClose} />
     <aside className="info-panel edge-glow" onMouseMove={onEdgeGlow}>
     <div className="info-head info-tabhead">
-      <button className="ghost info-close" onClick={onClose} aria-label={t("关闭详情面板")}><X size={16} /></button>
+      <button className="ghost info-close" {...btnPress(onClose)} aria-label={t("关闭详情面板")}><X size={16} /></button>
       <div className="info-tabs" role="tablist">
         {/* onMouseDown 而非 onClick:首次点击常先 blur 聚焦的输入框、触发重排,click(mouseup)落在移动后的位置丢失 → 要点两次(Settings 的 tab 同此处理) */}
-        <button className={tab === "branches" ? "selected" : ""} onMouseDown={(e) => { if (e.button !== 0) return; e.preventDefault(); setTab("branches"); }}>{t("分支")}</button>
-        <button className={tab === "files" ? "selected" : ""} onMouseDown={(e) => { if (e.button !== 0) return; e.preventDefault(); setTab("files"); }}>{t("文件")}</button>
-        {!session.casual && <button className={tab === "memory" ? "selected" : ""} onMouseDown={(e) => { if (e.button !== 0) return; e.preventDefault(); setTab("memory"); }}>{t("记忆")}</button>}
-        <button className={tab === "project" ? "selected" : ""} onMouseDown={(e) => { if (e.button !== 0) return; e.preventDefault(); setTab("project"); }}>{t("活动")}</button>
-        <button className={`tab-btw${tab === "btw" ? " selected" : ""}`} onMouseDown={(e) => { if (e.button !== 0) return; e.preventDefault(); setTab("btw"); }}>{t("btw顺便问问")}</button>
+        <button className={tab === "branches" ? "selected" : ""} {...btnPress(() => setTab("branches"))}>{t("分支")}</button>
+        <button className={tab === "files" ? "selected" : ""} {...btnPress(() => setTab("files"))}>{t("文件")}</button>
+        {!session.casual && <button className={tab === "memory" ? "selected" : ""} {...btnPress(() => setTab("memory"))}>{t("记忆")}</button>}
+        <button className={tab === "project" ? "selected" : ""} {...btnPress(() => setTab("project"))}>{t("活动")}</button>
+        <button className={`tab-btw${tab === "btw" ? " selected" : ""}`} {...btnPress(() => setTab("btw"))}>{t("btw顺便问问")}</button>
       </div>
     </div>
     {tab === "btw" && <BtwTab sessionId={session.id} />}
     {tab === "project" && <div className="info-scroll">
       {/* 工作目录一栏去掉:聊天页顶栏常驻显示同一个路径,抽屉里再列一遍是重复。首页面板那份留着 —— 那里没有顶栏。 */}
       <InfoSection title={t("会话进程（{{num}}）", { num: procs.length })}
-        action={procs.length > 0 && <button className="proc-stop stop-all" title={t("停止列出的全部进程")} onClick={() => setConfirmKill("proc")}><Square size={11} /> {t("停止全部")}</button>}>
-        {procs.length ? procs.map((process) => <div className="process-row" key={process.pid}><span title={process.name}>{process.name}</span><span className="muted">{process.elapsed}</span><button className="proc-stop" title={process.task ? t("停止该后台任务") : t("结束进程")} onClick={() => Promise.resolve(stopProc(process)).catch(() => {}).finally(() => refreshRuntime())}><Square size={11} /> {t("停止")}</button></div>) : <div className="muted">{t("未检测到属于此工作目录的活动进程")}</div>}
+        action={procs.length > 0 && <button className="proc-stop stop-all" title={t("停止列出的全部进程")} {...btnPress(() => setConfirmKill("proc"))}><Square size={11} /> {t("停止全部")}</button>}>
+        {procs.length ? procs.map((process) => <div className="process-row" key={process.pid}><span title={process.name}>{process.name}</span><span className="muted">{process.elapsed}</span><button className="proc-stop" title={process.task ? t("停止该后台任务") : t("结束进程")} {...btnPress(() => { Promise.resolve(stopProc(process)).catch(() => {}).finally(() => refreshRuntime()); })}><Square size={11} /> {t("停止")}</button></div>) : <div className="muted">{t("未检测到属于此工作目录的活动进程")}</div>}
         <StartProc cwd={session.termCwd || session.cwd} onDone={refreshRuntime} />
       </InfoSection>
       <InfoSection title={t("监听端口")}
-        action={allPorts.length > 0 && <button className="proc-stop stop-all" title={t("停止占用列出端口的全部进程")} onClick={() => setConfirmKill("port")}><Square size={11} /> {t("停止全部")}</button>}>
-        {git?.runtime?.ports.map((port) => <div className="process-row port-row" key={`${port.process}-${port.port}`}><span title={t("用浏览器打开 http://localhost:{{port}}", { port: port.port })} onClick={() => openUrl(`http://localhost:${port.port}`)}>{port.process}</span><code onClick={() => openUrl(`http://localhost:${port.port}`)}>:{port.port}</code><button className="proc-stop" title={t("结束占用该端口的进程")} onClick={() => invoke("kill_port", { port: String(port.port) }).catch(() => {}).finally(() => refreshRuntime())}><Square size={11} /> {t("停止")}</button></div>)}
+        action={allPorts.length > 0 && <button className="proc-stop stop-all" title={t("停止占用列出端口的全部进程")} {...btnPress(() => setConfirmKill("port"))}><Square size={11} /> {t("停止全部")}</button>}>
+        {git?.runtime?.ports.map((port) => <div className="process-row port-row" key={`${port.process}-${port.port}`}><span title={t("用浏览器打开 http://localhost:{{port}}", { port: port.port })} onClick={() => openUrl(`http://localhost:${port.port}`)}>{port.process}</span><code onClick={() => openUrl(`http://localhost:${port.port}`)}>:{port.port}</code><button className="proc-stop" title={t("结束占用该端口的进程")} {...btnPress(() => { invoke("kill_port", { port: String(port.port) }).catch(() => {}).finally(() => refreshRuntime()); })}><Square size={11} /> {t("停止")}</button></div>)}
         {/* cwd 抓不到、但按端口反查到的:标出来源(本会话启动 / 仅正文提及) */}
         {extraPorts.map((p) => {
           const started = startedPorts.has(p.port);
@@ -125,7 +126,7 @@ export function InfoPanel({ session, initialTab, memoryTarget, onClose }: { sess
             <span title={t("用浏览器打开 http://localhost:{{port}}", { port: p.port })} onClick={() => openUrl(`http://localhost:${p.port}`)}>{p.process}</span>
             <code onClick={() => openUrl(`http://localhost:${p.port}`)}>:{p.port}</code>
             <span className={`port-src ${started ? "started" : "mentioned"}`} title={started ? t("本会话运行的命令(如 ssh -L)开启的端口") : t("仅在对话正文/输出里出现过的端口,未必由本会话启动")}>{started ? t("本会话启动") : t("正文提及")}</span>
-            <button className="proc-stop" title={t("结束占用该端口的进程")} onClick={() => invoke("kill_port", { port: String(p.port) }).catch(() => {}).finally(() => refreshRuntime())}><Square size={11} /> {t("停止")}</button>
+            <button className="proc-stop" title={t("结束占用该端口的进程")} {...btnPress(() => { invoke("kill_port", { port: String(p.port) }).catch(() => {}).finally(() => refreshRuntime()); })}><Square size={11} /> {t("停止")}</button>
           </div>;
         })}
         {!git?.runtime?.ports.length && extraPorts.length === 0 && <div className="muted">{t("暂无本会话监听端口")}</div>}
@@ -165,16 +166,16 @@ export function HomeInfoPanel({ cwd, onClose }: { cwd: string; onClose: () => vo
     <div className="info-drawer-backdrop" onMouseDown={onClose} />
     <aside className="info-panel edge-glow" onMouseMove={onEdgeGlow}>
       <div className="info-head info-tabhead">
-        <button className="ghost info-close" onClick={onClose} aria-label={t("关闭详情面板")}><X size={16} /></button>
+        <button className="ghost info-close" {...btnPress(onClose)} aria-label={t("关闭详情面板")}><X size={16} /></button>
         <div className="info-tabs" role="tablist">
-          <button className={tab === "branches" ? "selected" : ""} onMouseDown={(e) => { if (e.button !== 0) return; e.preventDefault(); setTab("branches"); }}>{t("分支")}</button>
-          <button className={tab === "files" ? "selected" : ""} onMouseDown={(e) => { if (e.button !== 0) return; e.preventDefault(); setTab("files"); }}>{t("文件")}</button>
-          <button className={tab === "memory" ? "selected" : ""} onMouseDown={(e) => { if (e.button !== 0) return; e.preventDefault(); setTab("memory"); }}>{t("记忆")}</button>
-          <button className={tab === "project" ? "selected" : ""} onMouseDown={(e) => { if (e.button !== 0) return; e.preventDefault(); setTab("project"); }}>{t("活动")}</button>
+          <button className={tab === "branches" ? "selected" : ""} {...btnPress(() => setTab("branches"))}>{t("分支")}</button>
+          <button className={tab === "files" ? "selected" : ""} {...btnPress(() => setTab("files"))}>{t("文件")}</button>
+          <button className={tab === "memory" ? "selected" : ""} {...btnPress(() => setTab("memory"))}>{t("记忆")}</button>
+          <button className={tab === "project" ? "selected" : ""} {...btnPress(() => setTab("project"))}>{t("活动")}</button>
         </div>
       </div>
       {tab === "project" && <div className="info-scroll">
-        <InfoSection title={t("工作目录")}><code className="path-value">{cwd}</code><div className="info-actions"><button onClick={copyPath}>{copied ? t("已复制") : t("复制路径")}</button><button onClick={() => openPath(cwd)}>{t("在 Finder 中打开")}</button></div></InfoSection>
+        <InfoSection title={t("工作目录")}><code className="path-value">{cwd}</code><div className="info-actions"><button {...btnPress(copyPath)}>{copied ? t("已复制") : t("复制路径")}</button><button {...btnPress(() => openPath(cwd))}>{t("在 Finder 中打开")}</button></div></InfoSection>
         <InfoSection title={t("运行时信息")}><div className="muted">{t("建会话后可在聊天页查看进程、监听端口等信息。")}</div></InfoSection>
       </div>}
       {tab === "branches" && <BranchesTab session={fake} onCommit={() => setShowCommit(true)} committing={committing} />}
@@ -232,7 +233,7 @@ export function FilesTab({ root }: { root: string }) {
       <div className="file-search">
         <Search size={13} className="file-search-ico" />
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("搜索文件 / 文件夹…")} spellCheck={false} />
-        {query && <button className="file-search-clear" title={t("清空")} onClick={() => setQuery("")}><X size={13} /></button>}
+        {query && <button className="file-search-clear" title={t("清空")} {...btnPress(() => setQuery(""))}><X size={13} /></button>}
       </div>
       {q ? (
         <div className="file-results">
@@ -257,8 +258,8 @@ export function FilesTab({ root }: { root: string }) {
         <div className="tree"><TreeNode path={root} name={root.split("/").filter(Boolean).pop() || root} isDir depth={0} defaultOpen onOpen={open} onCtx={onCtx} /></div>
       )}
       {menu && createPortal(
-        <div className="tree-ctx-menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()} onContextMenu={(e) => e.preventDefault()}>
-          <button onMouseDown={(e) => { e.preventDefault(); openDir(); }}><FolderOpen size={13} /> {t("打开目录")}</button>
+        <div className="tree-ctx-menu" role="menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()} onContextMenu={(e) => e.preventDefault()}>
+          <button role="menuitem" {...btnPress(openDir)}><FolderOpen size={13} /> {t("打开目录")}</button>
         </div>, document.body)}
     </div>
   );
@@ -302,7 +303,7 @@ function StartProc({ cwd, onDone }: { cwd: string; onDone: () => void }) {
     <div className="proc-start">
       <input value={cmd} placeholder={t("启动命令，如 npm run dev")} onChange={(e) => setCmd(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) start(); }} />
-      <button className="proc-start-btn" disabled={!cmd.trim()} onClick={start}><Play size={11} /> {t("启动")}</button>
+      <button className="proc-start-btn" disabled={!cmd.trim()} {...btnPress(start)}><Play size={11} /> {t("启动")}</button>
     </div>
   );
 }
@@ -330,7 +331,7 @@ export function TurnDrawer({ session, anchor, onClose }: { session: Session; anc
   return <>
     <div className="turn-drawer-backdrop" onMouseDown={onClose} />
     <aside className="turn-drawer edge-glow" onMouseMove={onEdgeGlow}>
-      <div className="info-head"><b>{t("本轮回复详情")} · {running ? t("执行中") : t("已结束")}</b><button className="ghost" onClick={onClose} aria-label={t("关闭详情抽屉")}><X size={16} /></button></div>
+      <div className="info-head"><b>{t("本轮回复详情")} · {running ? t("执行中") : t("已结束")}</b><button className="ghost" {...btnPress(onClose)} aria-label={t("关闭详情抽屉")}><X size={16} /></button></div>
       {(skills.length > 0 || mcps.length > 0) && <div className="drawer-smbar">{t("本轮用到:")}<SkillMcpTags skills={skills} mcps={mcps} /></div>}
       <div className="info-scroll agent-run" ref={scrollRef}>
         {execution.length ? execution.map((item, index) => (
@@ -370,7 +371,7 @@ function ExecutionItem({ item, expanded, onToggle, cwd, onPermission }: { item: 
   if (item.kind === "agent_text") { title = item.streaming ? t("Agent 正在输出") : item.phase === "progress" ? t("执行说明") : t("Agent 回复"); body = item.text || "…"; streaming = !!item.streaming; }
   else if (item.kind === "tool") { title = t("工具 · {{name}}", { name: item.name }) + (item.result !== undefined ? item.isError ? t(" · 失败") : t(" · 完成") : t(" · 运行中")); body = JSON.stringify(item.input, null, 2) + (item.result !== undefined ? `\n\n${typeof item.result === "string" ? item.result : JSON.stringify(item.result, null, 2)}` : ""); streaming = item.result === undefined; }
   else if (item.kind === "terminal") { title = t("终端 · {{command}}", { command: item.command }); body = item.pending ? t("运行中…") : item.output || t("（无输出）"); streaming = !!item.pending; }
-  else if (permission) { title = t("需要授权 · {{toolName}}", { toolName: item.toolName }); body = JSON.stringify(item.input, null, 2); actions = !item.decision ? <div className="info-actions" onClick={(e) => e.stopPropagation()}><button onClick={() => onPermission(item.requestId, "allow")}>{t("允许")}</button><button onClick={() => onPermission(item.requestId, "deny")}>{t("拒绝")}</button></div> : null; }
+  else if (permission) { title = t("需要授权 · {{toolName}}", { toolName: item.toolName }); body = JSON.stringify(item.input, null, 2); actions = !item.decision ? <div className="info-actions" onClick={(e) => e.stopPropagation()}><button {...btnPress(() => onPermission(item.requestId, "allow"))}>{t("允许")}</button><button {...btnPress(() => onPermission(item.requestId, "deny"))}>{t("拒绝")}</button></div> : null; }
   else return null;
   return <ExecutionBlock title={title} body={body} streaming={streaming} expanded={expanded} onToggle={onToggle} actions={actions} permission={permission} />;
 }
@@ -389,7 +390,7 @@ function ExecutionBlock({ title, body, streaming, expanded, onToggle, actions, p
   return (
     <div className={`execution-entry ${permission ? "permission-entry" : ""} ${expanded ? "expanded" : "clamp"} ${streaming ? "streaming" : ""} ${!expanded && overflowing ? "truncated" : ""}`}>
       {/* toggle 热区 = 整个标题横行(展开/折叠都可点)。放在标题行而非整块:展开后点正文能正常选中复制,不误收起 */}
-      <div className={`execution-title ${canToggle ? "clickable" : ""}`} onClick={canToggle ? onToggle : undefined}><span>{title}</span>{canToggle && <button className="block-toggle" onClick={(e) => { e.stopPropagation(); onToggle(); }}>{expanded ? <>{t("收起")} <ChevronUp size={12} /></> : <>{t("展开")} <ChevronDown size={12} /></>}</button>}</div>
+      <div className={`execution-title ${canToggle ? "clickable" : ""}`} onClick={canToggle ? onToggle : undefined}><span>{title}</span>{canToggle && <button className="block-toggle" {...btnPress(onToggle)}>{expanded ? <>{t("收起")} <ChevronUp size={12} /></> : <>{t("展开")} <ChevronDown size={12} /></>}</button>}</div>
       <pre ref={preRef}>{body}</pre>
       {actions}
     </div>

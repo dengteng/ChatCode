@@ -8,6 +8,7 @@ import { onEdgeGlow } from "../lib/edgeGlow";
 import { unwrapSoftBreaks, htmlHasBlocks } from "../lib/unwrap";
 import { HomeInfoPanel } from "./InfoPanel";
 import { useTranslation } from "react-i18next";
+import { btnPress } from "../lib/utils";
 
 interface Img { media_type: string; data: string }
 const ZWSP = "​";
@@ -306,7 +307,7 @@ export function EmptyComposer() {
     <div className="empty-composer">
       {/* 选好项目后右上角出现「项目详情」:未建会话也能先看目录/文件/记忆 */}
       {cwd && (
-        <button className="home-details-btn" title={t("项目详情")} onClick={() => setShowInfo(true)}>
+        <button className="home-details-btn" title={t("项目详情")} {...btnPress(() => setShowInfo(true))}>
           <Info size={14} /> {t("项目详情")}
         </button>
       )}

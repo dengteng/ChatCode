@@ -12,6 +12,7 @@ import { THEMES, type SshHost, type ThemeId, type CustomArt } from "../types";
 import { loadExtensions, loadMarketplace, marketplaceNames, installPlugin, uninstallPlugin, enablePlugin, disablePlugin, addMarketplace, removeMarketplace, installSkillGit, setSkillOn, removeSkill, setMcpOn, removeMcp, loadExtNotes, saveExtNote, SEED_MARKETPLACES, type Exts, type MarketPlugin } from "../extensions";
 import { EXT_NOTE_ZH } from "../extNotesZh";
 import { openEditorWindow } from "../popout";
+import { btnPress } from "../lib/utils";
 import { copyText } from "./Chat";
 import { modelLogo } from "./Avatar";
 // 「个人资料」页单独成文件:开源版与内部版这一页装的东西不同,差异全收在那里,本文件两版逐字相同
@@ -46,13 +47,13 @@ export function Settings({ onClose, initialTab, theme, onPickTheme, customBg, cu
       <div className="settings-panel" onMouseDown={(e) => e.stopPropagation()}>
         <div className="settings-head">
           <b>{t("设置")}</b>
-          <button className="ghost" onClick={onClose} aria-label={t("关闭设置")}><X size={16} /></button>
+          <button className="ghost" {...btnPress(onClose)} aria-label={t("关闭设置")}><X size={16} /></button>
         </div>
         <div className="settings-body">
           <nav className="settings-nav">
             {/* 这个 tab 装的是 个人资料 + 账号/登录/同步(SHOW_ACCOUNT 关掉时就只剩头像昵称,名字随之改回「个人资料」) */}
             {([["profile", "个人资料"],["account", "大模型"], ["github", "GitHub连接"], ["ssh", "SSH连接"], ["extensions", "插件/MCP/Skills"], ["appearance", "语言与主题"], ["notify", "通知提醒"], ["about", "关于"]] as [Tab, string][]).map(([k, label]) => (
-              <button key={k} type="button" className={tab === k ? "sel" : ""} onMouseDown={(e) => { e.preventDefault(); setTab(k); }}>{t(label)}</button>
+              <button key={k} type="button" className={tab === k ? "sel" : ""} {...btnPress(() => setTab(k))}>{t(label)}</button>
             ))}
           </nav>
           <div className="settings-content">
@@ -170,8 +171,8 @@ function AppearanceTab({ theme, onPick, customBg, customBlur, customBrightness, 
         {!customBg && <span className="muted">{t("未选择图片")}</span>}
       </div>
       <div className="custom-theme-ops">
-        <button type="button" className="primary" onClick={() => fileRef.current?.click()}>{customBg ? t("更换图片") : t("上传图片")}</button>
-        {customBg && <button type="button" onClick={() => onSetCustomBg("")}>{t("移除")}</button>}
+        <button type="button" className="primary" {...btnPress(() => fileRef.current?.click())}>{customBg ? t("更换图片") : t("上传图片")}</button>
+        {customBg && <button type="button" {...btnPress(() => onSetCustomBg(""))}>{t("移除")}</button>}
       </div>
       <div className="custom-slider-row">
         <label>{t("侧栏模糊")}<span className="muted">{customBlur}px</span></label>
@@ -198,7 +199,7 @@ function AppearanceTab({ theme, onPick, customBg, customBlur, customBrightness, 
       <h4>{t("界面语言")}</h4>
       <div className="lang-row">
         {(["zh", "en", "auto"] as const).map((l) => (
-          <button key={l} type="button" className={`lang-btn${langSel === l ? " sel" : ""}`} onClick={() => changeLang(l)}>
+          <button key={l} type="button" className={`lang-btn${langSel === l ? " sel" : ""}`} {...btnPress(() => changeLang(l))}>
             {l === "zh" ? "中文" : l === "en" ? "English" : t("跟随系统")}
           </button>
         ))}
@@ -279,8 +280,8 @@ function AccountTab() {
         </div>
         <div className="provider-actions">
           {c?.loggedIn
-            ? <button onClick={() => authAction("claude", "logout")}>{t("登出")}</button>
-            : <button className="primary" disabled={!c?.installed} onClick={() => authAction("claude", "login")}>{t("登录")}</button>}
+            ? <button {...btnPress(() => authAction("claude", "logout"))}>{t("登出")}</button>
+            : <button className="primary" disabled={!c?.installed} {...btnPress(() => authAction("claude", "login"))}>{t("登录")}</button>}
         </div>
       </div>
 
@@ -321,9 +322,9 @@ function ProviderRow({ meta, onEdit }: { meta: { id: string; ini: string; cls: s
           {configured && p?.baseUrl ? ` · ${hostOf(p.baseUrl)}` : ""}</div></div></div>
       <div className="provider-status">{configured ? <><Dot ok /> {t("已配置 key")}</> : <><Dot ok={false} /> {t("未配置")}</>}</div>
       <div className="provider-actions">
-        <button className={configured ? "" : "primary"} onClick={() => onEdit("key")}>{configured ? t("更换") : t("配置 key")}</button>
-        <button onClick={() => onEdit("config")}>{t("配置")}</button>
-        {configured && <button onClick={() => setProviderKey(id, "")}>{t("清除")}</button>}
+        <button className={configured ? "" : "primary"} {...btnPress(() => onEdit("key"))}>{configured ? t("更换") : t("配置 key")}</button>
+        <button {...btnPress(() => onEdit("config"))}>{t("配置")}</button>
+        {configured && <button {...btnPress(() => setProviderKey(id, ""))}>{t("清除")}</button>}
       </div>
     </div>
   );
@@ -356,8 +357,8 @@ function ProviderEditPage({ id, mode, onDone }: { id: string; mode: "key" | "con
             onChange={(e) => setKey(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") saveKey(); }} />
           <div className="commit-modal-actions" style={{ marginTop: 12 }}>
-            <button onClick={onDone}>{t("取消")}</button>
-            <button className="hi" disabled={!key.trim()} onClick={saveKey}>{t("保存")}</button>
+            <button {...btnPress(onDone)}>{t("取消")}</button>
+            <button className="hi" disabled={!key.trim()} {...btnPress(saveKey)}>{t("保存")}</button>
           </div>
         </>
       ) : (
@@ -377,9 +378,9 @@ function ProviderEditPage({ id, mode, onDone }: { id: string; mode: "key" | "con
           <div className="provider-config-hint muted">{t("这张表按模型 id 逐条覆盖内置列表,没写到的模型照常自动更新;不想要某个模型,写")} {`{ "model": "模型id", "hidden": true }`}</div>
           {err && <div className="provider-config-err">{err}</div>}
           <div className="commit-modal-actions" style={{ marginTop: 12 }}>
-            <button onClick={resetConfig}>{t("恢复默认")}</button>
-            <button onClick={onDone}>{t("取消")}</button>
-            <button className="hi" onClick={saveConfig}>{t("保存配置")}</button>
+            <button {...btnPress(resetConfig)}>{t("恢复默认")}</button>
+            <button {...btnPress(onDone)}>{t("取消")}</button>
+            <button className="hi" {...btnPress(saveConfig)}>{t("保存配置")}</button>
           </div>
         </>
       )}
@@ -407,8 +408,8 @@ function GithubTab() {
         </div></div>
         <div className="provider-actions">
           {g?.loggedIn
-            ? <button onClick={() => authAction("github", "logout")}>{t("登出")}</button>
-            : <button className="primary" disabled={!g?.installed} onClick={() => authAction("github", "login")}>{t("登录")}</button>}
+            ? <button {...btnPress(() => authAction("github", "logout"))}>{t("登出")}</button>
+            : <button className="primary" disabled={!g?.installed} {...btnPress(() => authAction("github", "login"))}>{t("登录")}</button>}
         </div>
       </div>
       {g?.detail && <pre className="settings-detail">{g.detail}</pre>}
@@ -436,7 +437,7 @@ function SshTab() {
   }
   return (
     <section className="settings-section">
-      <div className="settings-section-head"><h4>{t("SSH 主机预设")}</h4><button className="primary" onClick={() => setEditing({ host: "" })}><Plus size={14} /> {t("新增")}</button></div>
+      <div className="settings-section-head"><h4>{t("SSH 主机预设")}</h4><button className="primary" {...btnPress(() => setEditing({ host: "" }))}><Plus size={14} /> {t("新增")}</button></div>
       {state.sshHosts.length === 0 && !editing && <p className="muted">{t("暂无预设。新增后可在会话里快速复用。")}</p>}
       <div className="ssh-host-list">
         {state.sshHosts.map((h) => {
@@ -449,9 +450,9 @@ function SshTab() {
                 {st && <div className={`ssh-test-result ${st.ok ? "ok" : "fail"}`}>{st.ok ? <><Check size={13} /> {t("连接成功")}</> : <><X size={13} /> {st.detail || t("连接失败")}</>}</div>}
               </div>
               <div className="ssh-host-actions">
-                <button className="ghost" onClick={() => testSshHost(h)} title={t("测试连接")}>{t("测试")}</button>
-                <button className="ghost" onClick={() => setEditing(h)}>{t("编辑")}</button>
-                <button className="ghost danger" onClick={() => h.id && deleteSshHost(h.id)}>{t("删除")}</button>
+                <button className="ghost" {...btnPress(() => testSshHost(h))} title={t("测试连接")}>{t("测试")}</button>
+                <button className="ghost" {...btnPress(() => setEditing(h))}>{t("编辑")}</button>
+                <button className="ghost danger" {...btnPress(() => { if (h.id) deleteSshHost(h.id); })}>{t("删除")}</button>
               </div>
             </div>
           );
@@ -466,15 +467,18 @@ function SshHostForm({ host, onSave, onCancel }: { host: SshHost; onSave: (h: Ss
   const { t } = useTranslation();
   const [f, setF] = useState<SshHost>({ port: "22", ...host });
   const set = (k: keyof SshHost) => (e: React.ChangeEvent<HTMLInputElement>) => setF((s) => ({ ...s, [k]: e.target.value }));
+  // 保存走 requestSubmit() 而不是直接 onSave:host 是 required,得让浏览器先跑校验;
+  // 又不能只留 type="submit" —— submit 靠 click 触发,click 在这儿会被吞掉第一次(见 lib/utils 的 btnPress)。
+  const formRef = useRef<HTMLFormElement>(null);
   return (
-    <form className="ssh-host-form" onSubmit={(e) => { e.preventDefault(); if (f.host.trim()) onSave({ ...f, host: f.host.trim() }); }}>
+    <form ref={formRef} className="ssh-host-form" onSubmit={(e) => { e.preventDefault(); if (f.host.trim()) onSave({ ...f, host: f.host.trim() }); }}>
       {/* 除私钥路径外都不给 placeholder:灰字示例长得像已填好的值,分不清哪些是真填了的 */}
       <label>{t("名称(可选)")}<input value={f.label || ""} onChange={set("label")} /></label>
       <label>{t("主机 / IP")}<input autoFocus required value={f.host} onChange={set("host")} /></label>
       <label>{t("ssh.username")}<input value={f.username || ""} onChange={set("username")} /></label>
       <label>{t("端口")}<input value={f.port || ""} onChange={set("port")} inputMode="numeric" /></label>
       <label>{t("私钥路径(可选)")}<input value={f.keyPath || ""} onChange={set("keyPath")} placeholder={t("如 ~/.ssh/id_ed25519")} /></label>
-      <div className="settings-form-actions"><button type="button" className="ghost" onClick={onCancel}>{t("取消")}</button><button className="primary" type="submit">{t("保存")}</button></div>
+      <div className="settings-form-actions"><button type="button" className="ghost" {...btnPress(onCancel)}>{t("取消")}</button><button className="primary" type="submit" {...btnPress(() => formRef.current?.requestSubmit())}>{t("保存")}</button></div>
     </form>
   );
 }
@@ -501,13 +505,13 @@ function AboutTab() {
       <h4>{t("关于")}</h4>
       <div className="ver-row">
         <span>{t("当前版本")} <b>v{APP_VERSION}</b></span>
-        <button className="primary" disabled={verBusy} onClick={doCheck}>{verBusy ? <Loader2 size={13} className="spin" /> : <RotateCw size={13} />} {t("检查更新")}</button>
+        <button className="primary" disabled={verBusy} {...btnPress(doCheck)}>{verBusy ? <Loader2 size={13} className="spin" /> : <RotateCw size={13} />} {t("检查更新")}</button>
       </div>
       {ver && (ver.hasUpdate ? (
         <div className="update-note">
           <div><b>{t("发现新版本 v{{version}}", { version: ver.latestVersion })}</b>{ver.forced && <span className="mkt-tag" style={{ marginLeft: 6 }}>{t("需强制更新")}</span>}</div>
           {ver.releaseNotes && <p className="settings-note" style={{ whiteSpace: "pre-wrap" }}>{ver.releaseNotes}</p>}
-          {ver.updateUrl && <button className="primary" onClick={() => openUrl(ver.updateUrl)}><ExternalLink size={13} /> {t("前往下载")}</button>}
+          {ver.updateUrl && <button className="primary" {...btnPress(() => openUrl(ver.updateUrl))}><ExternalLink size={13} /> {t("前往下载")}</button>}
         </div>
       ) : <p className="settings-note">{t("已是最新版本。")}</p>)}
     </section>
@@ -580,17 +584,14 @@ function ExtGroup({ items, empty, onToggle, onDelete, naTag, naHint }: {
                   onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commit(it.name); } else if (e.key === "Escape") { e.preventDefault(); setEditing(null); } }} />
               ) : note ? <span className="ext-note" title={note}>{note}</span> : null}
             </div>
-            {/* onMouseDown 而非 onClick:WKWebView 首点常被吞;stopPropagation 免触发整行打开 */}
+            {/* btnPress 而非 onClick:WKWebView 首点常被吞;它自带的 stopPropagation 顺便免掉触发整行打开 */}
             <button className="ext-note-btn ext-copy-btn" title={t("复制名字")}
-              onClick={(e) => e.stopPropagation()}
-              onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); e.stopPropagation(); copyText(it.name).then((ok) => ok && toast(t("已复制"), "success")); } }}><Copy size={12} /></button>
+              {...btnPress(() => { copyText(it.name).then((ok) => ok && toast(t("已复制"), "success")); })}><Copy size={12} /></button>
             <button className="ext-note-btn" title={note ? t("编辑备注") : t("添加备注")}
-              onClick={(e) => e.stopPropagation()}
-              onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); e.stopPropagation(); startEdit(it.name); } }}><Pencil size={12} /></button>
+              {...btnPress(() => startEdit(it.name))}><Pencil size={12} /></button>
             {onDelete && it.on !== undefined && (
               <button className="ext-note-btn" disabled={busy === rowKey(it)} title={t("删除")}
-                onClick={(e) => e.stopPropagation()}
-                onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); e.stopPropagation(); setAskDel(it); } }}>
+                {...btnPress(() => setAskDel(it))}>
                 <Trash2 size={12} />
               </button>
             )}
@@ -598,14 +599,13 @@ function ExtGroup({ items, empty, onToggle, onDelete, naTag, naHint }: {
               <button type="button" role="switch" aria-checked={it.on} disabled={busy === rowKey(it)}
                 className={`ext-switch${it.on ? " on" : ""}`}
                 title={it.on ? t("已启用,点击停用(保留安装)") : t("已停用,点击启用")}
-                onClick={(e) => e.stopPropagation()}
-                onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); e.stopPropagation(); act(rowKey(it), () => onToggle(it)); } }} />
+                {...btnPress(() => act(rowKey(it), () => onToggle(it)))} />
             )}
           </div>
         );
       })}
       {askDel && onDelete && (
-        <div className="commit-modal-overlay" onClick={() => setAskDel(null)}>
+        <div className="commit-modal-overlay" onMouseDown={() => setAskDel(null)}>
           <div className="commit-modal ext-del-modal" onClick={(e) => e.stopPropagation()}>
             <div className="commit-modal-title">{t("确认删除 {{name}}?", { name: askDel.name })}</div>
             <p className="git-map-hint">
@@ -613,10 +613,10 @@ function ExtGroup({ items, empty, onToggle, onDelete, naTag, naHint }: {
               {t("删除将在会话关闭后生效 —— 正在运行的会话仍会用旧的那份。")}
             </p>
             <div className="commit-modal-actions">
-              <button type="button" onMouseDown={(e) => { e.preventDefault(); setAskDel(null); }}>{t("取消")}</button>
-              <button type="button" className="hi danger" onMouseDown={(e) => {
-                e.preventDefault(); const it = askDel; act(rowKey(it), () => onDelete(it));
-              }}>{t("删除")}</button>
+              <button type="button" {...btnPress(() => setAskDel(null))}>{t("取消")}</button>
+              <button type="button" className="hi danger" {...btnPress(() => {
+                const it = askDel; act(rowKey(it), () => onDelete(it));
+              })}>{t("删除")}</button>
             </div>
           </div>
         </div>
@@ -658,7 +658,7 @@ function SkillInstaller({ onInstalled }: { onInstalled: () => void }) {
       <input value={url} onChange={(e) => setUrl(e.target.value)}
         placeholder={t("github 仓库地址,如 github.com/owner/skill-repo")}
         onKeyDown={(e) => { if (e.key === "Enter") install(); }} />
-      <button className="mkt-btn" disabled={busy || !url.trim()} onClick={install}>
+      <button className="mkt-btn" disabled={busy || !url.trim()} {...btnPress(install)}>
         {busy ? <Loader2 size={13} className="spin" /> : <Download size={13} />} {t("安装")}
       </button>
     </div>
@@ -673,6 +673,7 @@ function Marketplace({ onChanged }: { onChanged: () => void }) {
   const [items, setItems] = useState<MarketPlugin[] | null>(null);
   const [mkts, setMkts] = useState<string[]>([]);
   const [q, setQ] = useState("");
+  const qRef = useRef<HTMLInputElement>(null); // 搜索框旁那颗按钮要让它失焦,见下面的 mkt-search-go
   const [cat, setCat] = useState("全部");
   const [busy, setBusy] = useState<string | null>(null); // 正在操作的 "name@mkt"
   const [repo, setRepo] = useState("");
@@ -748,7 +749,7 @@ function Marketplace({ onChanged }: { onChanged: () => void }) {
           : <p className="settings-note">{preview.installed ? t("该插件没有 README。") : t("未安装,装好后可在此看 README。可先打开主页了解。")}</p>}
         {preview.homepage && (
           <div className="mkt-modal-foot">
-            <button className="mkt-btn ghost" onClick={() => openUrl(preview.homepage)}>
+            <button className="mkt-btn ghost" {...btnPress(() => openUrl(preview.homepage))}>
               <ExternalLink size={13} /> {t("打开主页")}
             </button>
           </div>
@@ -765,7 +766,7 @@ function Marketplace({ onChanged }: { onChanged: () => void }) {
           <input autoFocus value={repo} onChange={(e) => setRepo(e.target.value)}
             placeholder={t("owner/repo 或 git URL")}
             onKeyDown={(e) => { if (e.key === "Enter" && repo.trim()) doAddRepo(); }} />
-          <button className="mkt-btn" disabled={!repo.trim() || addingMkt} onClick={doAddRepo}>
+          <button className="mkt-btn" disabled={!repo.trim() || addingMkt} {...btnPress(doAddRepo)}>
             {addingMkt ? <Loader2 size={13} className="spin" /> : <Plus size={13} />} {t("加源")}
           </button>
         </div>
@@ -774,7 +775,7 @@ function Marketplace({ onChanged }: { onChanged: () => void }) {
             {missingSeeds.map((s) => (
               <button key={s.name} className="mkt-seed" title={t(s.desc)}
                 disabled={busy === `mkt:${s.name}`}
-                onClick={() => run(`mkt:${s.name}`, () => addMarketplace(s.repo), t("已添加市场 {{name}}", { name: s.name }))}>
+                {...btnPress(() => run(`mkt:${s.name}`, () => addMarketplace(s.repo), t("已添加市场 {{name}}", { name: s.name })))}>
                 {busy === `mkt:${s.name}` ? <Loader2 size={12} className="spin" /> : <Plus size={12} />} {s.name}
               </button>
             ))}
@@ -789,13 +790,15 @@ function Marketplace({ onChanged }: { onChanged: () => void }) {
       {/* 搜索框(内含搜索按钮)+ 加源按钮 同行 */}
       <div className="mkt-searchrow">
         <div className="mkt-search">
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("搜索插件名 / 说明 / 分类…")}
+          <input ref={qRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("搜索插件名 / 说明 / 分类…")}
             onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
-          <button className="mkt-search-go" title={t("搜索")} onClick={(e) => (e.currentTarget.previousElementSibling as HTMLInputElement)?.blur()}>
+          {/* 这颗按钮只做一件事:收起软键盘/让输入框失焦(列表是随输入实时过滤的,没有"提交搜索"这一步)。
+              原来靠 e.currentTarget.previousElementSibling 摸 DOM 拿输入框,btnPress 不传事件,改成 ref。 */}
+          <button className="mkt-search-go" title={t("搜索")} {...btnPress(() => qRef.current?.blur())}>
             <Search size={14} />
           </button>
         </div>
-        <button className="mkt-btn mkt-addsrc" onClick={() => setAddOpen(true)}>
+        <button className="mkt-btn mkt-addsrc" {...btnPress(() => setAddOpen(true))}>
           <Plus size={13} /> {t("加源")}
         </button>
       </div>
@@ -804,7 +807,7 @@ function Marketplace({ onChanged }: { onChanged: () => void }) {
       {(items?.length ?? 0) > 0 && (
         <div className="mkt-cats">
           {cats.map((c) => (
-            <button key={c} className={`mkt-cat${cat === c ? " on" : ""}`} onClick={() => setCat(c)}>{t(c)}</button>
+            <button key={c} className={`mkt-cat${cat === c ? " on" : ""}`} {...btnPress(() => setCat(c))}>{t(c)}</button>
           ))}
         </div>
       )}
@@ -831,24 +834,24 @@ function Marketplace({ onChanged }: { onChanged: () => void }) {
                   {p.installed && (
                     p.enabled ? (
                       <button className="mkt-btn ghost" disabled={b} title={t("停用(保留安装)")}
-                        onClick={() => run(key, () => disablePlugin(p.name, p.marketplace), t("已停用 {{name}}", { name: p.name }), true)}>
+                        {...btnPress(() => run(key, () => disablePlugin(p.name, p.marketplace), t("已停用 {{name}}", { name: p.name }), true))}>
                         {b ? <Loader2 size={13} className="spin" /> : <PowerOff size={13} />}
                       </button>
                     ) : (
                       <button className="mkt-btn" disabled={b} title={t("启用")}
-                        onClick={() => run(key, () => enablePlugin(p.name, p.marketplace), t("已启用 {{name}}", { name: p.name }), true)}>
+                        {...btnPress(() => run(key, () => enablePlugin(p.name, p.marketplace), t("已启用 {{name}}", { name: p.name }), true))}>
                         {b ? <Loader2 size={13} className="spin" /> : <Power size={13} />}
                       </button>
                     )
                   )}
                   {p.installed ? (
                     <button className="mkt-btn ghost" disabled={b} title={t("卸载")}
-                      onClick={() => run(key, () => uninstallPlugin(p.name, p.marketplace), t("已卸载 {{name}}", { name: p.name }), true)}>
+                      {...btnPress(() => run(key, () => uninstallPlugin(p.name, p.marketplace), t("已卸载 {{name}}", { name: p.name }), true))}>
                       {b ? <Loader2 size={13} className="spin" /> : <Trash2 size={13} />}
                     </button>
                   ) : (
                     <button className="mkt-btn" disabled={b}
-                      onClick={() => run(key, () => installPlugin(p.name, p.marketplace), t("已安装 {{name}}", { name: p.name }), true)}>
+                      {...btnPress(() => run(key, () => installPlugin(p.name, p.marketplace), t("已安装 {{name}}", { name: p.name }), true))}>
                       {b ? <Loader2 size={13} className="spin" /> : <Download size={13} />} {t("安装")}
                     </button>
                   )}
@@ -858,7 +861,7 @@ function Marketplace({ onChanged }: { onChanged: () => void }) {
           })}
       </div>
       {visible.length < shown.length && (
-        <button className="mkt-more" onClick={() => setPage((p) => p + 1)}>
+        <button className="mkt-more" {...btnPress(() => setPage((p) => p + 1))}>
           {t("加载更多(还有 {{count}} 个)", { count: shown.length - visible.length })}
         </button>
       )}

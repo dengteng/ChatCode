@@ -12,7 +12,9 @@ import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 
 export const BASE = 'https://api.dengteng.xyz'
-export const PROJECT_ID = 'ChatCode'
+// 曾用名 'ChatCode'（跟本仓库同名纯属巧合，它指的是那一行 Project，不是这个项目）。
+// fortune-signal-app/scripts/vault.mjs 是同一份，改名两处都要改。
+export const PROJECT_ID = 'tt-center'
 // 放 home 不放仓库：这是长期凭据，别让它跟着 git 走
 const STORE = path.join(os.homedir(), '.chatcode-publish.json')
 

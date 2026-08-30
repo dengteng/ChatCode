@@ -3,6 +3,7 @@
 // 复用 commit-modal 那套弹窗样式,危险确认按钮用 hi danger。
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import { btnPress } from "../lib/utils";
 
 export function ConfirmDialog({ title, body, confirmLabel, cancelLabel, danger = true, onConfirm, onCancel }:
   { title: string; body?: React.ReactNode; confirmLabel?: string; cancelLabel?: string; danger?: boolean; onConfirm: () => void; onCancel: () => void }) {
@@ -13,8 +14,8 @@ export function ConfirmDialog({ title, body, confirmLabel, cancelLabel, danger =
         <div className="commit-modal-title">{title}</div>
         {body && <p className="git-map-hint">{body}</p>}
         <div className="commit-modal-actions">
-          <button type="button" onMouseDown={(e) => { e.preventDefault(); onCancel(); }}>{cancelLabel ?? t("取消")}</button>
-          <button type="button" className={danger ? "hi danger" : "hi"} onMouseDown={(e) => { e.preventDefault(); onConfirm(); }}>{confirmLabel ?? t("确认")}</button>
+          <button type="button" {...btnPress(onCancel)}>{cancelLabel ?? t("取消")}</button>
+          <button type="button" className={danger ? "hi danger" : "hi"} {...btnPress(onConfirm)}>{confirmLabel ?? t("确认")}</button>
         </div>
       </div>
     </div>, document.body);

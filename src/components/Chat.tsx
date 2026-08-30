@@ -150,7 +150,8 @@ function PathToken({ raw, cwd, isUrl }: { raw: string; cwd: string; isUrl: boole
   }, [menu]);
   return (
     <span className="path-token" onMouseEnter={show} onMouseLeave={hide}
-      // 拖选文本后 mouseup 也会触发 click —— 有选区时别打开(否则想复制路径却把文件打开了)
+      // 拖选文本后 mouseup 也会触发 click —— 有选区时别打开(否则想复制路径却把文件打开了)。
+      // 这处故意留 onClick、不走 btnPress:选区要到 mouseup 才定得下来,mousedown 时判不出用户是在划选还是在点。
       onClick={(e) => { e.stopPropagation(); if (window.getSelection()?.isCollapsed !== false) open(); }}>
       <span className="path-token-label">{raw}</span>
       {menu && createPortal(
@@ -183,7 +184,7 @@ function TermOut({ text, cwd }: { text: string; cwd: string }) {
     <div className="term-out-wrap">
       <pre className="term-out" ref={ref} onScroll={check}><Linkify text={text} cwd={cwd} /></pre>
       {more && <button className="term-more" title={t("还有更多，点击向下滚动")}
-        onClick={() => ref.current?.scrollBy({ top: ref.current.clientHeight - 30, behavior: "smooth" })}><ChevronDown size={16} /></button>}
+        {...btnPress(() => ref.current?.scrollBy({ top: ref.current.clientHeight - 30, behavior: "smooth" }))}><ChevronDown size={16} /></button>}
     </div>
   );
 }
@@ -714,7 +715,7 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
                 <span className="dir-local-path">{sshPath}</span>
               </div>
             : <div className="dir-local" title={t("点击打开 {{path}}", { path: session.termCwd || session.cwd })} role="button" tabIndex={0}
-                onClick={() => openPath(session.termCwd || session.cwd)}>
+                {...btnPress(() => openPath(session.termCwd || session.cwd))}>
                 <span className="dir-ico"><Folder size={14} /></span><span className="dir-local-path">{(session.termCwd || session.cwd).replace(/^\/Users\/[^/]+/, "~")}</span>
               </div>}
           <div className="ssh-menu-wrap">
@@ -768,7 +769,7 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
           {!git ? <span className="muted">Git…</span> : !git.isRepo ? (
             // 本地目录还没纳入 git:给个入口,一键关联到已有的远程仓库(git init + remote add + fetch)
             <button className="branch-inline-btn git-map-trigger" title={t("把该本地目录关联到一个已有的远程 Git 仓库")}
-              onClick={(e) => { e.stopPropagation(); setShowGitMap(true); }}><GitBranch size={12} /> {t("关联 Git 仓库")}</button>
+              {...btnPress(() => setShowGitMap(true))}><GitBranch size={12} /> {t("关联 Git 仓库")}</button>
           ) : git.current && !branch ? (() => {
             // unborn 分支:有分支名但零提交,for-each-ref refs/heads 里没有它 → branch 为空。
             // 光"关联 Git 仓库"写了跟踪配置也会落到这:远程有同名分支就给「拉取」一键落地,否则提示先提交。
@@ -793,7 +794,7 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
             const btn2 = behind ? { name: "pull", cmd: "git pull" }
               : ahead && git.current && branch?.upstream ? { name: "push", cmd: pushCmd(git.current, branch.upstream) } : null;
             return <div className={`branch-line clickable ${ahead || behind ? "changed" : ""}`} role="button" tabIndex={0}
-              title={t("点击打开分支管理")} onClick={() => onToggleInfo("branches")}>
+              title={t("点击打开分支管理")} {...btnPress(() => onToggleInfo("branches"))}>
               <span className="branch-grp">{seg(t("本地"), git.current || "detached HEAD", ahead)}
               {dirty && commitBtn}</span>
               <span className="branch-sep">-</span>
@@ -1009,7 +1010,7 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
         <div ref={bottomRef} />
       </div>
 
-      {showJump && <button className="jump-bottom" title={t("回到最新")} onClick={jumpBottom}><ArrowDown size={18} /></button>}
+      {showJump && <button className="jump-bottom" title={t("回到最新")} {...btnPress(jumpBottom)}><ArrowDown size={18} /></button>}
       <SelectionActions containerRef={timelineRef} />
 
       {(() => {
@@ -1040,14 +1041,18 @@ function SshConfig({ current, onClose, onSave }: { current?: Session["ssh"]; onC
   const [account, setAccount] = useState(currentHost?.includes("@") ? username : "");
   const [port, setPort] = useState(current?.port || "22");
   const [keyPath, setKeyPath] = useState(current?.keyPath || "");
-  return <div className="ssh-config-shade" onMouseDown={onClose}><form className="ssh-config" onMouseDown={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); if (host.trim()) onSave({ host: host.trim(), username: account.trim() || undefined, port: port.trim() || undefined, keyPath: keyPath.trim() || undefined }); }}>
-    <div className="ssh-config-head"><b>{t("配置 SSH 连接")}</b><button type="button" className="ghost" onClick={onClose}><X size={16} /></button></div>
+  // 保存按钮不能直接 onSave:host 是 required,得让浏览器先跑表单校验(空着要弹"请填写此字段")。
+  // 但也不能只留 type="submit" —— submit 靠 click 触发,而 click 在这儿会被吞掉第一次(见 lib/utils 的 btnPress)。
+  // requestSubmit() 两头都要:走完校验,再触发下面这个 onSubmit。
+  const formRef = useRef<HTMLFormElement>(null);
+  return <div className="ssh-config-shade" onMouseDown={onClose}><form ref={formRef} className="ssh-config" onMouseDown={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); if (host.trim()) onSave({ host: host.trim(), username: account.trim() || undefined, port: port.trim() || undefined, keyPath: keyPath.trim() || undefined }); }}>
+    <div className="ssh-config-head"><b>{t("配置 SSH 连接")}</b><button type="button" className="ghost" {...btnPress(onClose)}><X size={16} /></button></div>
     <label>{t("服务器 IP / 主机名")}<input autoFocus required value={host} onChange={(e) => setHost(e.target.value)} placeholder={t("203.0.113.10 或 server.example.com")} /></label>
     <label>{t("登录账号")}<input value={account} onChange={(e) => setAccount(e.target.value)} placeholder="ubuntu" /></label>
     <label>{t("端口")}<input value={port} onChange={(e) => setPort(e.target.value)} placeholder="22" inputMode="numeric" /></label>
     <label>{t("私钥文件路径（可选）")}<input value={keyPath} onChange={(e) => setKeyPath(e.target.value)} placeholder="~/.ssh/id_ed25519" /></label>
     <div className="ssh-config-note">{t("配置会随会话保存。私钥路径只保存在本机；请确保文件权限正确。")}</div>
-    <button className="ssh-save" type="submit">{t("保存并连接")}</button>
+    <button className="ssh-save" type="submit" {...btnPress(() => formRef.current?.requestSubmit())}>{t("保存并连接")}</button>
   </form></div>;
 }
 
@@ -1263,7 +1268,7 @@ const AgentTurnCard = memo(function AgentTurnCard({ items, running, showFull, cw
       {settle?.isError && items.some((it) => it.kind === "agent_text" && AUTH_FAIL.test(it.text)) && (
         <div className="bubble-warn auth-fail">
           <span>{t("Claude 登录已失效。重新授权后再发一次这条消息。")}</span>
-          <button className="primary" onClick={() => authAction("claude", "login")}>{t("去登录")}</button>
+          <button className="primary" {...btnPress(() => authAction("claude", "login"))}>{t("去登录")}</button>
         </div>
       )}
       {/* 坏图:重试无用,必须先把它从历史里弄走。不写清楚的话用户只会一直重发同一条消息。 */}
@@ -1280,7 +1285,7 @@ const AgentTurnCard = memo(function AgentTurnCard({ items, running, showFull, cw
       {settle && <RoundMeta r={settle} doneTs={!running ? doneTs : undefined} />}
       {(skills.length > 0 || mcps.length > 0) && <SkillMcpTags skills={skills} mcps={mcps} activeSkills={activeSkills} activeMcps={activeMcps} />}
       {/* 详情只由这个箭头触发(不再点整个气泡);圆形外框增大点击面积 */}
-      <button className="bubble-arrow" title={t("查看本轮详情")} onClick={onClick}><ChevronRight size={14} /></button>
+      <button className="bubble-arrow" title={t("查看本轮详情")} {...btnPress(onClick)}><ChevronRight size={14} /></button>
     </div>
   );
 });
@@ -1402,7 +1407,7 @@ function BgTasksBar({ tasks }: { tasks: BgTask[] }) {
     return last ? last.slice(-120) : "";
   }, [stat, speed, out, t]);
   return <>
-    <button className="bubble-bg-wait" onClick={() => { setOpen(true); setActive(0); }} title={t("查看后台任务内容与实时输出")}>
+    <button className="bubble-bg-wait" {...btnPress(() => { setOpen(true); setActive(0); })} title={t("查看后台任务内容与实时输出")}>
       <span className="bg-wait-l1">
         <i className="bg-wait-dot" />{t("后台任务运行中")}{tasks.length > 1 ? t(" · {{n}} 个", { n: tasks.length }) : ""}{t(" · 已跑 ")}<span className="bgt-dur">{fmtDurationSec(now - since)}</span>{t("，完成后会自动继续")}
         <ChevronRight size={13} className="bgt-chevron" />
@@ -1415,14 +1420,14 @@ function BgTasksBar({ tasks }: { tasks: BgTask[] }) {
           <div className="commit-modal-title"><Loader2 size={15} className="ico-spin" /> {t("后台任务（{{n}}）", { n: tasks.length })}</div>
           <div className="bgt-tabs">
             {tasks.map((t, i) => (
-              <button key={t.id} className={`bgt-tab ${i === active ? "cur" : ""}`} title={t.title} onClick={() => setActive(i)}>
+              <button key={t.id} className={`bgt-tab ${i === active ? "cur" : ""}`} title={t.title} {...btnPress(() => setActive(i))}>
                 <span className={`bgt-tab-dot ${t.kind}`} />
                 <span className="bgt-tab-title">{t.title}</span>
               </button>
             ))}
           </div>
           <div className="bgt-pane"><BgTaskItem key={cur.id} task={cur} /></div>
-          <div className="commit-modal-actions"><button type="button" onClick={() => setOpen(false)}>{t("关闭")}</button></div>
+          <div className="commit-modal-actions"><button type="button" {...btnPress(() => setOpen(false))}>{t("关闭")}</button></div>
         </div>
       </div>, document.body)}
   </>;
@@ -1451,7 +1456,7 @@ function MemoryRefs({ memories, kind, cwd }: { memories: MemRef[]; kind: "ref" |
   const label = kind === "update" ? t("更新了 {{n}} 条记忆", { n: memories.length }) : t("{{n}} 条记忆引用", { n: memories.length });
   return (
     <div className={`mem-refs ${kind === "update" ? "mem-update" : ""}`}>
-      <button className="mem-refs-toggle" onClick={() => setOpen(true)} title={kind === "update" ? t("本轮回复新增/更新的记忆") : t("本轮回复引用到的记忆")}>
+      <button className="mem-refs-toggle" {...btnPress(() => setOpen(true))} title={kind === "update" ? t("本轮回复新增/更新的记忆") : t("本轮回复引用到的记忆")}>
         <ChevronRight size={13} /> <Brain size={13} /> {label}
       </button>
       {open && createPortal(
@@ -1461,7 +1466,7 @@ function MemoryRefs({ memories, kind, cwd }: { memories: MemRef[]; kind: "ref" |
             <div className="mem-refs-list">
               {memories.map((m) => (
                 <article key={m.file} className="mem-ref-item">
-                  <button className="mem-ref-title" title={t("在记忆中心查看")} onClick={() => { jumpToMemory(m.file); setOpen(false); }}>
+                  <button className="mem-ref-title" title={t("在记忆中心查看")} {...btnPress(() => { jumpToMemory(m.file); setOpen(false); })}>
                     <span className="mem-ref-name">{m.title}</span>
                     <ChevronRight size={12} />
                   </button>
@@ -1473,7 +1478,7 @@ function MemoryRefs({ memories, kind, cwd }: { memories: MemRef[]; kind: "ref" |
               ))}
             </div>
             <div className="commit-modal-actions">
-              <button type="button" onMouseDown={(e) => { e.preventDefault(); setOpen(false); }}>{t("关闭")}</button>
+              <button type="button" {...btnPress(() => setOpen(false))}>{t("关闭")}</button>
             </div>
           </div>
         </div>, document.body)}
@@ -1715,7 +1720,7 @@ function Item({ item, cwd, onPermission, onAgentClick, agentLabel }: { item: Tim
     }
     case "agent_text":
       return (
-        <button className={`line line-agent agent-message ${item.phase === "progress" ? "agent-progress" : "agent-final"}`} onClick={onAgentClick}>
+        <button className={`line line-agent agent-message ${item.phase === "progress" ? "agent-progress" : "agent-final"}`} {...btnPress(onAgentClick)}>
           <span className="gutter gutter-agent">{item.phase === "progress" ? "↳" : "✦"}</span>
           <div className="line-body md agent-copy">
             {item.phase === "progress" && <div className="agent-phase">{t("执行说明")}</div>}
@@ -1966,12 +1971,12 @@ export function PermissionCard({ item, cwd, onPermission }: {
       {/* 主操作(带底色)= 默认选中那个;其余走 ghost 弱化,拒绝再弱一档 */}
       <div className="perm-actions vertical">
         {hasR && (
-          <button className={`primary ${choice === 0 ? "hi" : ""}`} disabled={hasBlankRule} onClick={apply}>
+          <button className={`primary ${choice === 0 ? "hi" : ""}`} disabled={hasBlankRule} {...btnPress(apply)}>
             {t("允许并记住全部（{{n}} 项）(⏎)", { n: rememberRuleCount(usable) })}
           </button>
         )}
-        <button className={`${hasR ? "ghost" : "primary"} ${choice === (hasR ? 1 : 0) ? "hi" : ""}`} onClick={() => onPermission(item.requestId, "allow")}>{hasR ? t("允许") : t("允许 (⏎)")}</button>
-        <button className={`ghost deny ${choice === n - 1 ? "hi" : ""}`} onClick={() => onPermission(item.requestId, "deny")}>{t("拒绝")}</button>
+        <button className={`${hasR ? "ghost" : "primary"} ${choice === (hasR ? 1 : 0) ? "hi" : ""}`} {...btnPress(() => onPermission(item.requestId, "allow"))}>{hasR ? t("允许") : t("允许 (⏎)")}</button>
+        <button className={`ghost deny ${choice === n - 1 ? "hi" : ""}`} {...btnPress(() => onPermission(item.requestId, "deny"))}>{t("拒绝")}</button>
       </div>
     </div>
   );
@@ -2117,9 +2122,9 @@ function AskQuestionCard({ item, onSubmit, onCancel }: {
         </div>
       </div>
       <div className="ask-foot">
-        <button className="ask-submit" disabled={!allAnswered} onClick={() => submit()}>{t("提交")}{allAnswered ? "" : t("(还剩 {{n}} 题)", { n: questions.filter((_, i) => !answered(i)).length })}</button>
+        <button className="ask-submit" disabled={!allAnswered} {...btnPress(() => submit())}>{t("提交")}{allAnswered ? "" : t("(还剩 {{n}} 题)", { n: questions.filter((_, i) => !answered(i)).length })}</button>
         {/* 取消必须有个看得见的出口:esc 只有知道的人会按,不给按钮就等于逼着人必须选一个(HIG escape-routes) */}
-        <button className="ask-skip" onClick={() => { askDraftStore.delete(item.requestId); onCancel(); }}>{t("跳过")}</button>
+        <button className="ask-skip" {...btnPress(() => { askDraftStore.delete(item.requestId); onCancel(); })}>{t("跳过")}</button>
         <span className="ask-hint">{t("←→ 切题 · ↑↓/数字 选项 · 空格 选中 · 提交请点按钮 · esc 跳过")}</span>
       </div>
     </div>
