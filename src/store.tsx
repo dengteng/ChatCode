@@ -591,9 +591,12 @@ function handleSdkMessage(dispatch: (a: Action) => void, id: string, msg: any, l
       // freshDone: 仅本次启动软件后真正完成的轮次才置 true,驱动列表绿色✅;历史 reopen 的 idle 不点亮
       // 本轮若还挂着后台任务(bgTasks 非空)→ 轮次未完全了结,bgWait 保持;后台任务清空后的续跑 result 才放行队列。
       // 用户中断(aborted)时必清闩锁:SDK 可能先回 result 再发后台任务清空信号,不清的话闩锁会卡死队列。
+      // 还挂着后台任务 = 这一轮压根没完:绿✅ 和"任务完成"提醒都得压住,等后台任务清空后的续跑 result 再放。
+      // (不压的话:列表里画着 ✅、dock 跳一下、"叮"一声,可用户点进去看到的是"后台任务运行中·已跑 3min")
       const hasBg = (stateRef?.current.sessions[id]?.bgTasks?.length ?? 0) > 0;
-      dispatch({ type: "patch", id, patch: { status: "idle", freshDone: !msg.aborted, apiRetry: null, ...(msg.aborted || !hasBg ? { bgWait: false } : {}) } });
-      if (!msg.aborted) { notify(i18n.t("任务完成"), i18n.t("花费 ${{cost}}", { cost: (msg.total_cost_usd ?? 0).toFixed(4) })); alertUser(); } // d: 完成提醒 + dock 跳动(不在前台时才跳) + 提示音
+      const done = !msg.aborted && !hasBg;
+      dispatch({ type: "patch", id, patch: { status: "idle", freshDone: done, apiRetry: null, ...(msg.aborted || !hasBg ? { bgWait: false } : {}) } });
+      if (done) { notify(i18n.t("任务完成"), i18n.t("花费 ${{cost}}", { cost: (msg.total_cost_usd ?? 0).toFixed(4) })); alertUser(); } // d: 完成提醒 + dock 跳动(不在前台时才跳) + 提示音
     }
   }
 }
@@ -1205,8 +1208,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         timers.set(s.id, window.setTimeout(() => {
           timers.delete(s.id);
           const cur = stateRef.current.sessions[s.id];
-          if (cur?.bgWait && cur.status === "idle" && (cur.bgTasks?.length ?? 0) === 0)
-            dispatch({ type: "patch", id: s.id, patch: { bgWait: false } });
+          if (cur?.bgWait && cur.status === "idle" && (cur.bgTasks?.length ?? 0) === 0) {
+            // 走到这儿说明续跑轮确实不会来了 —— 那"轮次完成"就是此刻。
+            // 上面 result 那次因为挂着后台任务把 ✅ 和提醒压住了(见 hasBg),欠的这一次在这里补,
+            // 否则这种会话永远不点亮、也永远不响,用户以为还在跑。
+            // 能走到 stuck 就一定欠着:用户中断(aborted)那条路会当场清掉 bgWait,压根进不来。
+            dispatch({ type: "patch", id: s.id, patch: { bgWait: false, freshDone: true } });
+            notify(i18n.t("任务完成"), i18n.t("后台任务已结束"));
+            alertUser();
+          }
         }, 20_000));
       } else if (!stuck && timers.has(s.id)) {
         clearTimeout(timers.get(s.id)); timers.delete(s.id);

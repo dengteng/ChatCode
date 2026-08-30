@@ -19,9 +19,11 @@ const GithubMark = () => (
 );
 
 // 会话状态图标:lucide circle 家族,深浅色都协调;运行中用 Framer Motion 旋转
-function StatusIcon({ status, freshDone }: { status?: Session["status"]; freshDone?: boolean }) {
+// bg = 这一轮还挂着 agent 起的后台任务。模型已经说完话(status 回到 idle),但活儿没干完 ——
+// 续跑轮还会接着来,这时候点亮绿✅是在骗人。当成"还在跑"画转圈。
+function StatusIcon({ status, freshDone, bg }: { status?: Session["status"]; freshDone?: boolean; bg?: boolean }) {
   const sz = 15, sw = 2.2;
-  if (status === "running")
+  if (status === "running" || bg)
     // 用纯 CSS 动画(.dot.spin,transform rotate)转圈:合成线程驱动,切换会话主线程再忙也不掉帧;
     // 之前用 framer-motion 的 JS(rAF)动画,重渲染大会话时会被主线程挤掉一帧,肉眼可见"卡一下"。
     // 不写内联 display:flex —— 行内样式压过 hover 的 `> .dot { display:none }`,hover 时菊花躲不掉,
@@ -254,7 +256,9 @@ export function Sidebar({ onSearch, onOpenSettings, update, onShowUpdate }:
           <span className="drag-handle" onMouseDown={(ev) => beginDrag(e.id, ev)}
             title={t("拖拽排序 / 移入分组")}><GripVertical size={13} /></span>
         )}
-        <StatusIcon status={live?.status} freshDone={live?.freshDone} />
+        {/* 用 bgTasks 而不是 bgWait:bgWait 是闩锁,任务清空后还会多挂一会儿(等续跑的 result),
+            拿它画图标会在活儿早干完之后还转圈;真卡住时(见 store 的 20 秒兜底)更是永远转下去。 */}
+        <StatusIcon status={live?.status} freshDone={live?.freshDone} bg={(live?.bgTasks?.length ?? 0) > 0} />
         <div className="session-meta">
           <div className="session-title">
             {editId === e.id ? (

@@ -669,6 +669,7 @@
   "（还没有输出）": "(no output yet)",
   "查看后台任务内容与实时输出": "View background task content and live output",
   "后台任务运行中": "Background task running",
+  "后台任务已结束": "Background tasks finished",
   " · {{n}} 个": " · {{n}} tasks",
   " · 已跑 ": " · running for ",
   "，完成后会自动继续": ", will continue automatically when done",
