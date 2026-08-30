@@ -3,6 +3,7 @@ import { GitFork, GitBranch, ChevronRight, ChevronDown, Folder, Server, Puzzle, 
 import { createPortal } from "react-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { rawHtml } from "../lib/mdhtml";
 import { invoke } from "@tauri-apps/api/core";
 import { openPath, openUrl, revealPath } from "../native";
 import type { ApiRetry, PermissionSuggestion, ResumeChoice, ResumePrompt, Session, TimelineItem } from "../types";
@@ -1255,7 +1256,7 @@ const AgentTurnCard = memo(function AgentTurnCard({ items, running, showFull, cw
       {hasBody && (
         <div className="agent-turn-full md agent-copy">
           {segments.map((s, i) => s.kind === "text"
-            ? <Markdown key={i} remarkPlugins={[remarkGfm]} components={md}>{s.text}</Markdown>
+            ? <Markdown key={i} remarkPlugins={[remarkGfm]} rehypePlugins={rawHtml} components={md}>{s.text}</Markdown>
             : <TurnChoice key={i} answer={s.answer} />)}
         </div>
       )}
@@ -1472,7 +1473,7 @@ function MemoryRefs({ memories, kind, cwd }: { memories: MemRef[]; kind: "ref" |
                   </button>
                   <div className="mem-ref-file" title={m.file}>{m.file}</div>
                   {m.body
-                    ? <div className="mem-ref-body md"><Markdown remarkPlugins={[remarkGfm]} components={md}>{m.body}</Markdown></div>
+                    ? <div className="mem-ref-body md"><Markdown remarkPlugins={[remarkGfm]} rehypePlugins={rawHtml} components={md}>{m.body}</Markdown></div>
                     : <div className="mem-ref-none">{t("这条本轮被改写过，正文到记忆中心看")}</div>}
                 </article>
               ))}
@@ -1725,7 +1726,7 @@ function Item({ item, cwd, onPermission, onAgentClick, agentLabel }: { item: Tim
           <div className="line-body md agent-copy">
             {item.phase === "progress" && <div className="agent-phase">{t("执行说明")}</div>}
             {item.phase !== "progress" && <div className="agent-phase">{agentLabel || t("回复")}</div>}
-            <Markdown remarkPlugins={[remarkGfm]} components={md}>{item.text || (item.streaming ? "▍" : "")}</Markdown>
+            <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={rawHtml} components={md}>{item.text || (item.streaming ? "▍" : "")}</Markdown>
             {item.streaming && <span className="caret">▍</span>}
           </div>
           {item.tokensOut !== undefined && <span className="tok-tag" title={t("本条回复输出 token")}><ArrowDown size={11} />{fmtTok(item.tokensOut)}</span>}

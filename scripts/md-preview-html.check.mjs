@@ -10,7 +10,7 @@
 // 这三条互相牵制、拆哪条都「看着还行」,所以按 FileEditor 里那套插件真跑一遍管线断言输出。
 //
 // 跑法:node scripts/md-preview-html.check.mjs
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import assert from "node:assert";
 import { unified } from "unified";
 import remarkParse from "remark-parse";
@@ -84,13 +84,49 @@ assert.ok(!find(wrong, "h1")[0].properties["data-cc-line"],
 
 // ---------- 4. FileEditor 的接线 ----------
 const SRC = readFileSync("src/components/FileEditor.tsx", "utf8");
-assert.ok(/rehypePlugins=\{\[rehypeRaw, rehypeSanitize, rehypeLine\]\}/.test(SRC),
-  "md 预览的插件顺序必须是 raw → sanitize → line(见上面三条约束)");
+assert.ok(/rehypePlugins=\{\[\.\.\.rawHtml, rehypeLine\]\}/.test(SRC),
+  "md 预览的插件顺序必须是 rawHtml(raw → sanitize) → line(见上面三条约束)");
 assert.ok(/components=\{mdComponents\}/.test(SRC), "md 预览要挂 mdComponents(图片换 base64 靠它)");
-assert.ok(/img: \(\{ node: _node, \.\.\.p \}: any\) =>[\s\S]{0,200}?dataUrl\(r, assets\[r\]\)/.test(SRC),
-  "mdComponents.img 要把本地相对路径换成读回来的 base64,否则 README 的 logo 是破图");
+assert.ok(/const mdComponents = useMdImgComponents\(assets\);/.test(SRC),
+  "mdComponents 要把本地相对路径换成读回来的 base64(lib/mdhtml 那份),否则 README 的 logo 是破图");
 // md 也得进读盘那条路,否则 assets 里永远没有它的图
-assert.ok(/if \(isMd\) return \[\.\.\.new Set\(\[/.test(SRC), "refs 里要有 md 分支,不然图片压根不读盘");
-assert.ok(/isImg\(r\)\)\)\]/.test(SRC), "md 的图片引用要按扩展名过滤(读盘那步靠 isImg 分流 base64/文本)");
+assert.ok(/if \(isMd\) return mdImageRefs\(previewText\);/.test(SRC), "refs 里要有 md 分支,不然图片压根不读盘");
 
-console.log("✅ md-preview-html: HTML 真渲染 / script·onerror·javascript: 被剥 / data-cc-line 留住 / 接线四条 全部通过");
+// 插件市场那份 README 也要内联:图在插件自己的安装目录下,不读盘就是一排破图。
+// hook 必须在 `if (preview)` 那个 early return **之前**调 —— 挪到后面 React 直接报「hook 数量变了」。
+const SET = readFileSync("src/components/Settings.tsx", "utf8");
+const hookAt = SET.indexOf("useMdImages(");
+assert.ok(hookAt > 0 && /useMdImages\(preview\?\.installPath \? `\$\{preview\.installPath\}\/` : ""/.test(SET),
+  "市场 README 要按插件安装目录内联图片(dir 得带结尾的 /)");
+assert.ok(hookAt < SET.indexOf("if (preview) {"), "useMdImages 调在了 early return 后面,React 会因 hook 数量变化炸掉");
+assert.ok(/mkt-readme"><Markdown[^>]*components=\{readmeImgs\}/.test(SET), "市场 README 的 <Markdown> 没挂上内联后的图片组件");
+
+// ---------- 5. 全仓每处 <Markdown> 都过 rawHtml ----------
+// 少挂一处不会报错,只是那块的 HTML 静静地糊成标签原文(或者更糟:漏挂 sanitize 那半边)。
+// 所以两条一起扫:每个 <Markdown 都得带 rehypePlugins,且引的必须是 rawHtml —— 谁都别再单独 import
+// rehypeRaw,那样就能绕开 sanitize 了。
+// 扫全 src 而不是列一份文件清单:清单会漏掉将来新加的那个文件,而漏掉正是这条自检要防的事。
+const MD_FILES = readdirSync("src", { recursive: true })
+  .filter((f) => f.endsWith(".tsx") && f !== "lib/mdhtml.tsx") // mdhtml 自己就是那个定义点,只有它能引
+  .map((f) => `src/${f}`);
+let seen = 0;
+for (const f of MD_FILES) {
+  const src = readFileSync(f, "utf8");
+  assert.ok(!/from "rehype-raw"/.test(src), `${f} 单独引了 rehype-raw —— 只能用 lib/mdhtml 的 rawHtml,不然 sanitize 可能被漏掉`);
+  // 取每个 <Markdown 到它自己那个 '>' 为止(属性值里的花括号不算,箭头函数的 => 也不算)
+  for (let i = src.indexOf("<Markdown"); i >= 0; i = src.indexOf("<Markdown", i + 1)) {
+    let depth = 0, tag = "";
+    for (let j = i; j < src.length; j++) {
+      const c = src[j];
+      if (c === "{") depth++;
+      else if (c === "}") depth--;
+      else if (c === ">" && depth === 0 && src[j - 1] !== "=") { tag = src.slice(i, j + 1); break; }
+    }
+    assert.ok(/rehypePlugins=\{(rawHtml|\[\.\.\.rawHtml)/.test(tag),
+      `${f} 有一处 <Markdown> 没挂 rawHtml,那块的 HTML 会糊成标签原文:${tag.slice(0, 90)}`);
+    seen++;
+  }
+}
+assert.ok(seen >= 5, `只扫到 ${seen} 处 <Markdown>,少了 —— 是不是有文件没列进 MD_FILES`);
+
+console.log(`✅ md-preview-html: HTML 真渲染 / script·onerror·javascript: 被剥 / data-cc-line 留住 / 接线 / 市场 README 内联 / ${seen} 处 Markdown 全挂 rawHtml 全部通过`);

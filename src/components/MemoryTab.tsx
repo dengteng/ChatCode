@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { Brain, RefreshCw, Pencil, FolderOpen, TriangleAlert, ChevronRight, ChevronDown, LoaderCircle } from "lucide-react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { rawHtml } from "../lib/mdhtml";
 import { revealPath } from "../native";
 import { scanMemories, type MemoryEntry, type MemoryScan, type MemoryType } from "../memory";
 import { openEditorWindow } from "../popout";
@@ -130,7 +131,7 @@ function MemoryCard({ m, expanded, onToggle }: { m: MemoryEntry; expanded: boole
       </div>
       {expanded && (
         <div className="mem-card-body">
-          <div className="mem-body-md md"><Markdown remarkPlugins={[remarkGfm]}>{m.body}</Markdown></div>
+          <div className="mem-body-md md"><Markdown remarkPlugins={[remarkGfm]} rehypePlugins={rawHtml}>{m.body}</Markdown></div>
         </div>
       )}
       {/* 折叠时也留着:文件名和两个操作是这条记忆的身份,不该藏在展开里 */}

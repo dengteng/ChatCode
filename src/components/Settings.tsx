@@ -6,6 +6,7 @@ import { setLang, resetLang, selectedLang, getLang } from "../i18n";
 import { X, RotateCw, Plus, Check, GitBranch, Pencil, Copy, Search, Trash2, Download, Loader2, Power, PowerOff, ExternalLink, ChevronLeft } from "lucide-react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { rawHtml, useMdImages } from "../lib/mdhtml";
 import { useStore, useApi, DOCK_BOUNCE_KEY, dockBounceOn, SOUND_KEY, soundOn, playDing } from "../store";
 import { toast } from "./Toast";
 import { THEMES, type SshHost, type ThemeId, type CustomArt } from "../types";
@@ -730,6 +731,9 @@ function Marketplace({ onChanged }: { onChanged: () => void }) {
   const PAGE = 20;
   const visible = shown.slice(0, page * PAGE);
 
+  // README 里的图片按插件自己的安装目录读盘内联(必须在下面那个 early return 之前调:hook 不能被条件绕过)
+  const readmeImgs = useMdImages(preview?.installPath ? `${preview.installPath}/` : "", readme || "");
+
   // 详情页:直接在设置面板内切页(不再弹窗套弹窗),顶部返回列表
   if (preview) {
     return (
@@ -745,7 +749,8 @@ function Marketplace({ onChanged }: { onChanged: () => void }) {
         </div>
         {preview.desc && <p className="mkt-modal-desc">{preview.desc}</p>}
         {readme === null ? <p className="settings-note">{t("读取 README…")}</p>
-          : readme ? <div className="md mkt-readme"><Markdown remarkPlugins={[remarkGfm]}>{readme}</Markdown></div>
+          // 这份 README 是从别人仓库拉的,rawHtml 里的 sanitize 在这儿是硬要求(见 lib/mdhtml)
+          : readme ? <div className="md mkt-readme"><Markdown remarkPlugins={[remarkGfm]} rehypePlugins={rawHtml} components={readmeImgs}>{readme}</Markdown></div>
           : <p className="settings-note">{preview.installed ? t("该插件没有 README。") : t("未安装,装好后可在此看 README。可先打开主页了解。")}</p>}
         {preview.homepage && (
           <div className="mkt-modal-foot">
