@@ -356,24 +356,63 @@ async fn reveal_path(path: String, cwd: Option<String>) -> Result<(), String> {
     }
 }
 
-/// 结束进程。数字 PID → kill;非数字(docker 容器 id)→ docker stop。默认 TERM,给进程收尾机会。
-#[tauri::command]
-fn kill_pid(pid: String) -> Result<(), String> {
-    let ok = if pid.chars().all(|c| c.is_ascii_digit()) {
-        Command::new("kill").arg(&pid).status()
-    } else {
-        Command::new("docker").arg("stop").arg(&pid).status()
-    };
-    ok.map_err(|e| e.to_string()).and_then(|s| if s.success() { Ok(()) } else { Err(format!("结束失败(exit {:?})", s.code())) })
+/// 进程还在不在。用 ps 而不是 `kill -0`:后者对**别人家的进程**返回 EPERM,
+/// 会被当成"已经没了",于是明明没停掉却报成功 —— 正是这次要修的那种谎。
+fn alive(pid: &str) -> bool {
+    Command::new("ps").args(["-p", pid, "-o", "pid="])
+        .output().map(|o| !o.stdout.trim_ascii().is_empty()).unwrap_or(false)
 }
 
-/// 按端口结束占用它的进程:lsof 查 PID 再 kill。走 sh -c 用管道,一条搞定。
+/// TERM → 最多等 2 秒 → 还活着就 KILL。返回"到底停没停"。
+///
+/// 原来只发一发 TERM 就报成功:忽略 TERM 的进程(vite/webpack 的包装脚本、卡在 IO 里的)照样活着,
+/// 界面上就是"点了停止全部,一个都没停"。信号发出去 ≠ 进程结束,必须回头确认。
+fn stop_pid(pid: &str) -> Result<(), String> {
+    if !alive(pid) { return Ok(()); } // 已经不在了,算停成功
+    let _ = Command::new("kill").arg(pid).stdout(Stdio::null()).stderr(Stdio::null()).status();
+    for _ in 0..20 {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        if !alive(pid) { return Ok(()); }
+    }
+    let _ = Command::new("kill").arg("-9").arg(pid).stdout(Stdio::null()).stderr(Stdio::null()).status();
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    if alive(pid) { Err(format!("PID {pid} 收了 KILL 仍在运行")) } else { Ok(()) }
+}
+
+/// 结束进程。数字 PID → TERM/KILL;非数字(docker 容器 id)→ docker stop。
+/// async + spawn_blocking:同步命令跑在主线程,批量停止时几条会串起来把界面顶住(见 choose_directory 那条注释)。
 #[tauri::command]
-fn kill_port(port: String) -> Result<(), String> {
+async fn kill_pid(pid: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if !pid.chars().all(|c| c.is_ascii_digit()) {
+            let s = Command::new("docker").arg("stop").arg(&pid).status().map_err(|e| e.to_string())?;
+            return if s.success() { Ok(()) } else { Err(format!("docker stop 失败(exit {:?})", s.code())) };
+        }
+        stop_pid(&pid)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// 按端口结束**监听**它的进程。
+///
+/// 关键是 `-sTCP:LISTEN`:不加的话 `lsof -ti tcp:8787` 连**客户端**一起列出来 ——
+/// 浏览器开着这个页面,原来那条 `lsof -ti … | xargs kill` 就会顺手把浏览器也杀了(实测复现)。
+/// `-nP` 免掉 DNS 反查和端口名解析,别让一条 lsof 挂上好几秒。
+#[tauri::command]
+async fn kill_port(port: String) -> Result<(), String> {
     if !port.chars().all(|c| c.is_ascii_digit()) { return Err("非法端口".into()); }
-    Command::new("sh").arg("-c").arg(format!("lsof -ti tcp:{port} | xargs kill"))
-        .status().map_err(|e| e.to_string())
-        .and_then(|s| if s.success() { Ok(()) } else { Err("端口无占用或结束失败".into()) })
+    tauri::async_runtime::spawn_blocking(move || {
+        let out = Command::new("lsof").args(["-nP", "-ti", &format!("tcp:{port}"), "-sTCP:LISTEN"])
+            .output().map_err(|e| format!("lsof 起不来:{e}"))?;
+        let pids: Vec<String> = String::from_utf8_lossy(&out.stdout)
+            .split_whitespace().map(|s| s.to_string()).collect();
+        if pids.is_empty() { return Err(format!("端口 {port} 没有进程在监听")); }
+        let errs: Vec<String> = pids.iter().filter_map(|p| stop_pid(p).err()).collect();
+        if errs.is_empty() { Ok(()) } else { Err(errs.join(";")) }
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// 在项目目录后台启动一条命令(如 npm run dev)。detach:脱离父进程,关 app 也不连带被杀。

@@ -835,7 +835,8 @@ export function Composer({ session }: { session: Session }) {
       pushHistory(snap); clearEditor();
       return;
     }
-    sendMessage(session.id, outBlocks, { html: snap.html, imgs: snap.imgs });
+    // 断连没发出去:原文留在框里,重连后按一次回车就重发(和"待发已满"同一套约定)
+    if (!sendMessage(session.id, outBlocks, { html: snap.html, imgs: snap.imgs })) { toast(t("与后端断开,消息没发出去 —— 正在重连,稍后重发")); return; }
     if (compactCmd) dispatch({ type: "compact_start", id: session.id }); // 进度条要排在 /compact 这条消息之后
     pushHistory(snap); // 先快照(含图片),再清空
     clearEditor();

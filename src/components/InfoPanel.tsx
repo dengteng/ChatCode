@@ -15,6 +15,7 @@ import { isEditable } from "./FileEditor";
 import { openEditorWindow } from "../popout";
 import { onEdgeGlow } from "../lib/edgeGlow";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { toast } from "./Toast";
 import { useTranslation } from "react-i18next";
 import { btnPress } from "../lib/utils";
 
@@ -84,8 +85,19 @@ export function InfoPanel({ session, initialTab, memoryTarget, onClose }: { sess
   // agent 起的后台任务没有 pid,得让 SDK 自己收(kill "task:xxx" 只会失败)
   const stopProc = (p: { pid: string; task?: string }) =>
     p.task ? Promise.resolve(stopTask(session.id, p.task)) : invoke("kill_pid", { pid: p.pid });
-  const stopAllProcs = () => { Promise.allSettled(procs.map(stopProc)).finally(refreshRuntime); setConfirmKill(null); };
-  const stopAllPorts = () => { Promise.allSettled(allPorts.map((port) => invoke("kill_port", { port: String(port) }))).finally(refreshRuntime); setConfirmKill(null); };
+  // 批量停止的结果必须说出来。原来是 allSettled 全吞:哪条失败、为什么失败,界面上零线索,
+  // 表现就是"点了停止全部,进程还在那儿列着" —— 分不清是没杀成、还是杀了但列表没刷新。
+  const reportKills = (rs: PromiseSettledResult<unknown>[], noun: string) => {
+    const bad = rs.filter((r) => r.status === "rejected") as PromiseRejectedResult[];
+    if (!bad.length) toast(t("已停止 {{n}} 个{{noun}}", { n: rs.length, noun }));
+    else toast(t("{{n}} 个{{noun}}没停下:{{why}}", { n: bad.length, noun, why: [...new Set(bad.map((b) => String(b.reason)))].join("；") }), "error");
+    refreshRuntime();
+  };
+  // 逐行的「停止」同理:失败要出声。这里等的是 Rust 的"确认真停了"才 resolve,所以刷新一次就够。
+  const stopOne = (p: Promise<unknown>) =>
+    p.then(() => refreshRuntime(), (e) => { toast(t("没停下:{{why}}", { why: String(e) }), "error"); refreshRuntime(); });
+  const stopAllProcs = () => { Promise.allSettled(procs.map(stopProc)).then((rs) => reportKills(rs, t("进程"))); setConfirmKill(null); };
+  const stopAllPorts = () => { Promise.allSettled(allPorts.map((port) => invoke("kill_port", { port: String(port) }))).then((rs) => reportKills(rs, t("端口"))); setConfirmKill(null); };
   const [showCommit, setShowCommit] = useState(false);
   const commit = () => setShowCommit(true);
   const [committing, setCommitting] = useState(false); // 提交进行中:分支页 commit 按钮转菊花
@@ -113,12 +125,12 @@ export function InfoPanel({ session, initialTab, memoryTarget, onClose }: { sess
       {/* 工作目录一栏去掉:聊天页顶栏常驻显示同一个路径,抽屉里再列一遍是重复。首页面板那份留着 —— 那里没有顶栏。 */}
       <InfoSection title={t("会话进程（{{num}}）", { num: procs.length })}
         action={procs.length > 0 && <button className="proc-stop stop-all" title={t("停止列出的全部进程")} {...btnPress(() => setConfirmKill("proc"))}><Square size={11} /> {t("停止全部")}</button>}>
-        {procs.length ? procs.map((process) => <div className="process-row" key={process.pid}><span title={process.name}>{process.name}</span><span className="muted">{process.elapsed}</span><button className="proc-stop" title={process.task ? t("停止该后台任务") : t("结束进程")} {...btnPress(() => { Promise.resolve(stopProc(process)).catch(() => {}).finally(() => refreshRuntime()); })}><Square size={11} /> {t("停止")}</button></div>) : <div className="muted">{t("未检测到属于此工作目录的活动进程")}</div>}
+        {procs.length ? procs.map((process) => <div className="process-row" key={process.pid}><span title={process.name}>{process.name}</span><span className="muted">{process.elapsed}</span><button className="proc-stop" title={process.task ? t("停止该后台任务") : t("结束进程")} {...btnPress(() => { stopOne(Promise.resolve(stopProc(process))); })}><Square size={11} /> {t("停止")}</button></div>) : <div className="muted">{t("未检测到属于此工作目录的活动进程")}</div>}
         <StartProc cwd={session.termCwd || session.cwd} onDone={refreshRuntime} />
       </InfoSection>
       <InfoSection title={t("监听端口")}
         action={allPorts.length > 0 && <button className="proc-stop stop-all" title={t("停止占用列出端口的全部进程")} {...btnPress(() => setConfirmKill("port"))}><Square size={11} /> {t("停止全部")}</button>}>
-        {git?.runtime?.ports.map((port) => <div className="process-row port-row" key={`${port.process}-${port.port}`}><span title={t("用浏览器打开 http://localhost:{{port}}", { port: port.port })} onClick={() => openUrl(`http://localhost:${port.port}`)}>{port.process}</span><code onClick={() => openUrl(`http://localhost:${port.port}`)}>:{port.port}</code><button className="proc-stop" title={t("结束占用该端口的进程")} {...btnPress(() => { invoke("kill_port", { port: String(port.port) }).catch(() => {}).finally(() => refreshRuntime()); })}><Square size={11} /> {t("停止")}</button></div>)}
+        {git?.runtime?.ports.map((port) => <div className="process-row port-row" key={`${port.process}-${port.port}`}><span title={t("用浏览器打开 http://localhost:{{port}}", { port: port.port })} onClick={() => openUrl(`http://localhost:${port.port}`)}>{port.process}</span><code onClick={() => openUrl(`http://localhost:${port.port}`)}>:{port.port}</code><button className="proc-stop" title={t("结束占用该端口的进程")} {...btnPress(() => { stopOne(invoke("kill_port", { port: String(port.port) })); })}><Square size={11} /> {t("停止")}</button></div>)}
         {/* cwd 抓不到、但按端口反查到的:标出来源(本会话启动 / 仅正文提及) */}
         {extraPorts.map((p) => {
           const started = startedPorts.has(p.port);
@@ -126,7 +138,7 @@ export function InfoPanel({ session, initialTab, memoryTarget, onClose }: { sess
             <span title={t("用浏览器打开 http://localhost:{{port}}", { port: p.port })} onClick={() => openUrl(`http://localhost:${p.port}`)}>{p.process}</span>
             <code onClick={() => openUrl(`http://localhost:${p.port}`)}>:{p.port}</code>
             <span className={`port-src ${started ? "started" : "mentioned"}`} title={started ? t("本会话运行的命令(如 ssh -L)开启的端口") : t("仅在对话正文/输出里出现过的端口,未必由本会话启动")}>{started ? t("本会话启动") : t("正文提及")}</span>
-            <button className="proc-stop" title={t("结束占用该端口的进程")} {...btnPress(() => { invoke("kill_port", { port: String(p.port) }).catch(() => {}).finally(() => refreshRuntime()); })}><Square size={11} /> {t("停止")}</button>
+            <button className="proc-stop" title={t("结束占用该端口的进程")} {...btnPress(() => { stopOne(invoke("kill_port", { port: String(p.port) })); })}><Square size={11} /> {t("停止")}</button>
           </div>;
         })}
         {!git?.runtime?.ports.length && extraPorts.length === 0 && <div className="muted">{t("暂无本会话监听端口")}</div>}

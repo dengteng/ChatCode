@@ -659,7 +659,8 @@ interface Api {
   reopenSession: (id: string) => void;
   restartSession: (id: string) => void;
   chooseResume: (id: string, choice: ResumeChoice) => void;
-  sendMessage: (id: string, blocks: any[], meta?: { html?: string; imgs?: Record<string, { media_type: string; data: string }> }) => void;
+  // 返回 false = 与 sidecar 断连、这条没发出去。调用方必须据此保住原文(别清输入框)。
+  sendMessage: (id: string, blocks: any[], meta?: { html?: string; imgs?: Record<string, { media_type: string; data: string }> }) => boolean;
   // 返回 false = 队列已满、这条没进去。调用方必须据此提示用户并保住原文(别清输入框)。
   enqueuePending: (id: string, item: { blocks: any[]; text: string; html?: string; imgs?: Record<string, { media_type: string; data: string }> }) => boolean;
   cancelPending: (id: string, pid: string) => void;
@@ -750,6 +751,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const btwWaiters = useRef(new Map<string, { resolve: (s: string) => void; reject: (e: Error) => void }>());
   // 启动预取只做一次:连上后首个 index 到达时,异步暖各会话 git 分支状态 + 5h/周用量。断线重连会重置。
   const prefetched = useRef(false);
+  // 重连后待对表:下一份 index 用来把本地"运行中"和 sidecar 的真状态校齐(见 index 分支)。
+  const resync = useRef(false);
   // 空态输入框"发消息即建会话":会话 id 由 sidecar 生成、异步回来,先把首条消息暂存,等 session_created 到了再补发。
   const pendingFirst = useRef<any[] | null>(null);
   // 同目录重复建会话的拦截:标题只取目录 basename,同一目录建两次就是两条同名会话,
@@ -772,6 +775,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       wsRef.current = ws;
       ws.onopen = () => {
         dispatch({ type: "connected", v: true });
+        resync.current = true; // 见下面 index 分支:重连后拿 sidecar 的真状态校一次
+
         send({ type: "set_lang", lang: getLang() }); // 让 sidecar 一上来就按当前语言出消息
       };
       ws.onclose = () => { dispatch({ type: "connected", v: false }); prefetched.current = false; if (!stop) setTimeout(connect, 1500); };
@@ -780,6 +785,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         switch (m.type) {
           case "index":
             dispatch({ type: "index", index: m.sessions, groups: m.groups });
+            // 重连后的第一份 index 兼作状态对表:断线期间那轮多半已经结束,turn_ended 却丢在断线里,
+            // 界面就一直转圈。只在重连这一次做 —— 平时 index 可能比 user_message 先到,
+            // 会把刚起的轮次错判成空闲,把待发队列提前放出去。
+            if (resync.current) {
+              resync.current = false;
+              for (const e of m.sessions) {
+                const s = stateRef.current.sessions[e.id];
+                if (s && s.status === "running" && e.status !== "running")
+                  dispatch({ type: "patch", id: e.id, patch: { status: "idle", bgWait: false, bgTasks: [] } });
+              }
+            }
             // 启动后异步暖缓存:切到哪个会话都不再"Git…"闪一下,底部用量条也立刻有数。只在首个 index 触发。
             if (!prefetched.current) {
               prefetched.current = true;
@@ -965,9 +981,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // InvalidStateError("The object is in an invalid state."),冒到 React 里就是整屏错误页
   // (InfoPanel 挂载即调 requestGitInfo,重连窗口期一撞就炸)。发不出去就丢——
   // git_info/用量这类都是轮询,下一轮自己会补上。
+  // 返回值 = 到底发出去没有:发消息/打断这种"一次性、丢了就没了"的调用必须看它,
+  // 否则界面按发成功往下演(气泡贴上、转圈),而 sidecar 根本没收到。
   const send = (obj: any) => {
     const ws = wsRef.current;
-    if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
+    if (ws?.readyState !== WebSocket.OPEN) return false;
+    ws.send(JSON.stringify(obj));
+    return true;
   };
   blobSend = send; // 给 fetchBlob 用(ImgTag 在 context 外调)
 
@@ -1026,10 +1046,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         dispatch({ type: "patch", id, patch: { resumePrompt: null } });
         send({ type: "reopen_session", sessionId: id, choice: "full" });
       }
+      // 先发再记账。反过来(先贴气泡 + 置 running 再发)在断连时就是那个"卡住"的样子:
+      // 消息静默丢了,界面却一直转圈,点打断也没人收 —— 只能重启 app 才解得开。
+      if (!send({ type: "user_message", sessionId: id, content: blocks })) {
+        dispatch({ type: "append", id, item: { kind: "system", text: i18n.t("⚠ 与后端断开,这条没发出去 —— 正在重连,请稍后重发"), ts: nextTs(id) } });
+        return false;
+      }
       // composerHtml/Imgs:仅前端留存,给"编辑"按钮完整还原图片/引用 chip(blocks 里引用已并进纯文本,不可逆)
       dispatch({ type: "append", id, item: { kind: "user", blocks, ts: nextTs(id), composerHtml: meta?.html, composerImgs: meta?.imgs } });
       dispatch({ type: "patch", id, patch: { status: "running" } });
-      send({ type: "user_message", sessionId: id, content: blocks });
+      return true;
     },
     enqueuePending(id, item) {
       // 满没满在这里判(读实时 state),不让调用方拿渲染快照自己判 —— 快照过期时 reducer 会
@@ -1077,8 +1103,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // bgWait 闩锁就再也没人清了(它只由 result 清,而 result 不会再来)。所以本地必须同时放闸:
     // "打断"在这个态下的语义就是"不等这些后台任务了"。SDK 之后真报了新任务,电平会自己填回来。
     interrupt(id) {
-      send({ type: "interrupt", sessionId: id });
+      const sent = send({ type: "interrupt", sessionId: id });
       dispatch({ type: "patch", id, patch: { bgWait: false, bgTasks: [] } });
+      // 断连时 sidecar 收不到,那"打断"就必须在本地兑现:否则按钮点下去毫无反应,
+      // 而这个态恰恰是最容易点它的时候(界面转圈不动就是因为断了)。
+      if (!sent) {
+        dispatch({ type: "patch", id, patch: { status: "idle" } });
+        dispatch({ type: "append", id, item: { kind: "system", text: i18n.t("⚠ 与后端断开,已就地停止 —— 正在重连,请稍后重发"), ts: nextTs(id) } });
+      }
     },
     setModel(id, model, labelHint) {
       const sess = stateRef.current.sessions[id];
@@ -1180,7 +1212,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     for (const s of Object.values(state.sessions)) {
       const compacting = s.timeline.some((t) => t.kind === "compact" && t.running);
-      if (s.status === "idle" && !s.bgWait && !compacting && (s.bgTasks?.length ?? 0) === 0 && s.pending && s.pending.length > 0) {
+      // 断连时不出队:sendMessage 会失败,而这条已经从队列里摘掉了 —— 用户排的消息就凭空没了。
+      if (state.connected && s.status === "idle" && !s.bgWait && !compacting && (s.bgTasks?.length ?? 0) === 0 && s.pending && s.pending.length > 0) {
         const next = s.pending[0];
         dispatch({ type: "remove_pending", id: s.id, pid: next.pid });
         api.sendMessage(s.id, next.blocks, { html: next.html, imgs: next.imgs });
@@ -1190,7 +1223,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           dispatch({ type: "compact_start", id: s.id });
       }
     }
-  }, [state.sessions]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [state.sessions, state.connected]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // bgWait 闩锁兜底。闩锁只由「后台任务续跑的 result」清,可后台任务退出后 SDK 不一定再起一轮 ——
   // 那条 result 永远不来,闩锁就把待发队列锁死:界面上 status 是 idle、后台任务条也没了(bgTasks 已被
