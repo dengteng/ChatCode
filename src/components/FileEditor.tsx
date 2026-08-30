@@ -3,6 +3,8 @@ import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
+import rehypeSanitize from "rehype-sanitize";
 import CodeMirror from "@uiw/react-codemirror";
 import { EditorView } from "@codemirror/view";
 import type { EditorView as EV } from "@codemirror/view";
@@ -31,13 +33,18 @@ const IMG_RE = /<img\b[^>]*>/gi;
 // 处于不透明源,"/" 无处可指,交给它取等于取不到 —— Vite 打出来的站正文全靠那支 JS,
 // 拿不到就只剩一片白。这里按「html 自己所在目录 = 站点根」解析。
 // ponytail: 没做真站点根探测(往上找 index.html 之类)。猜错了读盘失败,预览退化成没样式,和修之前一样,不会更糟。
-const localRef = (tag: string, attr: "href" | "src"): string | null => {
-  const u = tag.match(new RegExp(`\\b${attr}\\s*=\\s*["']([^"']+)["']`, "i"))?.[1];
+const localPath = (u: string | null | undefined): string | null => {
   if (!u || /^(https?:|\/\/|data:|asset:|#)/i.test(u)) return null;
   return u.split(/[?#]/)[0].replace(/^\/+/, "");
 };
+const localRef = (tag: string, attr: "href" | "src"): string | null =>
+  localPath(tag.match(new RegExp(`\\b${attr}\\s*=\\s*["']([^"']+)["']`, "i"))?.[1]);
 const isImg = (u: string) => /\.(png|jpe?g|gif|webp|svg|avif|ico|bmp)$/i.test(u);
 const MIME: Record<string, string> = { svg: "image/svg+xml", jpg: "image/jpeg", ico: "image/x-icon" };
+const dataUrl = (ref: string, b64: string) => `data:${MIME[ext(ref)] || `image/${ext(ref)}`};base64,${b64}`;
+// md 里的图片两种写法都要收:markdown 的 ![](x.png) 和直接写的 <img src="x.png">
+// (README 开头那种 <div align="center"><img …> 居中排版全是后者)。
+const MD_IMG_RE = /!\[[^\]]*\]\(\s*([^)\s]+)/g;
 export const ext = (name: string) => name.split(".").pop()?.toLowerCase() || "";
 export const isEditable = (name: string) => EDITABLE.has(ext(name));
 
@@ -176,14 +183,22 @@ export function FileEditor({ path, name, onClose, windowed }: { path: string; na
   const previewText = useDeferredValue(text);
   const refs = useMemo(() => {
     // 关了预览就别扫了:下面那个 effect 会照着 refs 挨个读盘,内联上兆 base64 全是白干
-    if (!preview || !isHtml || !previewText) return [] as string[];
+    if (!preview || !previewText) return [] as string[];
+    // md 只要图片:相对路径在 webview 里解析到 app 自己的 base,不内联就是一排破图。
+    if (isMd) return [...new Set([
+      ...[...previewText.matchAll(MD_IMG_RE)].map((m) => localPath(m[1])),
+      ...(previewText.match(IMG_RE) || []).map((t) => localRef(t, "src")),
+      // 只留认得出的图片扩展名:下面读盘那步按 isImg 分流 base64/文本,漏进来个没扩展名的
+      // 会被当文本读回来,再拼成 data:image 就是一张永远加载不出的图。
+    ].filter((r): r is string => !!r && isImg(r)))];
+    if (!isHtml) return [] as string[];
     const out = [
       ...(previewText.match(LINK_RE) || []).filter((t) => /rel\s*=\s*["']?stylesheet/i.test(t)).map((t) => localRef(t, "href")),
       ...(previewText.match(SCRIPT_RE) || []).map((t) => localRef(t, "src")),
       ...(previewText.match(IMG_RE) || []).map((t) => localRef(t, "src")),
     ];
     return [...new Set(out.filter(Boolean) as string[])];
-  }, [preview, isHtml, previewText]);
+  }, [preview, isHtml, isMd, previewText]);
   const [assets, setAssets] = useState<Record<string, string>>({});
   // 依赖用 join 出来的字符串而不是 refs 本身:数组每次正文变化都是新引用,直接当依赖会变成每敲一键读一次盘。
   const refKey = refs.join("|");
@@ -225,10 +240,18 @@ export function FileEditor({ path, name, onClose, windowed }: { path: string; na
       .replace(IMG_RE, (tag) => {
         const hit = got(tag, "src");
         if (!hit) return tag;
-        const e = ext(hit.r);
-        return tag.replace(/(\bsrc\s*=\s*["'])[^"']*(["'])/i, `$1data:${MIME[e] || `image/${e}`};base64,${hit.data}$2`);
+        return tag.replace(/(\bsrc\s*=\s*["'])[^"']*(["'])/i, `$1${dataUrl(hit.r, hit.data)}$2`);
       }) + SCROLL_RUNTIME;
   }, [preview, isHtml, previewText, assets]);
+
+  // md 预览里的图片:相对路径换成读回来的 base64。html 那边是改字符串(见 htmlDoc),md 走的是
+  // 组件树,只能在这儿换。读盘还没回来时保持原 src(显示成破图),读回来 assets 一变就重渲染。
+  const mdComponents = useMemo(() => ({
+    img: ({ node: _node, ...p }: any) => {
+      const r = localPath(p.src);
+      return <img {...p} src={r && assets[r] !== undefined ? dataUrl(r, assets[r]) : p.src} />;
+    },
+  }), [assets]);
 
   // 预览分栏方向。窄窗口写代码时左右挤,宽屏读长文时上下挤 —— 交给用户自己按内容切。
   // 记进 localStorage:同一个人的习惯基本不变,每开一个文件都要重切一次很烦。
@@ -427,7 +450,14 @@ export function FileEditor({ path, name, onClose, windowed }: { path: string; na
             {preview && isMd && (
               <div className="feditor-preview md" ref={prevRef}
                 onMouseEnter={() => (driver.current = "prev")} onScroll={() => align("prev")}>
-                <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeLine]}>{text}</Markdown>
+                {/* rehypeRaw 让写在 md 里的 HTML 真的渲染出来(react-markdown 默认把它当纯文本贴出来,
+                    README 开头那种 <div align="center"> 排版就会以标签原文的样子糊在预览顶上)。
+                    rehypeSanitize 紧跟着收口:md 可能来自克隆下来的任意仓库,不过滤就是把 <script> / onerror
+                    直接放进宿主 webview 跑 —— 这里能碰到 Tauri 的 invoke。用默认的 GitHub 白名单,
+                    align/width 这些排版属性本来就在里面。
+                    rehypeLine 必须排在 sanitize **之后**:白名单不认 data-*,放前面会被当场剥掉,点源码跳转就没了。 */}
+                <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw, rehypeSanitize, rehypeLine]}
+                  components={mdComponents}>{text}</Markdown>
               </div>
             )}
             {preview && isHtml && <iframe ref={frameRef} className="feditor-preview-frame" title={t("HTML 预览")} sandbox="allow-scripts allow-forms allow-popups" srcDoc={htmlDoc} />}

@@ -62,7 +62,8 @@ assert.ok(/const preview = canPreview && previewOn;/.test(SRC),
   "preview 要 = 类型支持 && 用户没关 —— 下游的分栏/拖动条/同步滚动全看它");
 assert.ok(/\{preview && isMd &&/.test(SRC) && /\{preview && isHtml &&/.test(SRC),
   "两个预览栏都要跟着开关走,只改 split 类名没用");
-assert.ok(/if \(!preview \|\| !isHtml \|\| !previewText\)/.test(SRC) && /if \(!preview \|\| !isHtml \|\| previewText === null\)/.test(SRC),
+// refs 现在 md 也走(图片内联),第一道闸只剩 !preview;htmlDoc 那道仍带 !isHtml。
+assert.ok(/if \(!preview \|\| !previewText\) return \[\] as string\[\];/.test(SRC) && /if \(!preview \|\| !isHtml \|\| previewText === null\)/.test(SRC),
   "关了预览还在扫 refs / 拼 htmlDoc:每敲一键读盘内联上兆 base64,等于没关");
 assert.ok(/\{canPreview && \(/.test(SRC), "开关按钮的显示条件是 canPreview(不是 preview,否则关掉就再也开不回来)");
 

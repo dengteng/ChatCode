@@ -65,7 +65,8 @@ assert.ok(/return tagLines\(previewText\)\s*\n\s*\.replace\(LINK_RE/.test(SRC),
   "htmlDoc 必须先 tagLines 再内联资源,顺序反了行号会全错");
 assert.ok(/\}\) \+ SCROLL_RUNTIME;/.test(SRC), "htmlDoc 末尾要追加 SCROLL_RUNTIME,否则 iframe 收不到 postMessage");
 assert.ok(SRC.includes("<iframe ref={frameRef}"), "iframe 没接 ref,postMessage 发不出去");
-assert.ok(/rehypePlugins=\{\[rehypeLine\]\}/.test(SRC), "md 预览要挂 rehypeLine,否则没有 data-cc-line 可找");
+// 顺序由 md-preview-html.check.mjs 管(raw → sanitize → line),这儿只关心 line 还在不在
+assert.ok(/rehypePlugins=\{\[[^\]]*rehypeLine\]\}/.test(SRC), "md 预览要挂 rehypeLine,否则没有 data-cc-line 可找");
 assert.ok(/view\.dom\.addEventListener\("mouseup"/.test(SRC), "少了 mouseup 钩子,点击不会触发定位");
 assert.ok(/jumpRef\.current\(view\.state\.doc\.lineAt/.test(SRC),
   "mouseup 里要走 jumpRef(onCreate 只跑一次,直接闭包会锁住首帧的 jumpTo)");
