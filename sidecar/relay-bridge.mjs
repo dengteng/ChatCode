@@ -26,6 +26,8 @@ export function startRelayBridge({ port, relayUrl, hostToken, hostName, hostId, 
 
   let relay = null;
   let retry = 0;
+  let stopped = false;
+  let reconnectAt = null;   // 待重连的定时器。stop() 不清它的话，关掉之后还会再连回来
   let lastActivityAt = 0; // activity 上报节流
   const locals = new Map(); // cid -> { ws, queue: string[] }
 
@@ -74,6 +76,18 @@ export function startRelayBridge({ port, relayUrl, hostToken, hostName, hostId, 
     log("连接 relay/host…");
     const ws = new WebSocket(HOST_URL);
     relay = ws;
+    // 心跳。必须有:relay 那侧判死走的是 ws.terminate(),直接销毁 socket 不发 close
+    // frame。网络路径已经断了(换 WiFi、NAT 超时)的话这边收不到 FIN,TCP 停在
+    // ESTABLISHED —— on("close") 永远不触发,于是永不重连,手机那头就一直是「电脑离线」。
+    // 间隔跟 relay 对齐(25s),判死条件同样是「上一轮 ping 没等到 pong」。env 只给测试调小用。
+    const beatMs = Number(process.env.CHAT_CODE_RELAY_BEAT_MS) || 25000;
+    let alive = true;
+    ws.on("pong", () => { alive = true; });
+    const beat = setInterval(() => {
+      if (!alive) { log("relay 心跳超时，断开重连"); try { ws.terminate(); } catch {} return; }
+      alive = false;
+      try { ws.ping(); } catch {}
+    }, beatMs);
     ws.on("open", () => { retry = 0; log(`已连上 relay（host 在线，机器名=${NAME}）`); relaySend({ t: "hello", id: ID, name: NAME, sessions: (getActiveSessions?.() ?? []) }); });
     ws.on("message", (buf) => {
       let m; try { m = JSON.parse(buf.toString()); } catch { return; }
@@ -82,15 +96,17 @@ export function startRelayBridge({ port, relayUrl, hostToken, hostName, hostId, 
       else if (m.t === "app_close") { const e = locals.get(m.cid); if (e) { try { e.ws.close(); } catch {} locals.delete(m.cid); } }
     });
     ws.on("close", () => {
+      clearInterval(beat);   // 漏了就是每条死连接留一个定时器,还会 ping 已关闭的 ws
       relay = null;
       closeAllLocals(); // relay 重连后会补发全部 app_open，旧本地连接清掉避免重复
+      if (stopped) return;
       const delay = Math.min(1000 * 2 ** retry++, 15000);
       log(`relay 断开，${delay}ms 后重连`);
-      setTimeout(connect, delay);
+      reconnectAt = setTimeout(connect, delay);
     });
     ws.on("error", (e) => { log("relay 连接出错:", e.message); try { ws.close(); } catch {} });
   }
 
   connect();
-  return { stop() { try { relay?.close(); } catch {} closeAllLocals(); } };
+  return { stop() { stopped = true; clearTimeout(reconnectAt); try { relay?.close(); } catch {} closeAllLocals(); } };
 }
