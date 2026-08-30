@@ -1981,6 +1981,120 @@ async function restartAgent(ws, sess, id) {
   endTurn(id, sess);
 }
 
+// ---------- 本地预览快照 ----------
+// agent 把预览地址打在聊天里(`http://localhost:4173/`),但手机上的 localhost 指的是
+// 手机自己 —— 点开必然打不开。这里抓一份**自包含**的 HTML 发过去:本地 CSS/JS 内联、
+// 本地图片转 data URI,手机端 WebView 直接渲染,不用隧道、不用手机能连到这台机。
+//
+// 是快照不是实时:页内跳转和异步请求拿不到,看视觉效果够用。要实时得开隧道。
+const SNAP_TIMEOUT = 15_000;
+const SNAP_MAX = 6 * 1024 * 1024;   // relay 帧太大会被丢,超了就停止内联,剩下的留原样
+// 只内联本地地址的资源。CDN 上的字体/脚本留着原 URL —— 手机能直连公网,
+// 内联进来纯属把包撑大。
+const LOCAL_HOST = /^(localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|\[::1\]|.+\.local)$/i;
+
+const SNAP_MIME = {
+  css: "text/css", js: "text/javascript", mjs: "text/javascript", json: "application/json",
+  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif",
+  svg: "image/svg+xml", webp: "image/webp", ico: "image/x-icon", avif: "image/avif",
+  woff: "font/woff", woff2: "font/woff2", ttf: "font/ttf", otf: "font/otf",
+};
+
+/** String.replace 不吃 async 回调:先扫一遍把活儿都发出去并发取,再按同样顺序拼回去。 */
+async function replaceAsync(str, re, fn) {
+  const jobs = [];
+  str.replace(re, (...args) => { jobs.push(fn(...args)); return ""; });
+  const done = await Promise.all(jobs);
+  let i = 0;
+  return str.replace(re, () => done[i++]);
+}
+
+async function snapshot(pageUrl) {
+  const res = await fetch(pageUrl, { signal: AbortSignal.timeout(SNAP_TIMEOUT) });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  let html = await res.text();
+  const base = res.url || pageUrl;
+  let budget = SNAP_MAX - html.length;
+
+  const absLocal = (u) => {
+    if (!u || /^(data:|blob:|about:|#)/i.test(u)) return null;
+    let abs;
+    try { abs = new URL(u, base); } catch { return null; }
+    return LOCAL_HOST.test(abs.hostname) ? abs.href : null;   // 公网资源不碰
+  };
+  const extOf = (u) => (u.split(/[?#]/)[0].split(".").pop() || "").toLowerCase();
+
+  const grab = async (u) => {
+    if (budget <= 0) return null;
+    try {
+      const r = await fetch(u, { signal: AbortSignal.timeout(SNAP_TIMEOUT) });
+      if (!r.ok) return null;
+      const buf = Buffer.from(await r.arrayBuffer());
+      if (buf.length > budget) { budget = 0; return null; }   // 一超预算就整体收手
+      budget -= buf.length;
+      return {
+        buf,
+        type: r.headers.get("content-type")?.split(";")[0]
+          || SNAP_MIME[extOf(u)] || "application/octet-stream",
+      };
+    } catch { return null; }
+  };
+  const asDataUri = async (u) => {
+    const got = await grab(u);
+    return got && `data:${got.type};base64,${got.buf.toString("base64")}`;
+  };
+
+  // CSS 里的 url():字体和背景图都藏在这儿,不处理页面就是一副没字体的裸样子
+  const inlineCssUrls = (css, cssBase) => replaceAsync(
+    css, /url\(\s*(['"]?)([^'")]+)\1\s*\)/gi,
+    async (whole, _q, u) => {
+      let abs = null;
+      try { const x = new URL(u, cssBase); if (LOCAL_HOST.test(x.hostname)) abs = x.href; } catch { return whole; }
+      if (!abs) return whole;
+      const d = await asDataUri(abs);
+      return d ? `url("${d}")` : whole;
+    });
+
+  // 1. <link rel=stylesheet> → <style>
+  html = await replaceAsync(html, /<link\b[^>]*>/gi, async (tag) => {
+    if (!/\brel=["']?stylesheet["']?/i.test(tag)) return tag;
+    const href = (tag.match(/\bhref=["']([^"']+)["']/i) || [])[1];
+    const abs = absLocal(href);
+    if (!abs) return tag;
+    const got = await grab(abs);
+    if (!got) return tag;
+    return `<style>${await inlineCssUrls(got.buf.toString("utf8"), abs)}</style>`;
+  });
+
+  // 2. <script src> → 内联。type="module" 这类属性照抄,丢了脚本就跑不起来;
+  //    crossorigin 反过来要去掉 —— 内联之后没有跨域这回事了。
+  html = await replaceAsync(html, /<script\b([^>]*)\bsrc=["']([^"']+)["']([^>]*)>\s*<\/script>/gi,
+    async (tag, pre, src, post) => {
+      const abs = absLocal(src);
+      if (!abs) return tag;
+      const got = await grab(abs);
+      if (!got) return tag;
+      const attrs = (pre + post).replace(/\bcrossorigin\b(=["'][^"']*["'])?/gi, "").trim();
+      // JS 字符串里出现 "</script" 会把标签提前闭合,拆开躲掉
+      return `<script ${attrs}>${got.buf.toString("utf8").replace(/<\/script/gi, "<\\/script")}</script>`;
+    });
+
+  // 3. <img src> → data URI
+  html = await replaceAsync(html, /<img\b[^>]*>/gi, async (tag) => {
+    const src = (tag.match(/\bsrc=["']([^"']+)["']/i) || [])[1];
+    const abs = absLocal(src);
+    if (!abs) return tag;
+    const d = await asDataUri(abs);
+    return d ? tag.replace(/(\bsrc=["'])[^"']+(["'])/i, `$1${d}$2`) : tag;
+  });
+
+  // 4. 页面内嵌 <style> 里的 url() —— 这批没经过第 1 步
+  html = await replaceAsync(html, /<style\b[^>]*>([\s\S]*?)<\/style>/gi,
+    async (tag, css) => (css.includes("url(") ? tag.replace(css, await inlineCssUrls(css, base)) : tag));
+
+  return { html, base, truncated: budget <= 0 };
+}
+
 function send(ws, obj) {
   // ws 可能是 null:待发队列里的消息重放时,当初那条连接早断了(手机息屏),这时只走 broadcast
   if (ws?.readyState === 1) ws.send(JSON.stringify(obj));
@@ -2176,6 +2290,15 @@ wss.on("connection", (ws) => {
         saveIndex(idx);
         startSession(ws, { id, cwd, resume: m.resume });
         send(ws, { type: "session_created", sessionId: id, cwd, title, resume: m.resume ?? null, inheritFrom: m.inheritFrom ?? null, casual: isCasual || undefined });
+        break;
+      }
+      case "preview_snapshot": {
+        // 手机要看本机 dev server 的效果。localhost 在手机上指的是手机自己,
+        // 所以由这台机去抓,内联成一份自包含 HTML 发过去(见 snapshot 的注释)。
+        // 失败也要回包 —— 手机那边在等,不回就一直转圈。
+        snapshot(m.url)
+          .then((r) => send(ws, { type: "preview_snapshot", url: m.url, ...r }))
+          .catch((e) => send(ws, { type: "preview_snapshot", url: m.url, error: e?.message || String(e) }));
         break;
       }
       case "blob_get": {
