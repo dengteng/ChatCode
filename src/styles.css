@@ -1003,7 +1003,24 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 .custom-slider-row { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
 .custom-slider-row label { flex: 0 0 96px; display: flex; justify-content: space-between; font-size: 13px; color: var(--text); }
 .custom-slider-row label .muted { font-family: Menlo, monospace; font-size: 11.5px; }
-.custom-slider-row input[type="range"] { flex: 1; accent-color: var(--accent); cursor: pointer; }
+/* 轨道填充自己画,不用 accent-color:原生填充只到 thumb 圆心,拉到最大值右边还剩半个 thumb 没填,
+   看着就是"拉不到底"。--fill 由 Settings.tsx 的 sliderFill 算到 thumb 右边沿(见那里的注释)。 */
+.custom-slider-row input[type="range"] {
+  flex: 1; cursor: pointer; -webkit-appearance: none; appearance: none;
+  --th: 18px; --track: 6px;
+  height: var(--th); background: transparent;
+}
+.custom-slider-row input[type="range"]::-webkit-slider-runnable-track {
+  height: var(--track); border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent) 0 var(--fill, 0px), var(--border) var(--fill, 0px) 100%);
+}
+.custom-slider-row input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: var(--th); height: var(--th); border-radius: 50%;
+  background: #fff; border: 1px solid var(--border); box-shadow: 0 1px 3px rgb(0 0 0 / .25);
+  margin-top: calc((var(--track) - var(--th)) / 2); /* thumb 比轨道高,负 margin 骑在轨道中线上 */
+}
+.custom-slider-row input[type="range"]:focus-visible::-webkit-slider-thumb { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent); }
 .custom-theme-ops .primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 
 .app[data-theme="light"] .info-panel { background: #fbfcfd; }

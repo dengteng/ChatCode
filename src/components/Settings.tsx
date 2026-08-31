@@ -22,6 +22,11 @@ import { checkVersion, APP_VERSION, SDK_VERSION, ApiError, type VersionCheck } f
 
 type Tab = "appearance" | "account" | "profile" | "github" | "ssh" | "extensions" | "notify" | "about";
 
+// 滑杆填充长度。原生 accent-color 的填充只走到 thumb 圆心 —— 拉到底也差半个 thumb,看着像"拉不到头"。
+// 这里算到 thumb 的右边沿:最小值时填充正好被 thumb 盖住(看着空),最大值时铺满整条(看着满)。
+const sliderFill = (v: number, min: number, max: number) =>
+  ({ "--fill": `calc(${(v - min) / (max - min)} * (100% - var(--th)) + var(--th))` } as React.CSSProperties);
+
 // provider logo:有官方图(Claude/DeepSeek)显示图,和会话头像/侧栏共用同一份;没有的退回字母底
 function ProviderLogo({ name, cls, ini }: { name: string; cls: string; ini: string }) {
   const logo = modelLogo(name);
@@ -167,7 +172,6 @@ function AppearanceTab({ theme, onPick, customBg, customBlur, customBrightness, 
   };
   const bgPanel = (
     <div className="custom-theme-panel">
-      <p className="muted">{t("上传一张图片作为背景。系统自动分析图片的亮度、构图与复杂度:主区保护层自动选明暗、透明度随图的复杂程度调节(始终保证文字对比 ≥4.5:1),图片主色用于按钮、选中态与用户气泡。")}</p>
       <div className="custom-bg-preview" style={customBg ? { backgroundImage: `url("${customBg}")` } : undefined}>
         {!customBg && <span className="muted">{t("未选择图片")}</span>}
       </div>
@@ -177,11 +181,13 @@ function AppearanceTab({ theme, onPick, customBg, customBlur, customBrightness, 
       </div>
       <div className="custom-slider-row">
         <label>{t("侧栏模糊")}<span className="muted">{customBlur}px</span></label>
-        <input type="range" min={0} max={40} step={1} value={customBlur} onChange={(e) => onSetCustomBlur(Number(e.target.value))} />
+        <input type="range" min={0} max={40} step={1} value={customBlur} style={sliderFill(customBlur, 0, 40)}
+          onChange={(e) => onSetCustomBlur(Number(e.target.value))} />
       </div>
       <div className="custom-slider-row">
         <label>{t("侧栏亮度")}<span className="muted">{Math.round(customBrightness * 100)}%</span></label>
-        <input type="range" min={50} max={150} step={5} value={Math.round(customBrightness * 100)} onChange={(e) => onSetCustomBrightness(Number(e.target.value) / 100)} />
+        <input type="range" min={50} max={150} step={5} value={Math.round(customBrightness * 100)} style={sliderFill(Math.round(customBrightness * 100), 50, 150)}
+          onChange={(e) => onSetCustomBrightness(Number(e.target.value) / 100)} />
       </div>
       <input ref={fileRef} type="file" accept="image/*" hidden onChange={(e) => pickFile(e.target.files?.[0])} />
     </div>
