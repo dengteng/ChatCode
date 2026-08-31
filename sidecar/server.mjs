@@ -2149,6 +2149,12 @@ refreshBalances();
 setInterval(refreshBalances, 60_000).unref();
 
 wss.on("connection", (ws) => {
+  console.log(`[ws] 客户端接入(当前 ${wss.clients.size} 个)`);
+  // 断连要留证据:以前这里只挂 message,客户端掉线 sidecar 一声不吭,事后查不出是谁先断的。
+  // error 更要紧 —— ws 实例上没人听 'error',node 会把它抛成未捕获异常,一次就掀掉整个 sidecar。
+  ws.on("close", (code, reason) => console.log(`[ws] 客户端断开 code=${code} reason=${reason?.toString() || "(空)"}`));
+  ws.on("error", (e) => console.error("[ws] 客户端出错:", e.message));
+
   send(ws, { type: "index", sessions: indexWithStatus(), groups: loadGroups() });
   if (lastUsage || lastKimiUsage) send(ws, { type: "usage", usage: lastUsage, kimiUsage: lastKimiUsage });
   else { refreshSubscriptionUsage(); refreshKimiUsage(); }

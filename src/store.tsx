@@ -46,6 +46,7 @@ export interface RememberChoice { updates: PermissionSuggestion[]; label: string
 // 开发时 sidecar 由 npm run dev 起在 8975;打包后由 Rust 起在 8976。
 // 端口分开,装好的 app 和正在跑的 tauri dev 才能并存,不会 EADDRINUSE。
 export const SIDECAR_PORT = import.meta.env.DEV ? 8975 : 8976;
+const WS_DOWN = "ws-down"; // 断连常驻 toast 的 key,重连时按它收掉
 
 // ws 握手令牌:Rust 每次启动随机生成,只经 tauri command 发给自家 webview —— 浏览器网页调不到 IPC,
 // 也就连不上这个固定的 loopback 端口(WebSocket 不受同源策略约束,不校验等于本机任意网页可执行命令)。
@@ -776,10 +777,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       ws.onopen = () => {
         dispatch({ type: "connected", v: true });
         resync.current = true; // 见下面 index 分支:重连后拿 sidecar 的真状态校一次
-
+        dismissToast(WS_DOWN);
         send({ type: "set_lang", lang: getLang() }); // 让 sidecar 一上来就按当前语言出消息
       };
-      ws.onclose = () => { dispatch({ type: "connected", v: false }); prefetched.current = false; if (!stop) setTimeout(connect, 1500); };
+      ws.onerror = () => console.warn("[ws] 出错 readyState=", ws.readyState); // 紧跟着必有 onclose,这里只留个痕
+      ws.onclose = (ev) => {
+        console.warn(`[ws] 断开 code=${ev.code} reason=${ev.reason || "(空)"} wasClean=${ev.wasClean}`);
+        dispatch({ type: "connected", v: false });
+        prefetched.current = false;
+        // 断连当下就把转圈停掉:那轮的 turn_ended 会丢在断线里,不停就一直转到天荒地老,
+        // 而用户要等到手动发下一条才知道断了。真相以重连后的第一份 index 为准 ——
+        // 那边会把「其实还在跑」的会话恢复回 running(见下面 resync 的两个方向)。
+        for (const s of Object.values(stateRef.current.sessions))
+          if (s.status === "running") dispatch({ type: "patch", id: s.id, patch: { status: "idle" } });
+        toast(i18n.t("与后端断开 —— 正在重连,这期间发不出消息"), "error", WS_DOWN); // 带 key = 常驻,重连时收掉
+        if (!stop) setTimeout(connect, 1500);
+      };
       ws.onmessage = (ev) => {
         const m = JSON.parse(ev.data);
         switch (m.type) {
@@ -792,8 +805,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               resync.current = false;
               for (const e of m.sessions) {
                 const s = stateRef.current.sessions[e.id];
-                if (s && s.status === "running" && e.status !== "running")
+                if (!s) continue;
+                if (s.status === "running" && e.status !== "running")
                   dispatch({ type: "patch", id: e.id, patch: { status: "idle", bgWait: false, bgTasks: [] } });
+                // 反向也要校:onclose 把转圈一律停了,可 sidecar 那边这轮多半还在跑 —— 不恢复就成了
+                // 「界面空闲、后台在跑」,待发队列会当成空闲把下一条插进去。
+                else if (s.status !== "running" && e.status === "running")
+                  dispatch({ type: "patch", id: e.id, patch: { status: "running" } });
               }
             }
             // 启动后异步暖缓存:切到哪个会话都不再"Git…"闪一下,底部用量条也立刻有数。只在首个 index 触发。
