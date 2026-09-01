@@ -2325,6 +2325,7 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
 .cg-row { display: flex; flex-direction: column; justify-content: center; gap: 3px; min-width: 0; padding-left: 4px; border-radius: 5px; }
 .cg-row-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .cg-row:hover { background: color-mix(in srgb, var(--text) 5%, transparent); }
+.cg-row.clickable { cursor: pointer; }
 .cg-ref { flex: none; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; padding: 0 6px; line-height: 15px; border-radius: 99px; background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); border: 0; font-family: inherit; cursor: pointer; }
 .cg-ref:hover { filter: brightness(1.08); box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--accent) 40%, transparent); }
 .cg-ref.pick-target { box-shadow: 0 0 0 1.5px var(--accent); } /* 对比拾取中:可点的对端高亮 */
@@ -2366,6 +2367,11 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
 .branches-diff-nums { flex: none !important; font-size: 11px; }
 .branches-diff-nums .add { color: #2e9c58; } .branches-diff-nums .del { color: #e5484d; }
 .branches-diff-err { color: #e5484d; font-size: 12px; }
+/* 提交详情:说明在上、元信息一行、文件列表接下面(和对比视图共用文件列表那套样式) */
+.cd-subject { font-size: 13px; font-weight: 600; line-height: 1.45; word-break: break-word; }
+/* 正文原样保行,但长行还要能折 —— pre 默认不折,提交里贴的 URL 会把整块撑到横向滚动 */
+.cd-body { margin: 6px 0 0; font: 12px/1.55 Menlo, monospace; white-space: pre-wrap; word-break: break-word; color: var(--text); }
+.cd-meta { margin: 6px 0; font-size: 11px; word-break: break-word; }
 /* 对比视图:文件可点开看 patch */
 .branches-file.diffline.clickable { cursor: pointer; }
 .branches-file.diffline.clickable:hover { color: var(--accent); }

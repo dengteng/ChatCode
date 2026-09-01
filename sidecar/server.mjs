@@ -666,6 +666,29 @@ async function gitDiff(cwd, from, to) {
   return { from, to, ahead: left, behind: right, files, error: counts.ok ? undefined : counts.stderr.trim().slice(0, 200) };
 }
 
+// 单个提交的详情:元信息(含完整正文,拓扑图里只有被截断的 %s)+ 这次改了哪些文件。
+// 为什么是 git show 而不是 `git diff <hash>^ <hash>`:根提交没有 ^,那条命令直接 fatal —— 而根提交
+// 恰恰是新仓库里最先能被点到的那个。show 对根提交天然拿空树当左端。
+// --first-parent:裸 show 对合并提交打的是 combined diff(常常什么都不打),看着像"这次没改文件"。
+// %x00 分隔:提交正文里换行、制表符都可能有,只有 NUL 是 git 不会放进正文的。
+async function gitCommit(cwd, hash) {
+  const root = await execOut("git", ["rev-parse", "--show-toplevel"], cwd);
+  if (!root.ok) return { hash, files: [], error: "非 git 仓库" };
+  const repo = root.stdout.trim();
+  const [meta, numstat] = await Promise.all([
+    execOut("git", ["show", "-s", "--format=%H%x00%P%x00%an%x00%ae%x00%aI%x00%s%x00%b", hash], repo),
+    execOut("git", ["show", "--first-parent", "--numstat", "--format=", hash], repo),
+  ]);
+  if (!meta.ok) return { hash, files: [], error: meta.stderr.trim().slice(0, 200) };
+  const [full, parents, author, email, date, subject, body] = meta.stdout.split("\0");
+  const files = numstat.stdout.split("\n").filter(Boolean).map((line) => {
+    const [add, del, ...name] = line.split("\t");
+    return { file: name.join("\t"), add: add === "-" ? null : Number(add), del: del === "-" ? null : Number(del) }; // "-" = 二进制
+  });
+  return { hash: (full || hash).trim(), parents: (parents || "").trim().split(" ").filter(Boolean),
+    author, email, date, subject, body: (body || "").replace(/\s+$/, ""), files };
+}
+
 // 每轮随用户消息注入的系统上下文,统一走这里去重。
 // 为什么必须去重:SDK query 是长驻的,每轮 push 的 user 消息全部留在上下文里。同一类 note 每轮重发,
 // 到第 20 轮就堆了 20 份自相矛盾的旧快照(早期那份说"3 处未提交",最新那份说"干净"),
@@ -730,9 +753,13 @@ async function gitFileDiff(cwd, from, to, file) {
   // 超过 CLIP_LINES 就重跑一次 git 默认的 3 行上下文,前端标注「已截断」。
   //   实测 package-lock.json 一次 npm install:全文 8089 行 → -U3 844 行。
   // ponytail: 上限是「改动本身就上万行」(整份生成文件被重写),-U3 也救不了,那时才谈虚拟滚动。
-  // to === "WORKTREE":工作区未提交改动(HEAD vs 工作区),两点语义;否则两 ref 三点对比
+  // to === "WORKTREE":工作区未提交改动(HEAD vs 工作区),两点语义;
+  // from === "PARENT":单个提交自己改了什么(to = 该提交),走 show,理由同 gitCommit —— 根提交没有 ^;
+  // 否则两 ref 三点对比。
   const CLIP_LINES = 2000;
-  const run = (ctx) => execOut("git", to === "WORKTREE"
+  const run = (ctx) => execOut("git", from === "PARENT"
+    ? ["show", "--first-parent", "--format=", ctx, to, "--", file]
+    : to === "WORKTREE"
     ? ["diff", ctx, from, "--", file]
     : ["diff", ctx, `${from}...${to}`, "--", file], root.stdout.trim());
   let r = await run("-U999999");
@@ -2193,6 +2220,11 @@ wss.on("connection", (ws) => {
       case "git_diff": {
         const cwd = resolveCwd(m.sessionId);
         gitDiff(cwd, m.from, m.to).then((data) => send(ws, { type: "git_diff", sessionId: m.sessionId, ...data }));
+        break;
+      }
+      case "git_commit_detail": {
+        const cwd = resolveCwd(m.sessionId);
+        gitCommit(cwd, m.hash).then((data) => send(ws, { type: "git_commit_detail", sessionId: m.sessionId, ...data }));
         break;
       }
       case "commit_suggest": { // commit 弹窗打开时:汇总各轮 AI 已写的「本轮小结」回填输入框(不再二次调 AI,秒回)

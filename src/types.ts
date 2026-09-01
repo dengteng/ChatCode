@@ -292,6 +292,8 @@ export interface GitCommit { hash: string; parents: string[]; author: string; da
 export interface GitLogData { commits: GitCommit[]; heads: { name: string; sha: string; remote: boolean }[] }
 export interface GitDiffFile { file: string; add: number | null; del: number | null } // null = 二进制
 export interface GitDiffData { from: string; to: string; ahead: number; behind: number; files: GitDiffFile[]; error?: string }
+// 点开拓扑图某个提交时拉的详情。body = 完整正文(图上只有被截断的 subject),email/parents 图上没有
+export interface GitCommitDetail { hash: string; parents?: string[]; author?: string; email?: string; date?: string; subject?: string; body?: string; files: GitDiffFile[]; error?: string }
 export interface GitInfo {
   cwd: string; isRepo: boolean; root?: string; current?: string; status?: string;
   local: GitBranch[]; remote: string[]; remotes: string[]; remoteUrl?: string;

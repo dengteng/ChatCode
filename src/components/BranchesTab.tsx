@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { openUrl } from "../native";
 import { html as diffToHtml } from "diff2html";
 import "diff2html/bundles/css/diff2html.min.css";
-import type { Session, GitLogData, GitCommit, GitBranch } from "../types";
+import type { Session, GitLogData, GitCommit, GitCommitDetail, GitBranch, GitDiffFile } from "../types";
 import { useStore } from "../store";
 import { q, pushCmd, pushTargets, lanesFor, unpushedFor, COMMIT_HOLD_MS, type RepoLane } from "../lib/gitcmd";
 import { btnPress } from "../lib/utils";
@@ -58,11 +58,12 @@ const DISCARD_CMD = "git reset --hard HEAD && git clean -fd";
 // 写操作全走 runTerminal(输出进主窗口时间线,完事自动刷新 git_info + git_log);危险操作两步确认。
 export function BranchesTab({ session, onCommit, committing }: { session: Session; onCommit: () => void; committing?: boolean }) {
   const { t } = useTranslation();
-  const { state, runTerminal, requestGitLog, requestGitDiff, requestGitFileDiff } = useStore();
+  const { state, runTerminal, requestGitLog, requestGitDiff, requestGitFileDiff, requestGitCommitDetail } = useStore();
   const git = state.git[session.id];
   const log = state.gitLog[session.id];
   const diff = state.gitDiff[session.id];
   const fileDiff = state.gitFileDiff[session.id];
+  const commitDetail = state.gitCommitDetail[session.id];
   const [confirm, setConfirm] = useState<{ cmd: string; label: string } | null>(null); // 待弹窗确认的危险操作
   // kind="repo" 时 ref = 远端名(不是分支名),菜单换成远端管理那一组
   const [menu, setMenu] = useState<{ ref: string; remote: boolean; x: number; y: number; kind?: "repo" } | null>(null);
@@ -71,6 +72,7 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
   const [prompt, setPrompt] = useState<{ kind: "rename" | "newbranch" | "upstream" | "remoteadd" | "remotename" | "remoteurl"; ref: string; val: string; val2?: string; target?: "local" | "remote" } | null>(null);
   const [compareFrom, setCompareFrom] = useState<string | null>(null); // 已选对比左端,等点第二个节点选右端
   const [compareView, setCompareView] = useState<{ from: string; to: string } | null>(null);
+  const [commitView, setCommitView] = useState<string | null>(null); // 拓扑图里点开的那个提交(全长 sha)
   const [wtFile, setWtFile] = useState<string | null>(null); // 工作区单文件 diff 弹窗:正在查看的文件
   const lastChanged = useRef<ReturnType<typeof parseStatus>>([]); // 工作区折叠退场时还得渲染的最后一份文件列表
   const [pushing, setPushing] = useState(false); // 映射图上的 push 进行中:禁二次点击 + 菊花
@@ -111,7 +113,7 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
   // 真切了分支(git switch 跑完)就松开钉住的聚焦,主脊跟到新分支上。
   // 不松开的话:切过去了,脊还画着旧分支,push 按钮因为"聚焦≠当前"整组消失,像是坏了。
   useEffect(() => { setFocus(null); }, [git?.current]);
-  useEffect(() => { setConfirm(null); setMenu(null); setPrompt(null); setCompareFrom(null); setCompareView(null); setWtFile(null); setFocus(null); setRepo(null); }, [session.id]);
+  useEffect(() => { setConfirm(null); setMenu(null); setPrompt(null); setCompareFrom(null); setCompareView(null); setCommitView(null); setWtFile(null); setFocus(null); setRepo(null); }, [session.id]);
 
   // 工作区「查看改动」:拉 HEAD vs 工作区的单文件 patch,弹窗里用 diff2html 渲染(不再糊进终端)
   const viewWorktree = (path: string) => { setWtFile(path); requestGitFileDiff(session.id, "HEAD", "WORKTREE", path); };
@@ -122,6 +124,9 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
   // 危险操作:关掉菜单 + 打开弹窗二次确认(不再 inline),确认在弹窗里 run
   const danger = (label: string, cmd: string) => { setMenu(null); setPrompt(null); setConfirm({ cmd, label }); };
   const doCompare = (from: string, to: string) => { setCompareView({ from, to }); requestGitDiff(session.id, from, to); setCompareFrom(null); setMenu(null); };
+  // 拓扑图点某一行 → 提交详情。"PARENT" 是给 gitFileDiff 的哨兵:这个提交自己改了什么
+  // (不能写死 `${hash}^` —— 根提交没有父,那条命令会直接 fatal)。
+  const openCommit = (hash: string) => { setCommitView(hash); requestGitCommitDetail(session.id, hash); };
 
   if (!git) return <div className="info-scroll"><div className="muted branches-empty">{t("正在读取 Git 状态…")}</div></div>;
   if (!git.isRepo) return <div className="info-scroll"><div className="muted branches-empty">{t("当前目录不是 Git 仓库。在活动页可关联远程仓库。")}</div></div>;
@@ -242,7 +247,14 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
 
   return (
     <div className="info-scroll branches-tab">
-      {compareView ? (
+      {commitView ? (
+        <section className="branches-card branches-graph-card">
+          <CommitView hash={commitView} detail={commitDetail} fileDiff={fileDiff}
+            onBack={() => setCommitView(null)}
+            onRefresh={() => requestGitCommitDetail(session.id, commitView)}
+            onFile={(file) => requestGitFileDiff(session.id, "PARENT", commitView, file)} />
+        </section>
+      ) : compareView ? (
         <section className="branches-card branches-graph-card">
           <DiffView current={compareView.from} other={compareView.to} diff={diff} fileDiff={fileDiff}
             onBack={() => setCompareView(null)}
@@ -323,7 +335,7 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
               标题去掉了 —— 上面地址行已经交代了"在看哪个远端",再来个「提交拓扑」只是重复地把图往下推。 */}
           <section className="sync-zone brz-graph-zone">
             {log?.commits.length
-              ? <div className="branches-graph"><Graph log={log} repo={graphRepo} current={current} dirty={dirty} picking={compareFrom} onChip={onChip} /></div>
+              ? <div className="branches-graph"><Graph log={log} repo={graphRepo} current={current} dirty={dirty} picking={compareFrom} onChip={onChip} onCommit={openCommit} /></div>
               : <div className="muted branches-empty">{t("暂无提交记录")}</div>}
           </section>
           <div className="branches-hint muted">{multiRemote
@@ -693,7 +705,7 @@ function buildGraph(commits: GitCommit[]) {
   return { rows, edges, laneCount };
 }
 
-function Graph({ log, repo, current, dirty, picking, onChip }: { log: GitLogData; repo: string | null; current: string; dirty: boolean; picking: string | null; onChip: (ref: string, remote: boolean, e: React.MouseEvent) => void }) {
+function Graph({ log, repo, current, dirty, picking, onChip, onCommit }: { log: GitLogData; repo: string | null; current: string; dirty: boolean; picking: string | null; onChip: (ref: string, remote: boolean, e: React.MouseEvent) => void; onCommit: (hash: string) => void }) {
   const { t } = useTranslation();
   const { rows, edges, laneCount } = useMemo(() => buildGraph(log.commits), [log.commits]);
   // 远程 chip 只画选中仓库的(切换器在上面的仓库 tab)。本地 ref 全留 —— 它们不属于任何远端,
@@ -726,7 +738,12 @@ function Graph({ log, repo, current, dirty, picking, onChip }: { log: GitLogData
         const refs = headsBySha.get(r.c.hash) || [];
         const isUnpushed = unpushed.has(r.c.hash);
         return (
-          <div key={r.c.hash} className={`cg-row ${isUnpushed ? "unpushed" : ""}`} style={{ height: ROW_H }} title={`${r.c.hash.slice(0, 8)}  ${r.c.author}  ${r.c.subject}${isUnpushed ? `  ${t("(未推送)")}` : ""}`}>
+          <div key={r.c.hash} className={`cg-row ${isUnpushed ? "unpushed" : ""} ${picking ? "" : "clickable"}`} style={{ height: ROW_H }}
+            title={`${r.c.hash.slice(0, 8)}  ${r.c.author}  ${r.c.subject}${isUnpushed ? `  ${t("(未推送)")}` : ""}${picking ? "" : `\n${t("点击查看这次提交的详情")}`}`}
+            // 拾取对比对端时不抢:那会儿整张图上能点的只有分支标签,行一响应就把用户的对比流程打断了。
+            // onMouseDown 而不是 onClick,理由同分支 chip(WKWebView 里输入框聚焦时首次点击不派发 click)。
+            // 行内的分支标签自己 stopPropagation,点标签不会顺带弹出提交详情。
+            onMouseDown={(e) => { if (!picking && e.button === 0) onCommit(r.c.hash); }}>
             {/* 上行=这条提交的身份(分支标签 / 作者 / 时间),下行=说明文字。
                 说明常被截断,和身份挤一行时先牺牲的总是身份,分两行谁都不用让。 */}
             <div className="cg-row-top">
@@ -752,10 +769,7 @@ function fmtDate(d: string) { return new Date(d).toLocaleString(i18n.language ==
 // 对比视图:两 ref 各自独有提交数 + 文件级 +/− 统计;点文件名内联展开该文件 patch
 function DiffView({ current, other, diff, fileDiff, onBack, onRefresh, onFile }: { current: string; other: string; diff?: { from: string; to: string; ahead: number; behind: number; files: { file: string; add: number | null; del: number | null }[]; error?: string }; fileDiff?: { from: string; to: string; file: string; patch: string; clipped?: boolean; error?: string }; onBack: () => void; onRefresh: () => void; onFile: (file: string) => void }) {
   const { t } = useTranslation();
-  const [open, setOpen] = useState<string | null>(null); // 当前展开看正文的文件
   const stale = !diff || diff.from !== current || diff.to !== other; // 结果还没回来/是上一次的
-  useEffect(() => { setOpen(null); }, [current, other]); // 换对比对象收起展开
-  const toggle = (file: string) => { if (open === file) { setOpen(null); return; } setOpen(file); onFile(file); };
   return (
     <div className="branches-diff">
       <div className="branches-sec-h graph-h">
@@ -770,22 +784,72 @@ function DiffView({ current, other, diff, fileDiff, onBack, onRefresh, onFile }:
             <span className="branches-chip ahead">{t("{{a}} 独有 {{n}} 个提交", { a: current, n: diff.ahead })}</span>
             <span className="branches-chip behind">{t("{{a}} 独有 {{n}} 个提交", { a: other, n: diff.behind })}</span>
           </div>
-          {diff.files.length
-            ? diff.files.map((f) => {
-                const bin = f.add === null;
-                const isOpen = open === f.file;
-                const ready = isOpen && fileDiff && fileDiff.file === f.file;
-                return <div key={f.file} className={`branches-file-wrap ${isOpen ? "open" : ""}`}>
-                  <div className={`branches-file diffline ${bin ? "" : "clickable"}`} onClick={bin ? undefined : () => toggle(f.file)} title={bin ? f.file : t("点击查看改动")}>
-                    <span>{!bin && (isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />)}{f.file}</span>
-                    <span className="branches-diff-nums">
-                      {bin ? <i className="muted">{t("二进制")}</i> : <><b className="add">+{f.add}</b> <b className="del">−{f.del}</b></>}
-                    </span>
-                  </div>
-                  {isOpen && <div className="branches-file-patch">{ready ? (fileDiff.error ? <span className="branches-diff-err">{t("无法读取:{{error}}", { error: fileDiff.error })}</span> : <DiffHtml patch={fileDiff.patch} clipped={fileDiff.clipped} />) : <span className="muted">{t("加载中…")}</span>}</div>}
-                </div>;
-              })
-            : <div className="muted">{t("无文件差异")}</div>}
+          <FileList files={diff.files} fileDiff={fileDiff} onFile={onFile} resetKey={`${current}|${other}`} />
+        </>}
+    </div>
+  );
+}
+
+// 文件级改动列表:一行一个文件 + 展开看正文。分支对比和提交详情共用同一份 ——
+// 两者的区别只在 patch 拉的是哪两端,那由 onFile 决定,列表本身没有第二种长相。
+// resetKey 变了就收起展开:换了对比对象/换了提交,上一个展开的文件名很可能在新列表里根本不存在。
+function FileList({ files, fileDiff, onFile, resetKey }: {
+  files: GitDiffFile[];
+  fileDiff?: { from: string; to: string; file: string; patch: string; clipped?: boolean; error?: string };
+  onFile: (file: string) => void; resetKey: string;
+}) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState<string | null>(null); // 当前展开看正文的文件
+  useEffect(() => { setOpen(null); }, [resetKey]);
+  const toggle = (file: string) => { if (open === file) { setOpen(null); return; } setOpen(file); onFile(file); };
+  if (!files.length) return <div className="muted">{t("无文件差异")}</div>;
+  return <>{files.map((f) => {
+    const bin = f.add === null;
+    const isOpen = open === f.file;
+    const ready = isOpen && fileDiff && fileDiff.file === f.file;
+    return <div key={f.file} className={`branches-file-wrap ${isOpen ? "open" : ""}`}>
+      <div className={`branches-file diffline ${bin ? "" : "clickable"}`} onClick={bin ? undefined : () => toggle(f.file)} title={bin ? f.file : t("点击查看改动")}>
+        <span>{!bin && (isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />)}{f.file}</span>
+        <span className="branches-diff-nums">
+          {bin ? <i className="muted">{t("二进制")}</i> : <><b className="add">+{f.add}</b> <b className="del">−{f.del}</b></>}
+        </span>
+      </div>
+      {isOpen && <div className="branches-file-patch">{ready ? (fileDiff.error ? <span className="branches-diff-err">{t("无法读取:{{error}}", { error: fileDiff.error })}</span> : <DiffHtml patch={fileDiff.patch} clipped={fileDiff.clipped} />) : <span className="muted">{t("加载中…")}</span>}</div>}
+    </div>;
+  })}</>;
+}
+
+// 提交详情:拓扑图里点某一行进来。图上一行只放得下被截断的 subject,这里给完整正文 + 作者/时间/父提交,
+// 下面接这次改了哪些文件(点开看 patch)。
+function CommitView({ hash, detail, fileDiff, onBack, onRefresh, onFile }: {
+  hash: string; detail?: GitCommitDetail;
+  fileDiff?: { from: string; to: string; file: string; patch: string; clipped?: boolean; error?: string };
+  onBack: () => void; onRefresh: () => void; onFile: (file: string) => void;
+}) {
+  const { t } = useTranslation();
+  const stale = !detail || detail.hash !== hash; // 结果还没回来/是上一个点开的提交
+  const merge = (detail?.parents?.length || 0) > 1;
+  return (
+    <div className="branches-diff">
+      <div className="branches-sec-h graph-h">
+        <button className="ghost" {...btnPress(onBack)} title={t("返回拓扑图")}><ArrowLeft size={13} /></button>
+        {t("提交")} <b><code>{hash.slice(0, 8)}</code></b>
+        <button className="ghost" title={t("刷新")} {...btnPress(onRefresh)}><RotateCw size={13} /></button>
+      </div>
+      {stale ? <div className="muted branches-empty">{t("加载中…")}</div>
+        : detail!.error ? <div className="branches-diff-err">{detail!.error}</div>
+        : <>
+          <div className="cd-subject">{detail!.subject || t("(无提交说明)")}</div>
+          {/* 正文原样保行:提交说明里的列表/缩进是作者排过的,挤成一段就读不出条目 */}
+          {detail!.body && <pre className="cd-body">{detail!.body}</pre>}
+          <div className="cd-meta muted">
+            {detail!.author}{detail!.email ? ` <${detail!.email}>` : ""}
+            {detail!.date && <> · {new Date(detail!.date).toLocaleString(i18n.language === "zh" ? "zh-CN" : "en-US")}</>}
+            {!detail!.parents?.length && <> · {t("根提交")}</>}
+          </div>
+          {/* 合并提交给的是相对第一个父的 diff。不说明的话,用户会把"只有几个文件"当成这次合并只改了这些 */}
+          {merge && <div className="cd-meta muted">{t("合并提交（{{n}} 个父提交），下面是相对第一个父提交的改动", { n: detail!.parents!.length })}</div>}
+          <FileList files={detail!.files} fileDiff={fileDiff} onFile={onFile} resetKey={hash} />
         </>}
     </div>
   );

@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useReducer, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
-import type { AccountUsage, AuthStatus, GitDiffData, GitInfo, GitLogData, IndexEntry, LimitUsage, ModelInfo, PermissionSuggestion, ResumeChoice, SearchResult, Session, SessionGroup, SessionInfo, Spend, SshHost, TimelineItem, Wallet } from "./types";
+import type { AccountUsage, AuthStatus, GitCommitDetail, GitDiffData, GitInfo, GitLogData, IndexEntry, LimitUsage, ModelInfo, PermissionSuggestion, ResumeChoice, SearchResult, Session, SessionGroup, SessionInfo, Spend, SshHost, TimelineItem, Wallet } from "./types";
 import { sessionProvider, modelName } from "./types";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { toast, dismissToast } from "./components/Toast";
@@ -66,6 +66,7 @@ interface State {
   git: Record<string, GitInfo>;
   gitLog: Record<string, GitLogData>;   // 分支 Tab:提交拓扑图数据(按会话)
   gitDiff: Record<string, GitDiffData>; // 分支 Tab:最近一次两 ref 对比结果(按会话)
+  gitCommitDetail: Record<string, GitCommitDetail>; // 拓扑图点开的那个提交的详情(按会话)
   gitFileDiff: Record<string, { from: string; to: string; file: string; patch: string; clipped?: boolean; error?: string }>; // 对比视图点开的单文件 patch(clipped=文件太大,只给了改动附近的上下文)
   auth: AuthStatus | null;                          // 设置:账号登录状态
   sshHosts: SshHost[];                              // 设置:全局 SSH 主机预设
@@ -86,7 +87,7 @@ const emptyUsage: AccountUsage = { session: { usedPct: null, resetAt: null }, we
 const initial: State = {
   connected: false, index: [], groups: [], sessions: {}, activeId: null,
   usage: emptyUsage, usageKimi: emptyUsage,
-  search: [], git: {}, gitLog: {}, gitDiff: {}, gitFileDiff: {},
+  search: [], git: {}, gitLog: {}, gitDiff: {}, gitCommitDetail: {}, gitFileDiff: {},
   auth: null, sshHosts: [], sshTests: {}, autoAllow: {}, permMode: {}, spend: {}, wallet: {}, justCreatedId: null,
   homeModels: [], homeModel: (() => { try { return localStorage.getItem(HOME_MODEL_KEY) || "default"; } catch { return "default"; } })(),
 };
@@ -125,7 +126,8 @@ type Action =
   | { type: "git_info"; id: string; info: GitInfo }
   | { type: "git_log"; id: string; data: GitLogData }
   | { type: "git_diff"; id: string; data: GitDiffData }
-  | { type: "git_file_diff"; id: string; data: { from: string; to: string; file: string; patch: string; error?: string } }
+  | { type: "git_commit_detail"; id: string; data: GitCommitDetail }
+  | { type: "git_file_diff"; id: string; data: { from: string; to: string; file: string; patch: string; clipped?: boolean; error?: string } }
   | { type: "rename"; id: string; title: string }
   | { type: "clear_timeline"; id: string }             // /clear:清空可见对话
   | { type: "terminal_start"; id: string; command: string; cwd: string } // ! 命令乐观回显
@@ -177,6 +179,7 @@ function reducer(s: State, a: Action): State {
     case "git_info": return { ...s, git: { ...s.git, [a.id]: a.info } };
     case "git_log": return { ...s, gitLog: { ...s.gitLog, [a.id]: a.data } };
     case "git_diff": return { ...s, gitDiff: { ...s.gitDiff, [a.id]: a.data } };
+    case "git_commit_detail": return { ...s, gitCommitDetail: { ...s.gitCommitDetail, [a.id]: a.data } };
     case "git_file_diff": return { ...s, gitFileDiff: { ...s.gitFileDiff, [a.id]: a.data } };
     // /clear:清空可见对话,index 里落盘的 lastUser 一并抹掉 —— 否则列表副标题还挂着清空前的最近消息
     case "clear_timeline": {
@@ -690,6 +693,7 @@ interface Api {
   stopTask: (id: string, taskId: string) => void; // 停 agent 起的后台任务(SDK 侧,没有 pid 可杀)
   requestGitLog: (id: string) => void;
   requestGitDiff: (id: string, from: string, to: string) => void;
+  requestGitCommitDetail: (id: string, hash: string) => void;
   requestGitFileDiff: (id: string, from: string, to: string, file: string) => void;
   compareBranches: (id: string, base: string, head: string) => void;
   suggestCommit: (id: string, force?: boolean) => Promise<string>; // commit 弹窗:总结待提交改动;无新对话复用缓存,force 强制重跑
@@ -858,7 +862,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             if (w) { btwWaiters.current.delete(m.rid); m.error ? w.reject(new Error(m.error)) : w.resolve(m.text || ""); }
             break;
           }
-          case "git_file_diff": dispatch({ type: "git_file_diff", id: m.sessionId, data: { from: m.from, to: m.to, file: m.file, patch: m.patch, error: m.error } }); break;
+          // clipped 要带上:漏了的话「文件较大,只显示改动附近」那行提示永远不显示,用户会以为看到的是全文
+          case "git_file_diff": dispatch({ type: "git_file_diff", id: m.sessionId, data: { from: m.from, to: m.to, file: m.file, patch: m.patch, clipped: m.clipped, error: m.error } }); break;
+          case "git_commit_detail": dispatch({ type: "git_commit_detail", id: m.sessionId, data: {
+            hash: m.hash, parents: m.parents, author: m.author, email: m.email, date: m.date,
+            subject: m.subject, body: m.body, files: m.files || [], error: m.error } }); break;
           case "git_compare":
             dispatch({ type: "append", id: m.sessionId, item: { kind: "system", text: m.text, ts: Date.now() } }); break;
           case "models":
@@ -1181,6 +1189,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     stopTask(id, taskId) { send({ type: "stop_task", sessionId: id, taskId }); },
     requestGitLog(id) { send({ type: "git_log", sessionId: id }); },
     requestGitDiff(id, from, to) { send({ type: "git_diff", sessionId: id, from, to }); },
+    requestGitCommitDetail(id, hash) { send({ type: "git_commit_detail", sessionId: id, hash }); },
     requestGitFileDiff(id, from, to, file) { send({ type: "git_file_diff", sessionId: id, from, to, file }); },
     compareBranches(id, base, head) { send({ type: "git_compare", sessionId: id, base, head }); },
     suggestCommit(id, force) {
