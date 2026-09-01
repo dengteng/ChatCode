@@ -11,7 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 
 // Finder / Tauri 拉起的进程通常没有用户 zsh 的 Homebrew PATH。补齐常见目录，
 // 让 sidecar、! 终端命令以及 Claude Code 子进程看到相同的 gh / brew 等可执行文件。
@@ -543,6 +543,31 @@ function sshErrHint(raw, keyPath) {
 function execOut(bin, args, cwd, env, timeout = 12000) {
   return new Promise((resolve) => execFile(bin, args, { cwd, timeout, maxBuffer: 2 << 20, env: safeEnv(env) }, (err, stdout, stderr) =>
     resolve({ ok: !err, stdout: String(stdout || ""), stderr: String(stderr || ""), err })));
+}
+// 用户 shell 命令专用:必须用 spawn + 'exit',不能用 execFile。
+// execFile 的回调等的是 stdio 管道 EOF,而不是进程退出。命令若留下后台子孙进程(典型:git 仓库的
+// post-commit hook 里 `( ./build.sh > log 2>&1; rmdir lock ) &` 起打包),那个孙进程会一直攥着
+// stdout 的写端,管道就永不 EOF —— 于是一条 0.2s 就跑完的 `git commit` 也得挂到 timeout 才回,
+// 用户干等 30s 还以为 git 慢。'exit' 只认进程本身退出,孙进程持 fd 与我无关。
+// exit 后 setImmediate 一拍再收尾:让内核缓冲区里已就绪、但还没派发的 data 事件先跑完。
+function runShell(script, cwd, timeout, cb) {
+  const MAX = 4 << 20;
+  let out = "", errOut = "", killed = false, done = false;
+  const p = spawn("bash", ["-lc", script], { cwd, env: safeEnv() });
+  p.stdout.on("data", (d) => { if (out.length < MAX) out += d; });
+  p.stderr.on("data", (d) => { if (errOut.length < MAX) errOut += d; });
+  const timer = setTimeout(() => { killed = true; p.kill(); }, timeout);
+  const finish = (code, spawnErr) => {
+    if (done) return;
+    done = true;
+    clearTimeout(timer);
+    // 复刻 execFile 的错误形状:退出码非 0 或被超时杀掉时给 err,回调只读 .code / .killed
+    const err = spawnErr || (killed || code !== 0
+      ? Object.assign(new Error(killed ? "timeout" : `exit ${code}`), { code, killed }) : null);
+    cb(err, out, errOut);
+  };
+  p.on("error", (e) => finish(null, e));          // spawn 本身失败(ENOENT 等)
+  p.on("exit", (code) => setImmediate(() => finish(code, null))); // 被信号杀时 code 为 null
 }
 // 后台节流 fetch:upstream:track 只反映上次 fetch 到的 remote ref,不刷新就永远"已同步"。
 // 每仓库最多 30s fetch 一次,不阻塞 git_info(下一轮 15s 轮询就能读到新 ahead/behind)。
@@ -2593,7 +2618,7 @@ wss.on("connection", (ws) => {
         const cwd0 = sess?.termCwd || sess?.agentCwd || resolveCwd(m.sessionId);
         const script = `${m.command}\n__ec=$?; printf '\\0%s\\0%s' "$PWD" "$__ec"`;
         userCmdsRunning++; // 跑着期间挡掉后台 fetch,别跟用户的 push/pull 抢同一个远端(见 maybeFetch)
-        execFile("bash", ["-lc", script], { cwd: cwd0, timeout: 30000, maxBuffer: 4 << 20, env: safeEnv() }, (err, stdout, stderr) => {
+        runShell(script, cwd0, 30000, (err, stdout, stderr) => {
           userCmdsRunning--;
           let output = stdout || "", newCwd = cwd0, ec = err?.code ?? 0;
           const parts = output.split("\0");
