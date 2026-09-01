@@ -201,7 +201,13 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 .empty-composer { position: relative; padding: 10px 16px 16px; max-width: 760px; width: 100%; margin: 0 auto; }
 .empty-dir-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12px; }
 .empty-dir-pick { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--panel); color: var(--text); cursor: pointer; font-size: 12px; }
-.empty-dir-pick:hover { border-color: var(--accent); color: var(--accent); }
+.empty-dir-pick:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.empty-dir-pick:disabled { opacity: .45; cursor: default; }
+/* 两个入口并排,历史面板挂在这组下方(.palette 是绝对定位,得有个定位父级) */
+.empty-dir-pick-group { position: relative; display: inline-flex; gap: 8px; }
+/* .palette 默认 left/right:16px(贴输入框两侧),挂到这个窄父级上要改成从左沿起、按内容定宽 */
+.empty-hist-menu { left: 0; right: auto; width: min(420px, 86vw); }
+.empty-hist-last { margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .empty-model { position: relative; margin-left: auto; }
 .empty-model .model-switch { padding: 4px 8px; border-radius: 999px; }
 .empty-model .model-switch:hover { background: var(--panel); }

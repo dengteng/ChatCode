@@ -253,6 +253,10 @@ export interface IndexEntry {
 // 会话分组(左侧列表的文件夹)。顺序 = 数组顺序,持久化在 sidecar 的 groups.json
 export interface SessionGroup { id: string; name: string }
 
+// 已关闭的会话(首页「最近历史」)。sidecar 的 closed.json 里留着完整条目与 jsonl 日志,
+// 这里只带够渲染一行的字段;点开走 restore_session 原地恢复(id 不变,上下文接得上)。
+export interface ClosedEntry { id: string; title: string; cwd: string; lastUser?: string; closedAt: number }
+
 // ts:消息落盘时间的 ISO 字符串。老日志里 assistant 消息没有,sidecar 会退回同轮最近一条(见 findMessages)
 export interface SearchResult {
   sessionId: string; title: string; kind: "user" | "agent" | "tool"; text: string; ts?: string;

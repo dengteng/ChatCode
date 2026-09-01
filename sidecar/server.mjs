@@ -35,6 +35,7 @@ const SESS_DIR = path.join(DATA_DIR, "sessions");
 const SSH_DIR = path.join(DATA_DIR, "ssh"); // SSH ControlMaster 套接字
 const INDEX = path.join(DATA_DIR, "index.json");
 const GROUPS = path.join(DATA_DIR, "groups.json"); // 会话分组定义(顺序=数组顺序)
+const CLOSED = path.join(DATA_DIR, "closed.json"); // 关闭会话的回收站(见 CLOSED_LIMIT)
 const SETTINGS = path.join(DATA_DIR, "settings.json");
 fs.mkdirSync(SESS_DIR, { recursive: true });
 fs.mkdirSync(SSH_DIR, { recursive: true });
@@ -185,6 +186,16 @@ function saveIndex(idx) { fs.writeFileSync(INDEX, JSON.stringify(idx, null, 2));
 function loadGroups() { try { return JSON.parse(fs.readFileSync(GROUPS, "utf8")); } catch { return []; } }
 function saveGroups(g) { fs.writeFileSync(GROUPS, JSON.stringify(g, null, 2)); }
 
+// 关闭会话的回收站:关闭 = 从 index 移走但**留着** jsonl 与 sdkSessionId,首页「最近历史」列出来,
+// 点一条就搬回 index 原地恢复(id 不变 → 旧日志与 SDK 上下文都能接上)。
+// 超出上限的最旧条目才真删日志 —— 否则关掉的会话永远占着磁盘。
+// 闲聊会话不进这里:它的工作目录是一次性临时目录,关闭时已连目录一起删,列出来只是个空壳。
+const CLOSED_LIMIT = 20;
+function loadClosed() { try { return JSON.parse(fs.readFileSync(CLOSED, "utf8")); } catch { return []; } }
+function saveClosed(list) { fs.writeFileSync(CLOSED, JSON.stringify(list, null, 2)); }
+// 前端只需要够渲染一行的字段;整条 entry(含 spend/ssh/sdkSessionId)留在盘上,恢复时原样搬回
+const closedForClient = (list) => list.map((e) => ({ id: e.id, title: e.title, cwd: e.cwd, lastUser: e.lastUser, closedAt: e.closedAt }));
+
 // commit 小结水位:记录每个会话「已提交到第几条本轮小结」,下次 commit 只汇总其后的新小结。
 const COMMIT_WM = path.join(DATA_DIR, "commit-watermark.json");
 function loadCommitWm() { try { return JSON.parse(fs.readFileSync(COMMIT_WM, "utf8")); } catch { return {}; } }
@@ -274,9 +285,13 @@ function sessionStatus(id) {
 function indexWithStatus() {
   return loadIndex().map((e) => ({ ...e, status: sessionStatus(e.id) }));
 }
-// 会话列表 + 分组一起广播给所有客户端(索引/顺序/分组/运行状态任一变化都走这里)
+// 会话列表 + 分组 + 已关闭历史,一起给客户端(初次连接与后续广播同一份形状)
+function indexPayload() {
+  return { type: "index", sessions: indexWithStatus(), groups: loadGroups(), closed: closedForClient(loadClosed()) };
+}
+// 索引/顺序/分组/运行状态任一变化都走这里
 function broadcastIndex() {
-  const payload = JSON.stringify({ type: "index", sessions: indexWithStatus(), groups: loadGroups() });
+  const payload = JSON.stringify(indexPayload());
   for (const c of wss.clients) if (c.readyState === 1) c.send(payload);
 }
 // 把顶级会话移到 groupId(null=移出),插到 beforeId 之前(null=该组末尾)。与前端 applyMove 语义一致。
@@ -1049,6 +1064,7 @@ const EN_DICT = {
   "工作目录不存在: {{dir}} —— 目录被删或改名了。恢复该目录后再重连,或新建一个会话。":
     "Working directory is gone: {{dir}} — it was deleted or renamed. Restore it and reconnect, or start a new session.",
   "闲聊": "Casual",
+  "这条历史已不在了": "That history entry is gone",
   "新会话": "New session",
   "会话": "session",
   "错误: {{err}}": "Error: {{err}}",
@@ -2209,7 +2225,7 @@ wss.on("connection", (ws) => {
   ws.on("close", (code, reason) => console.log(`[ws] 客户端断开 code=${code} reason=${reason?.toString() || "(空)"}`));
   ws.on("error", (e) => console.error("[ws] 客户端出错:", e.message));
 
-  send(ws, { type: "index", sessions: indexWithStatus(), groups: loadGroups() });
+  send(ws, indexPayload());
   if (lastUsage || lastKimiUsage) send(ws, { type: "usage", usage: lastUsage, kimiUsage: lastKimiUsage });
   else { refreshSubscriptionUsage(); refreshKimiUsage(); }
   send(ws, { type: "wallet", wallet: walletPayload() }); // 今日/本月来自落盘账本,新窗口开着就有
@@ -2772,19 +2788,41 @@ wss.on("connection", (ws) => {
         break;
       }
       case "delete_session": {
-        // 关闭并从列表彻底移除:结束运行 + 删索引 + 删历史文件
+        // 关闭并从列表移除:结束运行 + 删索引。项目会话进回收站(留 jsonl,可从「最近历史」恢复),
+        // 闲聊会话仍是彻底删除 —— 它的临时目录跟着一起清掉,留个空壳没意义。
         sessions.get(m.sessionId)?.queue.end();
         sessions.delete(m.sessionId);
         const idx = loadIndex();
         const entry = idx.find((e) => e.id === m.sessionId);
-        const filtered = idx.filter((e) => e.id !== m.sessionId);
-        saveIndex(filtered);
-        try { fs.unlinkSync(path.join(SESS_DIR, `${m.sessionId}.jsonl`)); } catch {}
-        // 闲聊会话: 递归删除临时工作目录,不占磁盘
-        if (entry?.casual) {
-          try { fs.rmSync(entry.cwd, { recursive: true, force: true }); } catch {}
+        saveIndex(idx.filter((e) => e.id !== m.sessionId));
+        const jsonl = (id) => path.join(SESS_DIR, `${id}.jsonl`);
+        if (entry && !entry.casual) {
+          // 同一会话反复关/开只留一条;新的排最前
+          const list = [{ ...entry, closedAt: Date.now() }, ...loadClosed().filter((e) => e.id !== entry.id)];
+          for (const gone of list.slice(CLOSED_LIMIT)) { try { fs.unlinkSync(jsonl(gone.id)); } catch {} }
+          saveClosed(list.slice(0, CLOSED_LIMIT));
+        } else {
+          try { fs.unlinkSync(jsonl(m.sessionId)); } catch {}
+          // 闲聊会话: 递归删除临时工作目录,不占磁盘
+          if (entry?.casual) { try { fs.rmSync(entry.cwd, { recursive: true, force: true }); } catch {} }
         }
         for (const c of wss.clients) if (c.readyState === 1) c.send(JSON.stringify({ type: "session_deleted", sessionId: m.sessionId }));
+        broadcastIndex(); // 「最近历史」要立刻多出这一条
+        break;
+      }
+      case "restore_session": {
+        // 从「最近历史」恢复:把条目原样搬回 index(id 不变),真正的起会话/拉历史/恢复卡
+        // 全部交给随后的 reopen_session —— 那条路已经把 resume、上下文体积、权限模式都处理好了。
+        const list = loadClosed();
+        const entry = list.find((e) => e.id === m.sessionId);
+        if (!entry) { send(ws, { type: "session_error", sessionId: m.sessionId, error: tr("这条历史已不在了") }); break; }
+        const { closedAt, ...restored } = entry;
+        saveClosed(list.filter((e) => e.id !== entry.id));
+        const idx = loadIndex();
+        if (!idx.some((e) => e.id === entry.id)) idx.unshift(restored);
+        saveIndex(idx);
+        broadcastIndex(); // 先让客户端拿到新 index,再叫它 reopen —— 否则前端在自己的 index 里找不到这条
+        send(ws, { type: "session_restored", sessionId: entry.id });
         break;
       }
     }

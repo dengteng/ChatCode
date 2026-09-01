@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { FolderOpen, ArrowUp, X, ChevronDown, Info, Folder, File, CornerLeftUp, Sparkles } from "lucide-react";
+import { FolderOpen, ArrowUp, X, ChevronDown, Info, Folder, File, CornerLeftUp, Sparkles, History } from "lucide-react";
 import { BUILTIN_COMMANDS, modelName } from "../types";
 import { useStore } from "../store";
 import { openImageWindow } from "../popout";
@@ -49,13 +49,14 @@ const draft: { cwd: string; html: string; imgs: Map<string, Img>; idc: number } 
 // 也支持 /(内置命令补全)、@(选项目文件)、#(skill —— 首页无会话拿不到列表,只提示建会话后可用)。
 export function EmptyComposer() {
   const { t } = useTranslation();
-  const { state, startSessionWithMessage, requestHomeModels, setHomeModel } = useStore();
+  const { state, startSessionWithMessage, requestHomeModels, setHomeModel, restoreSession } = useStore();
   const [cwd, setCwd] = useState(draft.cwd);
   const [text, setText] = useState("");        // 纯文本镜像:驱动 / 命令面板与占位符
   const [imgCount, setImgCount] = useState(0);
   const [hasContent, setHasContent] = useState(false);
   const [preview, setPreview] = useState<{ src: string; left: number; top: number } | null>(null);
   const [modelMenu, setModelMenu] = useState(false);
+  const [histOpen, setHistOpen] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
   const [palIdx, setPalIdx] = useState(0);
   // @ 提及:mention=光标处的 @token(null=菜单关);mDir=浏览模式当前目录;mAll=全量索引(过滤用)
@@ -67,6 +68,7 @@ export function EmptyComposer() {
   const mDismiss = useRef(false);
   const [skillTok, setSkillTok] = useState<{ query: string } | null>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
+  const histRef = useRef<HTMLSpanElement>(null);
   const edRef = useRef<HTMLDivElement>(null);
   const imgData = useRef<Map<string, Img>>(draft.imgs); // 同一个 Map 引用:增删自动进草稿
   const idc = useRef(draft.idc);
@@ -84,13 +86,16 @@ export function EmptyComposer() {
 
   // 首页无会话:模型列表走 sidecar 缓存的 Claude 列表 + 已配置 provider。连上后拉一次。
   useEffect(() => { if (state.connected) requestHomeModels(); }, [state.connected]);
-  // 点菜单外收起
+  // 点菜单外收起(模型菜单 / 最近历史共用一套)
   useEffect(() => {
-    if (!modelMenu) return;
-    const onDown = (e: MouseEvent) => { if (!modelMenuRef.current?.contains(e.target as Node)) setModelMenu(false); };
+    if (!modelMenu && !histOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (modelMenu && !modelMenuRef.current?.contains(e.target as Node)) setModelMenu(false);
+      if (histOpen && !histRef.current?.contains(e.target as Node)) setHistOpen(false);
+    };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
-  }, [modelMenu]);
+  }, [modelMenu, histOpen]);
   const curModel = state.homeModels.find((m) => m.value === state.homeModel);
   const modelText = curModel ? modelName(state.homeModels, curModel)
     : (state.homeModel === "default" ? t("默认模型") : state.homeModel);
@@ -319,9 +324,34 @@ export function EmptyComposer() {
             <button className="empty-dir-x" onMouseDown={(e) => { e.preventDefault(); setCwd(""); }} title={t("清除,改为闲聊会话")}><X size={12} /></button>
           </span>
         ) : (
-          <button className="empty-dir-pick" onMouseDown={(e) => { e.preventDefault(); pick(); }}>
-            <FolderOpen size={13} /> {t("选择项目目录")}
-          </button>
+          // 两个入口:左边翻已关闭的会话(接着上次聊),右边从电脑挑目录(开新的)
+          <span className="empty-dir-pick-group" ref={histRef}>
+            <button className="empty-dir-pick" disabled={!state.closed.length}
+              title={state.closed.length ? t("从最近关闭的会话继续") : t("还没有关闭过的会话")}
+              onMouseDown={(e) => { e.preventDefault(); setHistOpen((v) => !v); }}>
+              <History size={13} /> {t("最近历史")}
+            </button>
+            <button className="empty-dir-pick" onMouseDown={(e) => { e.preventDefault(); pick(); }}>
+              <FolderOpen size={13} /> {t("选择项目目录")}
+            </button>
+            {histOpen && (
+              <div className="palette empty-hist-menu">
+                <div className="palette-head"><History size={13} /> {t("最近关闭的会话")}</div>
+                <div className="palette-scroll">
+                  {state.closed.map((c) => (
+                    <div key={c.id} className="palette-item"
+                      onMouseDown={(e) => { e.preventDefault(); setHistOpen(false); restoreSession(c.id); }}>
+                      <div>
+                        <b>{c.title}</b> <span className="muted">{short(c.cwd)}</span>
+                        {c.lastUser && <div className="muted empty-hist-last">{c.lastUser}</div>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="palette-hint">{t("点一条即恢复原对话,接着上次继续")}</div>
+              </div>
+            )}
+          </span>
         )}
         <div className="empty-model" ref={modelMenuRef}>
           <button className="model-switch" title={t("选择模型")} onMouseDown={(e) => { e.preventDefault(); if (!modelMenu) requestHomeModels(); setModelMenu((v) => !v); }}>

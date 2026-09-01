@@ -483,7 +483,9 @@ export function Sidebar({ onSearch, onOpenSettings, update, onShowUpdate }:
             {/* 两种情形共用同一层 dom/class,尺寸自然一致(宽度来自 .workspace-dialog),差别只在中间这几个按钮 */}
             <p>{killPrompt.procs > 0
               ? t("该会话仍有 {{count}} 个活跃进程/端口。关闭后要一并结束它们吗？", { count: killPrompt.procs })
-              : t("关闭后该会话的历史将被删除，且无法恢复。")}</p>
+              : killPrompt.e.casual
+                ? t("闲聊会话没有项目目录，关闭后历史与临时目录一并删除，无法恢复。")
+                : t("关闭后会移出列表，可在首页「最近历史」里恢复（只留最近 20 个）。")}</p>
             <div className="kill-dialog-ops">
               {killPrompt.procs > 0 ? <>
                 <button className="kill-yes" {...btnPress(() => doClose(killPrompt.e, true))}>{t("结束进程并关闭")}</button>

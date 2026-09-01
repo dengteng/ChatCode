@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useReducer, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
-import type { AccountUsage, AuthStatus, GitCommitDetail, GitDiffData, GitInfo, GitLogData, IndexEntry, LimitUsage, ModelInfo, PermissionSuggestion, ResumeChoice, SearchResult, Session, SessionGroup, SessionInfo, Spend, SshHost, TimelineItem, Wallet } from "./types";
+import type { AccountUsage, AuthStatus, ClosedEntry, GitCommitDetail, GitDiffData, GitInfo, GitLogData, IndexEntry, LimitUsage, ModelInfo, PermissionSuggestion, ResumeChoice, SearchResult, Session, SessionGroup, SessionInfo, Spend, SshHost, TimelineItem, Wallet } from "./types";
 import { sessionProvider, modelName } from "./types";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { toast, dismissToast } from "./components/Toast";
@@ -58,6 +58,7 @@ interface State {
   connected: boolean;
   index: IndexEntry[];
   groups: SessionGroup[];
+  closed: ClosedEntry[]; // 已关闭会话(首页「最近历史」),sidecar 随 index 一起下发
   sessions: Record<string, Session>;
   activeId: string | null;
   usage: AccountUsage; // 账号级订阅限额(所有会话共享)
@@ -85,7 +86,7 @@ const HOME_MODELS_ID = "__home__"; // 首页 get_models 的哨兵 sessionId
 const HOME_MODEL_KEY = "cc-home-model";
 const emptyUsage: AccountUsage = { session: { usedPct: null, resetAt: null }, weekly: { usedPct: null, resetAt: null }, fetchedAt: null, stale: false };
 const initial: State = {
-  connected: false, index: [], groups: [], sessions: {}, activeId: null,
+  connected: false, index: [], groups: [], closed: [], sessions: {}, activeId: null,
   usage: emptyUsage, usageKimi: emptyUsage,
   search: [], git: {}, gitLog: {}, gitDiff: {}, gitCommitDetail: {}, gitFileDiff: {},
   auth: null, sshHosts: [], sshTests: {}, autoAllow: {}, permMode: {}, spend: {}, wallet: {}, justCreatedId: null,
@@ -94,7 +95,7 @@ const initial: State = {
 
 type Action =
   | { type: "connected"; v: boolean }
-  | { type: "index"; index: IndexEntry[]; groups?: SessionGroup[] }
+  | { type: "index"; index: IndexEntry[]; groups?: SessionGroup[]; closed?: ClosedEntry[] }
   | { type: "groups"; groups: SessionGroup[] }
   | { type: "move_session"; sessionId: string; groupId: string | null; beforeId: string | null }
   | { type: "open"; session: Session }
@@ -146,7 +147,7 @@ function reducer(s: State, a: Action): State {
     s.sessions[id] ? { ...s, sessions: { ...s.sessions, [id]: f(s.sessions[id]) } } : s;
   switch (a.type) {
     case "connected": return { ...s, connected: a.v };
-    case "index": return { ...s, index: a.index, ...(a.groups ? { groups: a.groups } : {}) };
+    case "index": return { ...s, index: a.index, ...(a.groups ? { groups: a.groups } : {}), ...(a.closed ? { closed: a.closed } : {}) };
     case "groups": return { ...s, groups: a.groups };
     case "move_session": return { ...s, index: applyMove(s.index, a.sessionId, a.groupId, a.beforeId) };
     case "rename": {
@@ -661,6 +662,7 @@ interface Api {
   requestHomeModels: () => void;        // 首页拉取模型列表
   setHomeModel: (model: string) => void; // 首页选中模型(持久化,新会话以此启动)
   reopenSession: (id: string) => void;
+  restoreSession: (id: string) => void;
   restartSession: (id: string) => void;
   chooseResume: (id: string, choice: ResumeChoice) => void;
   // 返回 false = 与 sidecar 断连、这条没发出去。调用方必须据此保住原文(别清输入框)。
@@ -801,7 +803,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const m = JSON.parse(ev.data);
         switch (m.type) {
           case "index":
-            dispatch({ type: "index", index: m.sessions, groups: m.groups });
+            dispatch({ type: "index", index: m.sessions, groups: m.groups, closed: m.closed });
             // 重连后的第一份 index 兼作状态对表:断线期间那轮多半已经结束,turn_ended 却丢在断线里,
             // 界面就一直转圈。只在重连这一次做 —— 平时 index 可能比 user_message 先到,
             // 会把刚起的轮次错判成空闲,把待发队列提前放出去。
@@ -874,6 +876,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             else dispatch({ type: "patch", id: m.sessionId, patch: { models: m.models } });
             break;
           case "session_deleted": dispatch({ type: "remove_session", id: m.sessionId }); break;
+          // 「最近历史」恢复完成:条目已随前一条 index 回到列表,这里照常走重开(拉历史/接上下文)
+          case "session_restored": api.reopenSession(m.sessionId); break;
           // 连上远程后 termCwd 会被远程命令写成 "user@host:/path";一断开就得清掉,
           // 否则目录栏一直挂着远程路径。清空即回落到本地项目目录(各处都按 termCwd || cwd 取)。
           case "ssh_status": dispatch({ type: "patch", id: m.sessionId,
@@ -1055,6 +1059,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         dispatch({ type: "activate", id });
       }
       send({ type: "reopen_session", sessionId: id, haveHistory });
+    },
+    // 首页「最近历史」点一条:sidecar 把条目搬回 index 后回 session_restored,那时再 reopen
+    // (要等新 index 到了,reopenSession 才在 state.index 里找得到这条)
+    restoreSession(id) {
+      send({ type: "restore_session", sessionId: id });
     },
     restartSession(id) {
       send({ type: "restart_session", sessionId: id });
