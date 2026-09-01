@@ -177,6 +177,14 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
   from { opacity: 0; transform: translateY(.16em) scale(.8); }
   to   { opacity: 1; transform: none; }
 }
+/* 品牌字直接压在背景图上,图的**局部**明暗不可控 —— 浅色壳里照样能压着一片深色头发,
+   字色是按整体亮度算的,那一块就糊没了。加一圈跟壳相反的光晕把字从图上剥出来:
+   深壳字亮 → 暗晕,浅壳字深 → 白晕。em 单位跟着 4em 字号缩放。 */
+[data-palette="custom"] .brand-word span {
+  --brand-halo: rgba(255,255,255,.75);
+  text-shadow: 0 0 .07em var(--brand-halo), 0 0 .24em var(--brand-halo);
+}
+[data-palette="custom"][data-custom-shell="dark"] .brand-word span { --brand-halo: rgba(0,0,0,.55); }
 
 /* 本次会话已经播过进场了(从会话切回空态):直接落到终态 */
 .brand[data-skip] .brand-logo { animation: none; opacity: 1; translate: 0 0; }
