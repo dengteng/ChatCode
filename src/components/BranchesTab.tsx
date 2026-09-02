@@ -315,7 +315,7 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
           {/* ② 竖脊:聚焦的本地分支 → 扇出到每个远端 → 落到下面的仓库 tab(同时是拓扑的切换器) */}
           <section className="sync-zone">
             {compareFrom && <div className="branches-pick-hint">{t("选择要与")} <b>{compareFrom}</b> {t("对比的另一个分支节点…")} <button className="ghost" {...btnPress(() => setCompareFrom(null))}><X size={12} /> {t("取消")}</button></div>}
-            <BranchSpine local={git.local} remote={git.remote} remoteSha={git.remoteSha} remotes={git.remotes}
+            <BranchSpine local={git.local} remote={git.remote} remoteSha={git.remoteSha} remotes={git.remotes} pushSpecs={git.pushSpecs}
               current={current} focus={focusName} repo={graphRepo} dirty={dirty} picking={compareFrom}
               onChip={onChip} onFocus={setFocus} onRepo={setRepo} onRun={run}
               onRepoMenu={onRepoMenu}
@@ -426,8 +426,8 @@ const TAB_W = 118, TAB_GAP = 10;
 const SIDE_W = 46;
 const FORK_Y = 34, DROP_H = 40, FAN_H = FORK_Y + DROP_H; // 主干高 / 分叉后下落段高
 const TAIL = 26; // 传输光点的尾迹长度(px,svg 用户坐标)
-function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, dirty, picking, onChip, onFocus, onRepo, onRun, onRepoMenu, pushing, pushFlow, pullFlow, onPush, onNew, urlLine, onStem }:
-  { local: GitBranch[]; remote: string[]; remoteSha?: Record<string, string>; remotes: string[]; current: string; focus: string; repo: string | null; dirty: boolean;
+function BranchSpine({ local, remote, remoteSha, remotes, pushSpecs, current, focus, repo, dirty, picking, onChip, onFocus, onRepo, onRun, onRepoMenu, pushing, pushFlow, pullFlow, onPush, onNew, urlLine, onStem }:
+  { local: GitBranch[]; remote: string[]; remoteSha?: Record<string, string>; remotes: string[]; pushSpecs?: Record<string, string[]>; current: string; focus: string; repo: string | null; dirty: boolean;
     picking: string | null; onChip: (ref: string, remote: boolean, e: React.MouseEvent) => void; onFocus: (name: string) => void; onRepo: (name: string) => void;
     onRun: (cmd: string) => void; onRepoMenu: (name: string, e: React.MouseEvent) => void;
     pushing: boolean; pushFlow: boolean; pullFlow: boolean; onPush: (cmd: string) => void;
@@ -463,16 +463,18 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
   const localSorted = [...local].sort((x, y) => rank(x) - rank(y) || x.name.localeCompare(y.name));
   // 上游那条 lane 同理排最左:它是当前分支真正映射到的远程分支,和上面第一格的 chip 对齐着读。
   // sort 稳定,其余远端保持 remotes 的原顺序。
-  const lanes = lanesFor(focus, remotes, remote, b?.upstream)
+  const lanes = lanesFor(focus, remotes, remote, b?.upstream, pushSpecs)
     .sort((x, y) => Number(y.isUpstream) - Number(x.isUpstream));
   const laneRefs = lanes.map((l) => l.ref).filter(Boolean) as string[];
   const up = lanes.find((l) => l.isUpstream)?.ref;
   // push 按钮只给当前分支,且只给"确实还有东西可推"的远端(判定见 pushTargets)。
   // ref 还不存在的远端(从没推过)也算可推:那次 push 会把分支建出来。
   const pushable = isCur && b ? new Set(pushTargets(b, laneRefs, up, remoteSha)) : new Set<string>();
+  // 目标分支名一律走 l.push:配了 remote.<名>.push 时它和本地名不一样(main → oss),
+  // 拿 focus 去拼就会推到同名那条 —— 正是配置想避开的目标。远端还没这条分支时顺手建出来。
   const pushCmdFor = (l: RepoLane) => l.ref
     ? pushCmd(focus, l.ref)
-    : `git push ${up ? "" : "-u "}${q(l.remote)} ${q(focus)}`;  // 远端还没这条分支:顺手建出来
+    : `git push ${up ? "" : "-u "}${q(l.remote)} ${q(l.push && l.push !== focus ? `${focus}:${l.push}` : focus)}`;
   const canPush = (l: RepoLane) => isCur && !!b && (l.ref ? pushable.has(l.ref) : true);
   const pushLanes = lanes.filter(canPush);
   const showPush = pushLanes.length > 0 && !pushFlow && !pushing;
@@ -637,10 +639,14 @@ function BranchSpine({ local, remote, remoteSha, remotes, current, focus, repo, 
         <div className="brz-tabs" style={{ width: rowW, gap: TAB_GAP, "--side-w": `${SIDE_W}px` } as React.CSSProperties}>
           <div className="brz-tabrow" style={{ gap: TAB_GAP }}>
           {lanes.map((l) => (
-            <button key={l.remote} className={`brz-tab ${l.remote === repo ? "sel" : ""} ${l.ref ? "" : "empty"} ${l.isUpstream ? "up" : ""}`}
+            /* mapped 和 upstream 一样画实线:两者都是 git 认的映射,裸 push 真的会到那儿。
+               同名兜底来的仍是虚线 —— 它只是"名字撞上了",git 不会自己推过去。 */
+            <button key={l.remote} className={`brz-tab ${l.remote === repo ? "sel" : ""} ${l.ref ? "" : "empty"} ${l.isUpstream || l.mapped ? "up" : ""}`}
               style={{ width: TAB_W }} title={(l.ref
-                ? (l.isUpstream ? t("{{r}} · 上游,裸 git push 去这里", { r: l.ref }) : t("{{r}} · 同名远程分支,不是上游:裸 git push 不会推到这里", { r: l.ref }))
-                : t("{{remote}} 里还没有 {{name}} 分支", { remote: l.remote, name: focus })) + t(" · 右键管理远端")}
+                ? (l.mapped && !l.isUpstream ? t("{{r}} · remote.{{remote}}.push 配的映射,git push {{remote}} 去这里", { r: l.ref, remote: l.remote })
+                  : l.isUpstream ? t("{{r}} · 上游,裸 git push 去这里", { r: l.ref })
+                  : t("{{r}} · 同名远程分支,不是上游:裸 git push 不会推到这里", { r: l.ref }))
+                : t("{{remote}} 里还没有 {{name}} 分支", { remote: l.remote, name: l.push || focus })) + t(" · 右键管理远端")}
               onMouseDown={() => onRepo(l.remote)}
               onContextMenu={(e) => onRepoMenu(l.remote, e)}>
               <b className="brz-tab-remote">{l.remote}</b>

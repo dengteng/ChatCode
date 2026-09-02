@@ -305,6 +305,9 @@ export interface GitInfo {
   remoteSha?: Record<string, string>;
   // 远端名 → url(拓扑区切仓库时地址行跟着换);remoteUrl 是当前分支上游那个远端的,留着当兜底
   remoteUrls?: Record<string, string>;
+  // 远端名 → 该远端配的 push refspec(remote.<名>.push,可有多条)。分支面板据此决定
+  // 本地分支在这个远端里对着哪条分支 —— 两边名字对不上时(main → oss)只有这里说得清。
+  pushSpecs?: Record<string, string[]>;
   // task 有值 = agent 起的后台任务(SDK 报的),没有真 pid,停止走 stopTask 而非 kill_pid
   runtime?: { processes: { pid: string; name: string; elapsed: string; task?: string }[]; ports: { process: string; port: string }[] };
   github?: { installed: boolean; loggedIn: boolean; account?: string; detail?: string };

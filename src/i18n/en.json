@@ -773,6 +773,7 @@
   "暂无远程仓库": "No remotes configured",
   "{{r}} · 上游,裸 git push 去这里": "{{r}} · upstream — a bare git push goes here",
   "{{r}} · 同名远程分支,不是上游:裸 git push 不会推到这里": "{{r}} · same-named remote branch, not the upstream: a bare git push will not reach it",
+  "{{r}} · remote.{{remote}}.push 配的映射,git push {{remote}} 去这里": "{{r}} · mapped by remote.{{remote}}.push — git push {{remote}} goes here",
   "{{remote}} 里还没有 {{name}} 分支": "{{remote}} does not have a {{name}} branch yet",
   "{{name}} 还没有上游,设为 {{ref}}": "{{name}} has no upstream — set it to {{ref}}",
   "已从 {{reg}} 安装完成": "Installed from {{reg}}",

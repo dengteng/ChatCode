@@ -624,7 +624,7 @@ async function gitInfo(cwd, sessionId) {
   if (!root.ok) return { cwd, isRepo: false, local: [], remote: [], remotes: [], github, runtime: await runtimeInfo(cwd, sessionId) };
   const repo = root.stdout.trim();
   maybeFetch(repo); // 后台刷新 remote-tracking ref,让顶部 领先/落后 计数不至于长期过期
-  const [current, status, locals, remote, remotesV, runtime] = await Promise.all([
+  const [current, status, locals, remote, remotesV, pushCfg, runtime] = await Promise.all([
     // --no-optional-locks:status 默认会把刷新后的索引写回去,要抢 .git/index.lock。这是 15s 一轮的后台轮询,
     // 撞上用户正在跑的 git add/commit 就让对方报 "index.lock: File exists"。只读轮询不需要那把锁。
     execOut("git", ["branch", "--show-current"], repo), execOut("git", ["--no-optional-locks", "status", "--short"], repo),
@@ -632,8 +632,21 @@ async function gitInfo(cwd, sessionId) {
     execOut("git", ["for-each-ref", "--format=%(refname:short)\t%(objectname:short)\t%(authorname)", "refs/remotes"], repo),
     // `git remote -v` 一条顶原来的 `git remote` + `git remote get-url origin` 两条:名字和 url 一起给。
     // 每个远端两行(fetch/push),push 行在后、直接覆盖 —— 界面上那个地址回答的是"推到哪",按 push url 取才对。
-    execOut("git", ["remote", "-v"], repo), runtimeInfo(repo, sessionId),
+    execOut("git", ["remote", "-v"], repo),
+    // remote.<名>.push:本地分支推到该远端时的目标分支。有人的两个远端分支名对不上
+    // (本地 main → 私有仓的 oss),这条配置就是 git 里唯一表达这种映射的地方 ——
+    // 不读它,界面只能退回"同名匹配",给出一条注定 non-fast-forward 的 push 命令。
+    // 没配任何一条时 git 以 1 退出、stdout 为空,execOut 不抛,下面按空处理。
+    execOut("git", ["config", "--get-regexp", "^remote\\..*\\.push$"], repo),
+    runtimeInfo(repo, sessionId),
   ]);
+  // "remote.cloud.push refs/heads/main:refs/heads/oss" → { cloud: ["refs/heads/main:refs/heads/oss"] }
+  // 一个远端可以配多条(git 允许 --add),全给前端,让它按 focus 分支自己挑。
+  const pushSpecs = {};
+  for (const line of pushCfg.stdout.split("\n").filter(Boolean)) {
+    const m = line.match(/^remote\.(.+)\.push\s+(.+)$/);
+    if (m) (pushSpecs[m[1]] ||= []).push(m[2].trim());
+  }
   const urlByRemote = new Map(remotesV.stdout.split("\n").filter(Boolean).map((line) => {
     const [name, rest] = line.split("\t");
     return [name, (rest || "").replace(/\s+\((fetch|push)\)$/, "")];
@@ -663,7 +676,7 @@ async function gitInfo(cwd, sessionId) {
     remote: remoteRows.map(([name]) => name).filter((x) => x && x.includes("/") && !/\/HEAD$/.test(x)), remotes: [...urlByRemote.keys()],
     // 每个远程跟踪分支的 sha。界面判断"这条还有东西可推吗"要用:git 只给 upstream 算 ahead/behind,
     // 同名撞上的非上游远端(oss → private/oss)一个数都没有,只能拿 sha 和本地 head 比。
-    remoteSha: Object.fromEntries(shaByRemote),
+    remoteSha: Object.fromEntries(shaByRemote), pushSpecs,
     // 每个远端的 url。拓扑区的仓库切换器切到哪个远端,地址行就得跟着换 —— 只给一条 remoteUrl 的话,
     // 切到 private 还挂着 origin 的地址,等于告诉用户这些提交推去了另一个仓库。
     remoteUrls: Object.fromEntries(urlByRemote),

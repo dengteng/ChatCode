@@ -26,16 +26,46 @@ export function pushCmd(local: string, remoteRef: string) {
   return `git push ${q(remote)} ${q(`${local}:${rest.join("/")}`)}`;
 }
 
+// `remote.<名>.push` 的 refspec 解析:给定本地分支,问它按配置该推到该远端的哪条分支。
+// git 里这是表达「两边分支名对不上」的唯一位置(本地 main → 私有仓的 oss)。
+// 认这几种写法:`main:oss`、`refs/heads/main:refs/heads/oss`、带 `+` 的强推前缀、
+// 以及通配 `refs/heads/*:refs/heads/*`。没有冒号的单边 refspec 表示推到同名,不算重命名,返回 undefined。
+const shortRef = (r: string) => r.replace(/^refs\/heads\//, "");
+export function pushTargetOf(focus: string, specs?: string[]): string | undefined {
+  for (const raw of specs || []) {
+    const [src, dst] = raw.replace(/^\+/, "").split(":");
+    if (!dst) continue;
+    const [s, d] = [shortRef(src), shortRef(dst)];
+    if (s === focus) return d;
+    // 通配只处理最常见的「前缀 + 尾部 *」,复杂 refspec 交给 git 自己,界面不猜
+    if (s.endsWith("*") && d.endsWith("*") && focus.startsWith(s.slice(0, -1)))
+      return d.slice(0, -1) + focus.slice(s.length - 1);
+  }
+  return undefined;
+}
+
 // 聚焦的那条本地分支,在每个远端里对应哪条远程分支 —— 分支面板竖脊的扇出就是按这个画的,
 // 一个远端一条 lane。没有对应分支的远端**照样出一条**(ref=undefined):那条画虚线、落到「新建」,
 // 少画一条等于告诉用户"这个仓库不存在",而它只是还没推过。
-// 选法:先认 upstream(git 唯一认的那条),upstream 不在这个远端就退回同名匹配。
-export type RepoLane = { remote: string; ref?: string; isUpstream: boolean };
-export function lanesFor(focus: string, remotes: string[], remoteRefs: string[], upstream?: string): RepoLane[] {
+// 选法:先认 `remote.<名>.push`(用户显式配的映射,git 自己在裸 push 时也认它,优先级高于同名兜底),
+// 再认 upstream(git 唯一跟踪的那条),都没有才退回同名匹配。
+// push:这条 lane 该推去的**分支短名**。ref 是"远端已经存在的那条",push 是"该往哪推" ——
+// 配了 refspec 但那边还没这条分支时(从没推过),ref 为空而 push 有值,push 命令得按后者拼。
+// mapped:这条 lane 的目标来自 remote.<名>.push,不是同名撞出来的 —— 界面据此画实线:
+// 实线的含义是"git 真的会把这条分支推到那儿",配了 refspec 的和 upstream 一样满足这句话。
+export type RepoLane = { remote: string; ref?: string; isUpstream: boolean; push?: string; mapped?: boolean };
+export function lanesFor(focus: string, remotes: string[], remoteRefs: string[], upstream?: string, pushSpecs: Record<string, string[]> = {}): RepoLane[] {
   return remotes.map((remote) => {
+    const mapped = pushTargetOf(focus, pushSpecs[remote]);
     const up = upstream && upstream.split("/")[0] === remote && remoteRefs.includes(upstream) ? upstream : undefined;
     const same = remoteRefs.find((r) => r.split("/")[0] === remote && r.split("/").slice(1).join("/") === focus);
-    return { remote, ref: up || same, isUpstream: !!up };
+    // 配了 refspec 就以它为准,别再退回同名:同名那条正是配置想避开的目标(推过去必然 non-fast-forward)
+    if (mapped) {
+      const ref = remoteRefs.find((r) => r === `${remote}/${mapped}`);
+      return { remote, ref, isUpstream: !!ref && ref === up, push: mapped, mapped: true };
+    }
+    const ref = up || same;
+    return { remote, ref, isUpstream: !!up, push: ref?.split("/").slice(1).join("/") };
   });
 }
 
