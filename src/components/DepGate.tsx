@@ -49,7 +49,12 @@ export function DepGate({ children }: { children: React.ReactNode }) {
   const check = useCallback(() => {
     setChecking(true);
     invoke<[string, boolean, string][]>("check_deps")
-      .then((rows) => setDeps(rows.map(([name, ok, path]) => ({ name, ok, path }))))
+      .then(async (rows) => {
+        // 依赖齐了就先把 sidecar 补起来再放行:启动那会儿 claude 还没装,Rust 里那次自动拉起是失败的,
+        // 直接渲染主界面等于给用户一个连不上后台的空壳。已在跑的话这个命令是空操作。
+        if (rows.every(([, ok]) => ok)) await invoke("start_sidecar").catch(() => {});
+        setDeps(rows.map(([name, ok, path]) => ({ name, ok, path })));
+      })
       .catch(() => setDeps([]))  // 命令都调不动(如浏览器开发模式),放行别把人锁死
       .finally(() => setChecking(false));
   }, []);

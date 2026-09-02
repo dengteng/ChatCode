@@ -186,6 +186,22 @@ fn relay_env() -> Vec<(String, String)> {
     out
 }
 
+/// 给子进程拼一份够用的 PATH。从 Finder 启动的 GUI 进程只有 /usr/bin:/bin:/usr/sbin:/sbin,
+/// 直接把它传下去,子进程就会看不见 homebrew / mise / asdf 里的 gh、也看不见 node。
+/// 用登录 shell 的 PATH 打底(拿不到才退回 GUI 那份),再补上我们选中的这份 node 所在目录。
+///
+/// node_first:装包时要让 npm 的 postinstall 用**跑 npm 的这同一个** node(见 install_claude),
+/// 免得撞上用户 PATH 里某个老版本;起 sidecar 时反过来 —— 用户自己的 node 版本优先(他的
+/// `!npm run dev` 该用他的那份),包内 node 只在机器上一个都没有时兜底。
+fn child_path(login: Option<&str>, node: &Path, node_first: bool) -> String {
+    let dir = node.parent().unwrap_or(Path::new("")).to_string_lossy().into_owned();
+    let rest = login.unwrap_or("/usr/bin:/bin:/usr/sbin:/sbin").to_string();
+    if dir.is_empty() || rest.split(':').any(|d| d == dir) {
+        return rest;
+    }
+    if node_first { format!("{dir}:{rest}") } else { format!("{rest}:{dir}") }
+}
+
 /// 起 sidecar。失败原因写进 ~/.ChatCode/sidecar.log —— GUI 应用的 stderr 无处可看。
 fn spawn_sidecar(script: &Path) -> Result<Child, String> {
     let path = login_path();
@@ -208,6 +224,13 @@ fn spawn_sidecar(script: &Path) -> Result<Child, String> {
         .env("CHAT_CODE_PORT", SIDECAR_PORT)
         .env("CHAT_CODE_TOKEN", sidecar_token_value())
         .env("CHAT_CODE_CLAUDE_BIN", &claude)
+        // 把登录 shell 的 PATH 传下去。sidecar 继承的是 GUI 那份(只有 /usr/bin:/bin:...),
+        // 它自己只能靠一份写死的常见目录清单去猜(见 server.mjs 开头)—— homebrew 装的 gh 能猜中,
+        // macports / mise / asdf 的 shim 就猜不中,于是 `gh --version` 失败、设置页显示"未安装 gh CLI",
+        // 可用户在终端里明明跑得通。这份 PATH 我们为了找 node/claude 本来就算过一次(带缓存),白拿。
+        // 顺序:登录 PATH 在前(用户自己的 node 版本优先),包内 node 的目录垫在最后 ——
+        // 机器上一个 node 都没有时,claude 起的 npx / 脚本才不至于又撞上 `node: command not found`。
+        .env("PATH", child_path(p, &node, false))
         // 数据目录以 Rust 这边为准,别让 sidecar 自己再算一遍 ——
         // 老目录改名那一下要是两边各算各的,就会出现「一个搬完、一个新建空目录」
         .env("CHAT_CODE_DATA_DIR", data_dir())
@@ -416,10 +439,17 @@ async fn kill_port(port: String) -> Result<(), String> {
 }
 
 /// 在项目目录后台启动一条命令(如 npm run dev)。detach:脱离父进程,关 app 也不连带被杀。
+/// `sh -lc` 只读 /etc/profile + ~/.profile,拿到的是 path_helper 那份(/etc/paths.d 里登记过的能拿到);
+/// nvm / mise / volta 这类写在 .zshrc 的一律拿不到 —— 用它们装的 node 就会「终端里跑得通、这儿起不来」。
+/// 所以把登录 shell 那份 PATH 直接喂进去(和 run_claude 同一套)。
 #[tauri::command]
 fn spawn_proc(cmd: String, cwd: String) -> Result<(), String> {
-    Command::new("sh").arg("-lc").arg(&cmd).current_dir(&cwd)
-        .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
+    let mut c = Command::new("sh");
+    c.arg("-lc").arg(&cmd).current_dir(&cwd);
+    if let Some(p) = login_path() {
+        c.env("PATH", p);
+    }
+    c.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
         .spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
@@ -584,6 +614,33 @@ fn check_deps(app: tauri::AppHandle) -> Vec<(String, bool, String)> {
     ]
 }
 
+/// 依赖装齐之后把 sidecar 补起来。
+/// 首次启动时 claude 还没装,setup 里那次 spawn_sidecar 是直接失败的(错误只写进 sidecar.log);
+/// 而 DepGate 一旦检测通过就渲染主界面 —— 少了这一步,用户装完点「重新检测」进去的是个没有后台的
+/// 空壳(界面在,发消息没反应),得自己想到去重启 app。
+#[tauri::command]
+fn start_sidecar(app: tauri::AppHandle) -> Result<(), String> {
+    // 开发时 `npm run dev` 起的那个才是正主,别插一脚
+    if cfg!(debug_assertions) {
+        return Ok(());
+    }
+    use tauri::Manager;
+    let state: tauri::State<Sidecar> = app.state();
+    let mut slot = state.0.lock().map_err(|e| e.to_string())?;
+    // 已经有一个活着就什么都不做:两个 sidecar 抢同一个固定端口,后起的那个会立刻死掉
+    if let Some(child) = slot.as_mut() {
+        if matches!(child.try_wait(), Ok(None)) {
+            return Ok(());
+        }
+    }
+    let script = app
+        .path()
+        .resolve("resources/sidecar.mjs", tauri::path::BaseDirectory::Resource)
+        .map_err(|e| e.to_string())?;
+    *slot = Some(spawn_sidecar(&script)?);
+    Ok(())
+}
+
 const NPM_OFFICIAL: &str = "https://registry.npmjs.org";
 const NPM_MIRROR: &str = "https://registry.npmmirror.com";
 
@@ -617,6 +674,10 @@ async fn install_claude(app: tauri::AppHandle, registry: Option<String>) -> Resu
         .ok_or("找不到 npm")?;
     let prefix = npm_prefix();
     let reg2 = reg.clone();
+    // claude-code 的 postinstall 是 `sh -c node install.cjs`(它去下真正的原生二进制)。
+    // 子进程继承的是 GUI 进程那份 PATH(只有 /usr/bin:/bin:...),用户机器又可能压根没装 node,
+    // 于是脚本报 `node: command not found`、npm 以 127 退出,只留下一个指向 .exe 的断链。
+    let npm_path = child_path(path.as_deref(), &node, true);
     tauri::async_runtime::spawn_blocking(move || {
         use std::io::BufReader;
         let _ = fs::create_dir_all(&prefix);
@@ -626,6 +687,7 @@ async fn install_claude(app: tauri::AppHandle, registry: Option<String>) -> Resu
             .arg(format!("--registry={reg2}"))
             .arg("--prefix")
             .arg(&prefix)
+            .env("PATH", &npm_path)
             // 非 TTY 下 npm 默认几乎不吐东西(进度条只在 TTY 画),装 267MB 时按钮会静默转几分钟。
             // --loglevel=http 让它每次网络请求打一行,才有得流。
             .arg("--loglevel=http")
@@ -821,7 +883,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_http::init())
-        .invoke_handler(tauri::generate_handler![open_url, open_path, reveal_path, resolve_path_cmd, kill_pid, kill_port, spawn_proc, run_claude, choose_directory, set_app_theme, list_dir, walk_project, read_file, read_file_b64, write_file, read_dir_meta, probe_ports, bounce_dock, check_deps, probe_registry, install_claude, install_skill_git, remove_path, rename_path, sidecar_token])
+        .invoke_handler(tauri::generate_handler![open_url, open_path, reveal_path, resolve_path_cmd, kill_pid, kill_port, spawn_proc, run_claude, choose_directory, set_app_theme, list_dir, walk_project, read_file, read_file_b64, write_file, read_dir_meta, probe_ports, bounce_dock, check_deps, start_sidecar, probe_registry, install_claude, install_skill_git, remove_path, rename_path, sidecar_token])
         .manage(Sidecar(Mutex::new(None)))
         // 浮窗(大图 / 代码编辑器)关闭:先 hide,隔一小会儿再销毁。
         // 起因是一次 SIGSEGV:关掉图片浮窗后几秒,主进程崩在 WebKit::DisplayLink::notifyObserversDisplayDidRefresh()。
@@ -889,7 +951,24 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{data_dir_in, resolve_path};
+    use super::{child_path, data_dir_in, resolve_path};
+    use std::path::Path;
+
+    // 子进程的 PATH:登录 shell 那份必须原样在里面(gh 就是靠它才找得到),node 目录按 node_first
+    // 决定垫前还是垫后;已经在 PATH 里的话不重复追加。
+    #[test]
+    fn child_path_places_node_dir() {
+        let node = Path::new("/Applications/ChatCode.app/Contents/Resources/resources/node");
+        let dir = "/Applications/ChatCode.app/Contents/Resources/resources";
+        let login = Some("/opt/homebrew/bin:/usr/bin:/bin");
+
+        assert_eq!(child_path(login, node, true), format!("{dir}:/opt/homebrew/bin:/usr/bin:/bin"));
+        assert_eq!(child_path(login, node, false), format!("/opt/homebrew/bin:/usr/bin:/bin:{dir}"));
+        // 拿不到登录 PATH 时退回 GUI 那份,但 node 目录照补
+        assert_eq!(child_path(None, node, true), format!("{dir}:/usr/bin:/bin:/usr/sbin:/sbin"));
+        // 用户自己就把 node 装在 PATH 里的目录下:原样返回,不留重复项
+        assert_eq!(child_path(login, Path::new("/opt/homebrew/bin/node"), false), "/opt/homebrew/bin:/usr/bin:/bin");
+    }
 
     // 老目录 ~/.chat-code 必须原样搬成 ~/.ChatCode(会话、settings.json、relay.env 都在里面);
     // 新目录已存在时不许碰老的 —— 两个版本都跑过的话,乱合并比留着更糟。

@@ -1199,10 +1199,17 @@ function launchInTerminal(cmd) {
   return execOut("osascript", ["-e", "tell application \"Terminal\" to activate",
     "-e", `tell application "Terminal" to do script ${asStr(cmd)}`]).then((r) => ({ ok: r.ok, manual: r.ok ? null : cmd }));
 }
+// shell 单引号转义:claude 可能装在 ~/.ChatCode/npm/bin 这类我们拼出来的路径下,家目录带空格就得引起来。
+const shQuote = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 // provider/action -> 实际命令。login 走各自 CLI 的交互式登录;logout 同理。
+// claude 走绝对路径:我们「一键安装」装进 ~/.ChatCode/npm(不碰系统目录),那儿不在用户登录 shell 的
+// PATH 里 —— 之前发裸 `claude` 过去,Terminal 一开就是 `command not found`,登录流程当场断在这。
 function authCommand(provider, action) {
   if (provider === "github") return action === "logout" ? "gh auth logout" : "gh auth login --web";
-  if (provider === "claude") return action === "logout" ? "claude /logout" : "claude"; // claude TUI:未登录会走 OAuth,已登录内输 /logout
+  if (provider === "claude") {
+    const bin = CLAUDE_BIN ? shQuote(CLAUDE_BIN) : "claude";
+    return action === "logout" ? `${bin} /logout` : bin; // claude TUI:未登录会走 OAuth,已登录内输 /logout
+  }
   return null;
 }
 
