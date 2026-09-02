@@ -10,6 +10,8 @@ html, body, #root { height: 100%; width: 100%; overflow: hidden; overscroll-beha
   --text: #f8fafc; --muted: #94a3b8;
   --user: #1f6f43; --agent: #272f42; --accent: #3b82f6;
   --code-bg: #111827; --amber: #e0a92e; --green: #2e9c58;
+  /* 品牌字色:logo 蓝紫渐变的中点,深底走亮版保对比度(见 .brand-word span) */
+  --brand-ink: #8f9bff;
   --radius: 8px;
   /* 强 ease-out(entering/exiting 用):内置 ease-out 太软,起手没劲。全局统一走这一条 */
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
@@ -167,24 +169,47 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 }
 
 .brand-word { position: relative; font-weight: 800; letter-spacing: -.5px; white-space: nowrap; }
-/* 字色取背景图主色,无自定义图回退 accent */
+/* 品牌字跟 logo 同一支蓝紫:logo 那块渐变是 #1a6bff→#5b2ce8,取中点 #3a4bf3 当实色,
+   不跟主题 accent 也不跟背景图走 —— 品牌色到哪张皮肤都是同一个。
+   深底上换亮一档(掺 38% 白,色相不动):#3a4bf3 压在深板/深壳上只有 2.7:1,
+   够不着 WCAG 1.4.3 大字的 3:1;亮版对 #0f172a 是 6:1。--brand-ink 定义见 :root / [data-theme=light]。 */
 .brand-word span {
   display: inline-block; opacity: 0;
-  color: var(--custom-accent, var(--accent));
+  color: var(--brand-ink);
   animation: brand-letter-in .34s cubic-bezier(.34,1.56,.64,1) both;
 }
 @keyframes brand-letter-in {
   from { opacity: 0; transform: translateY(.16em) scale(.8); }
   to   { opacity: 1; transform: none; }
 }
-/* 品牌字直接压在背景图上,图的**局部**明暗不可控 —— 浅色壳里照样能压着一片深色头发,
-   字色是按整体亮度算的,那一块就糊没了。加一圈跟壳相反的光晕把字从图上剥出来:
-   深壳字亮 → 暗晕,浅壳字深 → 白晕。em 单位跟着 4em 字号缩放。 */
-[data-palette="custom"] .brand-word span {
-  --brand-halo: rgba(255,255,255,.75);
-  text-shadow: 0 0 .07em var(--brand-halo), 0 0 .24em var(--brand-halo);
+/* 自定义背景是用户随便丢进来的图,品牌色又固定不跟图走 —— 那就反过来:保证它踩的那块「地」可预期。
+   走 Material 的 scrim(半透明保护层)而不是给整图压一层:M1 imagery 明说「别拿 scrim 糊整张图,
+   大画面只保护放字的那一小块」,深色 scrim 20~40% / 浅色 40~60%。这里椭圆只罩品牌块,
+   浅壳白 50% / 深壳黑 45%,72% 处淡出,图本身基本不动。
+   scrim 走 ::before + z-index:-1,不用 .brand 自己的 background:background 被 border-box 裁死,
+   罩不出字外那一圈;改用 padding 撑开又会让 BrandIntro 量 --slide 的那套坐标偏掉半个 padding。 */
+[data-palette="custom"] .brand::before {
+  content: ""; position: absolute; inset: -.35em -.9em; z-index: -1; pointer-events: none;
+  background: radial-gradient(58% 62% at 50% 50%, var(--brand-scrim), transparent 72%);
 }
-[data-palette="custom"][data-custom-shell="dark"] .brand-word span { --brand-halo: rgba(0,0,0,.55); }
+/* isolation 把 .brand 自己变成层叠上下文:否则 z-index:-1 会掉到「祖先块的背景之下」那一层,
+   中间任何一个带底色的容器都能把 scrim 盖没。自成上下文后它只在 .brand 内部沉到内容底下。 */
+[data-palette="custom"] .brand { --brand-scrim: rgba(255,255,255,.5); isolation: isolate; }
+[data-palette="custom"][data-custom-shell="dark"] .brand { --brand-scrim: rgba(0,0,0,.45); }
+/* scrim 之上再补一层紧贴字的柔光(Chromium 的自定义新标签页同样是 scrim + text-shadow 两层):
+   scrim 管整块地的明暗,柔光管「字压在局部高光/深发上」那种一两百像素的意外。
+   只留大扩散那一档:原来还有一层 .07em 的紧描边,在图上就是一圈 WordArt 发光轮廓,越描越脏。
+   em 单位跟着 4em 字号缩放。 */
+[data-palette="custom"] .brand-word span,
+[data-palette="custom"] .brand-logo {
+  --brand-halo: rgba(255,255,255,.5);
+}
+[data-palette="custom"][data-custom-shell="dark"] .brand-word span,
+[data-palette="custom"][data-custom-shell="dark"] .brand-logo { --brand-halo: rgba(0,0,0,.45); }
+[data-palette="custom"] .brand-word span { text-shadow: 0 0 .28em var(--brand-halo); }
+/* logo 吃同一层柔光:它是固定的蓝紫渐变方块,和任何背景图都不同色系,硬边直接贴在图上最出戏。
+   drop-shadow 认 SVG 的实际形状(圆角矩形),box-shadow 会绕着方盒子画。 */
+[data-palette="custom"] .brand-logo { filter: drop-shadow(0 0 .12em var(--brand-halo)); }
 
 /* 本次会话已经播过进场了(从会话切回空态):直接落到终态 */
 .brand[data-skip] .brand-logo { animation: none; opacity: 1; translate: 0 0; }
@@ -835,6 +860,7 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
   --bg: #f8fafc; --panel: #ffffff; --border: #e2e8f0; --text: #0f172a; --muted: #64748b;
   --user: #e9f7ee; --agent: #f1f5f9; --accent: #2563eb;
   --code-bg: #f1f5f9; --amber: #b45309; --green: #15803d;
+  --brand-ink: #3a4bf3;                            /* 浅底用原色,对白底 7:1 */
   /* 浅色侧栏:明显偏灰,和近白的主区(#f8fafc)拉开;主区/卡片(白)才浮得起来 */
   --sidebar: #e9edf4;
 }
@@ -1086,6 +1112,13 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 .session-item { gap: 8px; padding: 9px 8px; border-left: 0; border-radius: 7px; margin-bottom: 2px; }
 /* 选中态多重线索:偏白抬升卡(从有色侧栏浮起) + 主色左条 + 标题染主色加粗 —— 单靠淡色底色差不够 */
 .session-item.active { border-left-color: transparent; background: color-mix(in srgb, var(--accent) 12%, var(--panel)); }
+/* 左条走 ::before 不走 border/box-shadow:border 会挤动内容,box-shadow 又被各皮肤自己的
+   投影规则(light 的抬升影、custom 的 shadow:none)整条覆盖掉。--fbar 是 forest 深绿底上专门提亮的
+   指示条色,其余皮肤回落到 --accent。 */
+.session-item.active::before {
+  content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px;
+  border-radius: 0 3px 3px 0; background: var(--fbar, var(--accent)); pointer-events: none;
+}
 .session-item.active .session-title-text { color: color-mix(in srgb, var(--accent) 65%, var(--text)); font-weight: 600; }
 /* 浅色基座再加一层轻投影,让白卡真正从浅绿侧栏浮起来 */
 .app[data-theme="light"] .session-item.active { box-shadow: 0 1px 3px rgba(15,23,42,.09); }
