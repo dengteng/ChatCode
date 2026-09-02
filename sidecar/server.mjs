@@ -146,7 +146,7 @@ function sshDial(ws, sess, id, target, port) {
 function sshRun(ws, sess, id, command) {
   const cwd = sess.ssh.cwd || "";
   const script = `${cwd ? `cd ${JSON.stringify(cwd)} 2>/dev/null; ` : ""}${command}\n__ec=$?; printf '\\0%s\\0%s' "$PWD" "$__ec"`;
-  execFile("ssh", sshCtl(id, sess.ssh, [sess.ssh.target, script]), { timeout: 30000, maxBuffer: 4 << 20, env: safeEnv() }, (err, stdout, stderr) => {
+  const cp = execFile("ssh", sshCtl(id, sess.ssh, [sess.ssh.target, script]), { timeout: 30000, maxBuffer: 4 << 20, env: safeEnv() }, (err, stdout, stderr) => {
     let output = stdout || "", newCwd = sess.ssh.cwd, ec = err?.code ?? 0;
     const parts = output.split("\0");
     if (parts.length >= 3) { output = parts[0]; newCwd = parts[1].trim() || newCwd; ec = Number(parts[2]) || 0; }
@@ -158,6 +158,9 @@ function sshRun(ws, sess, id, command) {
     } else sess.ssh.cwd = newCwd;
     send(ws, { type: "terminal_result", sessionId: id, command, cwd: `${sess.ssh.target}:${newCwd || "~"}`, cwdChanged: false, output, exitCode: ec });
   });
+  // 远端命令同样边跑边回显(execFile 也给 child,挂两个监听即可)
+  const onData = outStreamer(ws, id, command);
+  cp.stdout?.on("data", onData); cp.stderr?.on("data", onData);
 }
 
 // ---------- 持久化(f: 跨 session 继承历史) ----------
@@ -565,12 +568,12 @@ function execOut(bin, args, cwd, env, timeout = 12000) {
 // stdout 的写端,管道就永不 EOF —— 于是一条 0.2s 就跑完的 `git commit` 也得挂到 timeout 才回,
 // 用户干等 30s 还以为 git 慢。'exit' 只认进程本身退出,孙进程持 fd 与我无关。
 // exit 后 setImmediate 一拍再收尾:让内核缓冲区里已就绪、但还没派发的 data 事件先跑完。
-function runShell(script, cwd, timeout, cb) {
+function runShell(script, cwd, timeout, cb, onData) {
   const MAX = 4 << 20;
   let out = "", errOut = "", killed = false, done = false;
   const p = spawn("bash", ["-lc", script], { cwd, env: safeEnv() });
-  p.stdout.on("data", (d) => { if (out.length < MAX) out += d; });
-  p.stderr.on("data", (d) => { if (errOut.length < MAX) errOut += d; });
+  p.stdout.on("data", (d) => { if (out.length < MAX) out += d; onData?.(d); });
+  p.stderr.on("data", (d) => { if (errOut.length < MAX) errOut += d; onData?.(d); });
   const timer = setTimeout(() => { killed = true; p.kill(); }, timeout);
   const finish = (code, spawnErr) => {
     if (done) return;
@@ -583,6 +586,19 @@ function runShell(script, cwd, timeout, cb) {
   };
   p.on("error", (e) => finish(null, e));          // spawn 本身失败(ENOENT 等)
   p.on("exit", (code) => setImmediate(() => finish(code, null))); // 被信号杀时 code 为 null
+}
+// 命令跑着时把输出边跑边推给气泡:原来只有"运行中… 11.5s",npm run build 这类要跑几分钟的
+// 完全看不出跑到哪一步了。150ms 攒一批再发 —— 一次构建刷几千行,逐条 send 会把 ws 打爆,
+// 而 150ms 的延迟人眼看不出来。script 尾部那段 \0PWD\0退出码 是给结果解析用的,
+// 流里遇到 \0 就截断,别让这堆内部标记露到界面上(完整输出仍以 terminal_result 为准)。
+function outStreamer(ws, sessionId, command) {
+  let buf = "", timer = null;
+  const flush = () => { timer = null; if (buf) { send(ws, { type: "terminal_chunk", sessionId, command, text: buf }); buf = ""; } };
+  return (d) => {
+    const s = String(d), i = s.indexOf("\0");
+    buf += i >= 0 ? s.slice(0, i) : s;
+    if (!timer) timer = setTimeout(flush, 150);
+  };
 }
 // 后台节流 fetch:upstream:track 只反映上次 fetch 到的 remote ref,不刷新就永远"已同步"。
 // 每仓库最多 30s fetch 一次,不阻塞 git_info(下一轮 15s 轮询就能读到新 ahead/behind)。
@@ -1117,16 +1133,20 @@ async function claudeAuth() {
     bin = which.ok ? "claude" : "";
   }
   const installed = !!bin;
-  if (process.env.ANTHROPIC_API_KEY) return { installed, loggedIn: true, method: "API Key（环境变量）" };
-  if (!installed) return { installed, loggedIn: false, method: "" };
+  // CLI 版本要露在设置页:新模型会硬性卡版本(实测 Fable 5.1 要 2.1.251+,低了直接 400
+  // "does not support this model"),而这份 CLI 未必是用户终端里的那份 —— 打包版用的是
+  // Rust 挑出来的绝对路径。看不见它,报错就无从对号入座。`--version` 打印 "2.1.258 (Claude Code)"。
+  const version = installed ? (await execOut(bin, ["--version"])).stdout.trim().split(/\s+/)[0] || "" : "";
+  if (process.env.ANTHROPIC_API_KEY) return { installed, loggedIn: true, method: "API Key（环境变量）", version };
+  if (!installed) return { installed, loggedIn: false, method: "", version };
   const auth = await execOut(bin, ["auth", "status", "--json"]);
   try {
     const st = JSON.parse(auth.stdout);
     const method = st.authMethod === "oauth_token" ? "Claude 订阅（OAuth）" : st.authMethod || "";
-    return { installed, loggedIn: !!st.loggedIn, method };
+    return { installed, loggedIn: !!st.loggedIn, method, version };
   } catch {
     // CLI 报错/非 JSON(网络挂、CLI 异常)按未登录处理,设置面板不至于卡死在旧状态
-    return { installed, loggedIn: false, method: "" };
+    return { installed, loggedIn: false, method: "", version };
   }
 }
 // GitHub 登录态:gh auth status(全局,与工作目录无关)。
@@ -1170,6 +1190,7 @@ async function authStatus() {
 // SDK 的 supportedModels 没上报、或还没问到时的兜底表。首装第一次用(缓存也空)时,菜单至少有这几个。
 // 与 SDK 上报重复的会在下面按 key 去重,不会出现两份。
 const CLAUDE_MANUAL_MODELS = [
+  { value: "claude-fable-5-1", model: "claude-fable-5-1", displayName: "Fable 5.1", description: "claude-fable-5-1 · 手动指定", provider: "claude", contextWindow: 1_000_000 },
   { value: "claude-opus-5", model: "claude-opus-5", displayName: "Opus 5", description: "claude-opus-5 · 手动指定", provider: "claude", contextWindow: 1_000_000 },
   { value: "claude-sonnet-5", model: "claude-sonnet-5", displayName: "Sonnet 5", description: "claude-sonnet-5 · 手动指定", provider: "claude" },
   { value: "claude-opus-4-8", model: "claude-opus-4-8", displayName: "Opus 4.8", description: "claude-opus-4-8 · 手动指定", provider: "claude" },
@@ -2671,7 +2692,7 @@ wss.on("connection", (ws) => {
             const wm = loadCommitWm(); wm[m.sessionId] = collectRoundSummaries(m.sessionId).length; saveCommitWm(wm);
           }
           send(ws, { type: "terminal_result", sessionId: m.sessionId, command: m.command, cwd: newCwd, cwdChanged: newCwd !== cwd0, output, exitCode: ec });
-        });
+        }, outStreamer(ws, m.sessionId, m.command));
         break;
       }
       case "ssh_reconnect": {

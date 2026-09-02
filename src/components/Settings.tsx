@@ -278,7 +278,7 @@ function AccountTab() {
     <section className="settings-section">
       <h4>{t("大模型账号")}</h4>
       <div className="provider-row">
-        <div className="provider-id"><ProviderLogo name="Claude" cls="claude" ini="C" /><div><b>Claude</b><div className="muted">Anthropic · SDK v{SDK_VERSION}</div></div></div>
+        <div className="provider-id"><ProviderLogo name="Claude" cls="claude" ini="C" /><div><b>Claude</b><div className="muted">Anthropic{c?.version ? ` · CLI v${c.version}` : ""} · SDK v{SDK_VERSION}</div></div></div>
         <div className="provider-status">
           {!c ? <span className="muted">{t("检测中…")}</span> :
             c.loggedIn ? <><Dot ok /> {t("已登录")} <span className="muted">{c.method}</span></> :

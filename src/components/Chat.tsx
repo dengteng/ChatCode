@@ -170,20 +170,29 @@ function PathToken({ raw, cwd, isUrl }: { raw: string; cwd: string; isUrl: boole
 
 // 终端输出块:内容超出限高(scrollbar 已藏)时,气泡底部中间浮出一个下箭头提示"还有更多",
 // 点它平滑下滚一屏;滚到底箭头消失。用 ResizeObserver + onScroll 判断是否还没到底。
-function TermOut({ text, cwd }: { text: string; cwd: string }) {
+function TermOut({ text, cwd, live }: { text: string; cwd: string; live?: boolean }) {
   const { t } = useTranslation();
   const ref = useRef<HTMLPreElement>(null);
   const [more, setMore] = useState(false);
   const check = () => { const el = ref.current; if (el) setMore(el.scrollTop + el.clientHeight < el.scrollHeight - 2); };
-  useEffect(() => {
+  // 跟随底部:stick 只在用户自己滚动时更新。不能在 text 变化后现算"是不是贴底"——
+  // 那会儿新日志已经进 DOM,scrollHeight 变大,永远算成"没贴底"。
+  const stick = useRef(true);
+  const onScroll = () => {
+    const el = ref.current;
+    if (el) stick.current = el.scrollTop + el.clientHeight >= el.scrollHeight - 8;
     check();
+  };
+  useEffect(() => {
     const el = ref.current; if (!el) return;
+    if (live && stick.current) el.scrollTop = el.scrollHeight; // 命令还在跑:新日志顶着底部走,和终端一样
+    check();
     const ro = new ResizeObserver(check); ro.observe(el);
     return () => ro.disconnect();
   }, [text]);
   return (
     <div className="term-out-wrap">
-      <pre className="term-out" ref={ref} onScroll={check}><Linkify text={text} cwd={cwd} /></pre>
+      <pre className="term-out" ref={ref} onScroll={onScroll}><Linkify text={text} cwd={cwd} /></pre>
       {more && <button className="term-more" title={t("还有更多，点击向下滚动")}
         {...btnPress(() => ref.current?.scrollBy({ top: ref.current.clientHeight - 30, behavior: "smooth" }))}><ChevronDown size={16} /></button>}
     </div>
@@ -1629,7 +1638,10 @@ function TermRows({ item, cwd }: { item: Extract<TimelineItem, { kind: "terminal
           <div className="msg-name">{host}</div>
           <div className="line line-term-out bubble">
             <BubbleActs text={item.command + (hasOut ? "\n" + item.output : "")} />
-            {item.pending ? <TermRunning since={item.ts} /> : <>
+            {item.pending ? <>
+              {hasOut && <TermOut text={item.output} cwd={cwd} live />}
+              <TermRunning since={item.ts} />
+            </> : <>
               {hasOut && <TermOut text={item.output} cwd={cwd} />}
               {item.cwdChanged && <div className="term-cwd-line"><Folder size={13} /> {t("现在在 {{dir}}", { dir: shortCwd })}</div>}
               {!hasOut && !item.cwdChanged && item.exitCode === 0 && <div className="term-cwd-line muted">{t("（无输出）")}</div>}
@@ -1773,7 +1785,10 @@ function Item({ item, cwd, onPermission, onAgentClick, agentLabel }: { item: Tim
             {/* 悬停显形的复制按钮:一键复制命令 + 输出;文本本身也可鼠标框选 */}
             <BubbleActs text={item.command + (hasOut ? "\n" + item.output : "")} />
             <div className="term-cmd" title={item.cwd}>{item.command}{item.exitCode !== 0 && <span className="term-ec"> <X size={11} />{item.exitCode}</span>}</div>
-            {item.pending ? <TermRunning since={item.ts} /> : <>
+            {item.pending ? <>
+              {hasOut && <TermOut text={item.output} cwd={cwd} live />}
+              <TermRunning since={item.ts} />
+            </> : <>
               {hasOut && <TermOut text={item.output} cwd={cwd} />}
               {item.cwdChanged && <div className="term-cwd-line"><Folder size={13} /> {t("现在在 {{dir}}", { dir: shortCwd })}</div>}
               {!hasOut && !item.cwdChanged && item.exitCode === 0 && <div className="term-cwd-line muted">{t("（无输出）")}</div>}

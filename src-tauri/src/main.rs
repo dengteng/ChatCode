@@ -81,22 +81,35 @@ fn is_exec(p: &Path) -> bool {
 
 /// 先在登录 shell 的 PATH 里找,再退回常见安装位置。
 fn which(bin: &str, fallbacks: &[&str], path: Option<&str>) -> Option<PathBuf> {
-    if let Some(path) = path {
-        for dir in path.split(':').filter(|d| !d.is_empty()) {
-            let c = Path::new(dir).join(bin);
-            if is_exec(&c) {
-                return Some(c);
-            }
-        }
-    }
+    which_all(bin, fallbacks, path).into_iter().next()
+}
+
+/// which 的全量版:PATH + fallback 里所有能跑的同名可执行文件,保持优先级顺序。
+/// 按真实路径去重 —— `~/.local/bin/claude` 常常就是 PATH 里那条的软链,同一份别数两次。
+fn which_all(bin: &str, fallbacks: &[&str], path: Option<&str>) -> Vec<PathBuf> {
     let home = std::env::var("HOME").unwrap_or_default();
-    for f in fallbacks {
-        let c = PathBuf::from(f.replace('~', &home));
-        if is_exec(&c) {
-            return Some(c);
+    let in_path = path.unwrap_or("").split(':').filter(|d| !d.is_empty()).map(|d| Path::new(d).join(bin));
+    let in_fallback = fallbacks.iter().map(|f| PathBuf::from(f.replace('~', &home)));
+    let mut seen: Vec<(PathBuf, PathBuf)> = Vec::new(); // (真实路径, 原始路径)
+    for c in in_path.chain(in_fallback) {
+        if !is_exec(&c) {
+            continue;
         }
+        let real = fs::canonicalize(&c).unwrap_or_else(|_| c.clone());
+        if seen.iter().any(|(r, _)| *r == real) {
+            continue;
+        }
+        seen.push((real, c));
     }
-    None
+    seen.into_iter().map(|(_, c)| c).collect()
+}
+
+/// `claude --version` 打印 "2.1.258 (Claude Code)"。取前三段数字用来比大小,认不出的当最旧。
+fn claude_version(bin: &Path) -> Option<(u32, u32, u32)> {
+    let out = Command::new(bin).arg("--version").stdin(Stdio::null()).output().ok()?;
+    let s = String::from_utf8_lossy(&out.stdout);
+    let mut it = s.split_whitespace().next()?.split('.').map(|x| x.parse::<u32>().unwrap_or(0));
+    Some((it.next()?, it.next().unwrap_or(0), it.next().unwrap_or(0)))
 }
 
 /// 用户数据目录。会话、settings.json、relay.env、装出来的 claude 全在这。
@@ -141,9 +154,16 @@ fn find_node(app: &tauri::AppHandle, path: Option<&str>) -> Option<PathBuf> {
         .or_else(|| which("node", &["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"], path))
 }
 
+/// 装了不止一份 claude 时挑版本最高的那份,而不是按固定顺序取第一个。
+///
+/// 为什么必要:新模型会硬性要求 CLI 版本(实测 Fable 5.1 要 2.1.251+,老版本直接
+/// 400 "does not support this model"),而各渠道的版本差得远 —— native installer 跟 stable
+/// 通道,npm 的 latest 能比它领先二十几个补丁号。按顺序取第一个,等于让安装路径决定能用哪些模型。
+///
+/// 只有一份时不跑 `--version`:省掉一次 exec,也避免它万一卡住/失败连累唯一那份。
 fn find_claude(path: Option<&str>) -> Option<PathBuf> {
     // PATH 兜不住的几处:装 claude 的路子太多,而 nvm 那种版本号在路径里的只能靠 PATH。
-    which(
+    let cands = which_all(
         "claude",
         &[
             "~/.ChatCode/npm/bin/claude",
@@ -157,7 +177,21 @@ fn find_claude(path: Option<&str>) -> Option<PathBuf> {
             "~/.yarn/bin/claude",
         ],
         path,
-    )
+    );
+    newest_claude(cands)
+}
+
+/// 拆出来只为可测(同 data_dir_in):测试里给几个假 claude 脚本,不必去动真机上的安装。
+fn newest_claude(cands: Vec<PathBuf>) -> Option<PathBuf> {
+    if cands.len() <= 1 {
+        return cands.into_iter().next();
+    }
+    // 同版本时保留原优先级(取先出现的那条):下标取 Reverse 一起参与比较
+    cands
+        .iter()
+        .enumerate()
+        .max_by_key(|(i, c)| (claude_version(c), std::cmp::Reverse(*i)))
+        .map(|(_, c)| c.clone())
 }
 
 fn log_path() -> PathBuf {
@@ -951,8 +985,41 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{child_path, data_dir_in, resolve_path};
+    use super::{child_path, data_dir_in, newest_claude, resolve_path, which_all};
     use std::path::Path;
+
+    // 装了不止一份 claude 时必须挑版本最高的:老版本会被新模型直接 400 掉
+    // (Fable 5.1 要 2.1.251+),而 stable 通道那份可能落后 npm latest 二十几个补丁号。
+    // 顺带验 which_all:同一份的软链只能算一次,否则"多份"判断会被自己骗到。
+    #[test]
+    fn picks_newest_claude() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("chatcode-claude-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let fake = |sub: &str, ver: &str| {
+            let d = dir.join(sub);
+            std::fs::create_dir_all(&d).unwrap();
+            let p = d.join("claude");
+            std::fs::write(&p, format!("#!/bin/sh\necho '{ver} (Claude Code)'\n")).unwrap();
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+            p
+        };
+        let old = fake("old", "2.1.236");
+        let new = fake("new", "2.1.258");
+        std::fs::create_dir_all(dir.join("link")).unwrap();
+        std::os::unix::fs::symlink(&old, dir.join("link/claude")).unwrap();
+
+        // 软链指回 old,不该被当成第三份
+        let path = format!("{0}/old:{0}/link:{0}/new", dir.display());
+        let cands = which_all("claude", &[], Some(&path));
+        assert_eq!(cands, vec![old.clone(), new.clone()]);
+        assert_eq!(newest_claude(cands), Some(new.clone()));
+        // 只有一份时原样返回(这条路径上不跑 --version)
+        assert_eq!(newest_claude(vec![old.clone()]), Some(old));
+        assert_eq!(newest_claude(vec![]), None);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     // 子进程的 PATH:登录 shell 那份必须原样在里面(gh 就是靠它才找得到),node 目录按 node_first
     // 决定垫前还是垫后;已经在 PATH 里的话不重复追加。

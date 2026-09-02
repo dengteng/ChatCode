@@ -99,7 +99,10 @@ export const PROVIDERS = {
     baseUrlCN: "https://open.bigmodel.cn/api/anthropic",
     smallFast: "glm-4.5-air",
     models: [
-      { value: "glm/glm-4.6",     model: "glm-4.6",     displayName: "GLM-4.6",     description: "glm-4.6 · 最强", provider: "glm", contextWindow: 200_000 },
+      // 不写 contextWindow:官方窗口没查到就别猜。省掉后会话第一条 message_start 的 modelUsage
+      // 会报真实窗口(见 types.ts 的 contextWindowOf),猜错反而会压过真值。
+      { value: "glm/glm-5.3",     model: "glm-5.3",     displayName: "GLM-5.3",     description: "glm-5.3 · 最强", provider: "glm" },
+      { value: "glm/glm-4.6",     model: "glm-4.6",     displayName: "GLM-4.6",     description: "glm-4.6 · 通用", provider: "glm", contextWindow: 200_000 },
       { value: "glm/glm-4.5-air", model: "glm-4.5-air", displayName: "GLM-4.5 Air", description: "glm-4.5-air · 快", provider: "glm", contextWindow: 128_000 },
     ],
   },
@@ -109,7 +112,10 @@ export const PROVIDERS = {
     baseUrlCN: "https://dashscope.aliyuncs.com/apps/anthropic",
     smallFast: "qwen3-coder-flash",
     models: [
-      { value: "qwen/qwen3-coder-plus",  model: "qwen3-coder-plus",  displayName: "Qwen3 Coder Plus",  description: "qwen3-coder-plus · 最强", provider: "qwen", contextWindow: 1_000_000 },
+      // 模型 id 按百炼历代命名推的(qwen2.5-max / qwen3-max → qwen3.8-max)。对不上就在设置里改 ——
+      // 同样不写 contextWindow,理由见 glm 那条。
+      { value: "qwen/qwen3.8-max",       model: "qwen3.8-max",       displayName: "Qwen3.8 Max",       description: "qwen3.8-max · 最强", provider: "qwen" },
+      { value: "qwen/qwen3-coder-plus",  model: "qwen3-coder-plus",  displayName: "Qwen3 Coder Plus",  description: "qwen3-coder-plus · 编码", provider: "qwen", contextWindow: 1_000_000 },
       { value: "qwen/qwen3-coder-flash", model: "qwen3-coder-flash", displayName: "Qwen3 Coder Flash", description: "qwen3-coder-flash · 快", provider: "qwen", contextWindow: 1_000_000 },
     ],
   },

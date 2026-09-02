@@ -132,6 +132,7 @@ type Action =
   | { type: "rename"; id: string; title: string }
   | { type: "clear_timeline"; id: string }             // /clear:清空可见对话
   | { type: "terminal_start"; id: string; command: string; cwd: string } // ! 命令乐观回显
+  | { type: "terminal_chunk"; id: string; command: string; text: string } // 跑着时的增量输出
   | { type: "resolve_terminal"; id: string; command: string; cwd: string; cwdChanged: boolean; output: string; exitCode: number } // 结果回填
   | { type: "compact_start"; id: string; auto?: boolean }  // 开始压缩上下文
   | { type: "compact_finish"; id: string; patch: Partial<Extract<TimelineItem, { kind: "compact" }>> } // 收尾并回填 token 数
@@ -194,6 +195,20 @@ function reducer(s: State, a: Action): State {
         ...x,
         timeline: [...x.timeline, { kind: "terminal", command: a.command, cwd: a.cwd, output: "", exitCode: 0, pending: true, ts: Date.now() }],
       }));
+    // 命令跑着时往待回填那条上追加输出。命令结束后 resolve_terminal 会用完整输出整条覆盖,
+    // 所以这里丢包/截断都不会留下痕迹。
+    case "terminal_chunk":
+      return upd(a.id, (x) => {
+        const tl = [...x.timeline];
+        for (let i = tl.length - 1; i >= 0; i--) {
+          const t = tl[i];
+          if (t.kind === "terminal" && t.pending && t.command === a.command) {
+            tl[i] = { ...t, output: t.output + a.text };
+            return { ...x, timeline: tl };
+          }
+        }
+        return x;
+      });
     case "resolve_terminal":
       return upd(a.id, (x) => {
         const tl = [...x.timeline];
@@ -887,6 +902,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             break;
           case "system_note":
             dispatch({ type: "append", id: m.sessionId, item: { kind: "system", text: m.text, ts: Date.now() } });
+            break;
+          case "terminal_chunk":
+            dispatch({ type: "terminal_chunk", id: m.sessionId, command: m.command, text: m.text });
             break;
           case "terminal_result": {
             // git 写操作跑完给一句反馈。顶栏按钮、分支面板、节点菜单发的命令都汇到这条通路,

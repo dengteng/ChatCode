@@ -280,7 +280,8 @@ export interface ProviderState {
 }
 // 设置:账号登录状态(Claude + GitHub + 其他 LLM provider)
 export interface AuthStatus {
-  claude: { installed: boolean; loggedIn: boolean; method: string };
+  claude: { installed: boolean; loggedIn: boolean; method: string; version?: string }; // version = 实际在用的 claude CLI 版本
+
   github: { installed: boolean; loggedIn: boolean; account?: string; detail?: string };
   providers?: Record<string, ProviderState>;
   cnEndpoint?: boolean;           // 国内节点总开关

@@ -155,9 +155,14 @@
     ],
     "glm": [
       {
+        "model": "glm-5.3",
+        "displayName": "GLM-5.3",
+        "description": "glm-5.3 · 最强"
+      },
+      {
         "model": "glm-4.6",
         "displayName": "GLM-4.6",
-        "description": "glm-4.6 · 最强",
+        "description": "glm-4.6 · 通用",
         "contextWindow": 200000
       },
       {
@@ -169,9 +174,14 @@
     ],
     "qwen": [
       {
+        "model": "qwen3.8-max",
+        "displayName": "Qwen3.8 Max",
+        "description": "qwen3.8-max · 最强"
+      },
+      {
         "model": "qwen3-coder-plus",
         "displayName": "Qwen3 Coder Plus",
-        "description": "qwen3-coder-plus · 最强",
+        "description": "qwen3-coder-plus · 编码",
         "contextWindow": 1000000
       },
       {
