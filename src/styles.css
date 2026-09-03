@@ -989,6 +989,9 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
   content: ""; position: absolute; left: 0; right: 0; bottom: 100%; height: 44px;
   background: var(--foot-tint); pointer-events: none;
 }
+/* 空顶栏(闲聊会话)撤掉上面两条:没有文字要托,渐变+实底只是在背景图顶部糊出一条白带。 */
+.app[data-palette="custom"] .chat-topbar.bare { background: transparent; }
+.app[data-palette="custom"] .chat-topbar.bare::before { content: none; }
 .app[data-palette="custom"] .input-box { background: var(--custom-input); }
 /* 消息发送人名字直接压在背景图上难读,加同色系半透明 chip 托底 */
 .app[data-palette="custom"] .msg-name {
