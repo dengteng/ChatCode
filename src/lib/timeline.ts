@@ -151,7 +151,9 @@ export function nextSteps(items: TimelineItem[]): string[] {
   const lines = turnText(items).split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
     const m = lines[i].match(NEXT_RE);
-    if (m) return m[1].split(/[|｜]/).map((s) => s.replace(/[*`]/g, "").trim()).filter(Boolean).slice(0, 3);
+    // 三种竖线都切:| (ASCII) ｜ (全角) 丨 (U+4E28 汉字竖)。模型常把分隔符打成「丨」,
+    // 漏认这一个整排快捷指令就切不开,仨挤成一条。手机端 protocol.ts 同款。
+    if (m) return m[1].split(/[|｜丨]/).map((s) => s.replace(/[*`]/g, "").trim()).filter(Boolean).slice(0, 3);
   }
   return [];
 }

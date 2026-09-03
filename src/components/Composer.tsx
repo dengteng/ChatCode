@@ -1180,6 +1180,18 @@ export function Composer({ session }: { session: Session }) {
           ))}
         </div>
       )}
+      {/* 别端(手机 / 另一台电脑)排在这个会话上的待发,只读:没有取消按钮,取消该由排它的那端操作。
+          标一个来源角标区分,免得跟本机排的混为一谈。 */}
+      {(session.peerQueue?.length ?? 0) > 0 && (
+        <div className="pending-queue">
+          {session.peerQueue!.map((p, i) => (
+            <div key={p.pid} className="pending-row">
+              <span className="pending-tag">{t("其他端排队{{n}}", { n: i + 1 })}</span>
+              <span className="pending-text" title={p.text}>{p.text || t("（图片）")}</span>
+            </div>
+          ))}
+        </div>
+      )}
       {paletteOpen && filtered.length > 0 && (
         <div className="palette">
           <div className="palette-scroll">

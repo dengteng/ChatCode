@@ -139,6 +139,7 @@ type Action =
   | { type: "compact_settle"; id: string }                 // 兜底:没等到结束信号就把进度条停下
   | { type: "enqueue_pending"; id: string; item: import("./types").PendingMsg } // 待发入队
   | { type: "remove_pending"; id: string; pid: string }    // 移除某条待发(取消 / 已发出)
+  | { type: "set_peer_queue"; id: string; items: { pid: string; text: string }[] } // 别端排在该会话的待发(只读镜像)
   | { type: "remove_session"; id: string }
   | { type: "home_models"; models: ModelInfo[] } // 首页模型列表到货
   | { type: "set_home_model"; model: string };    // 首页选中模型
@@ -188,6 +189,7 @@ function reducer(s: State, a: Action): State {
       const next = upd(a.id, (x) => ({ ...x, timeline: [], todos: [], contextTokens: 0 }));
       return { ...next, index: next.index.map((e) => (e.id === a.id ? { ...e, lastUser: undefined } : e)) };
     }
+    case "set_peer_queue": return upd(a.id, (x) => ({ ...x, peerQueue: a.items }));
     case "enqueue_pending": return upd(a.id, (x) => ((x.pending?.length ?? 0) >= PENDING_MAX ? x : { ...x, pending: [...(x.pending ?? []), a.item] }));
     case "remove_pending": return upd(a.id, (x) => ({ ...x, pending: (x.pending ?? []).filter((p) => p.pid !== a.pid) }));
     case "terminal_start":
@@ -843,6 +845,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             }
             break;
           case "usage": dispatch({ type: "set_usage", usage: m.usage, kimiUsage: m.kimiUsage }); break;
+          // 别端排在这个会话上的待发,只读显示。手机走 sidecar 真队列(msg_queue),别的前端走镜像(peer_pending),
+          // 两条通路都指向「对端队列」这一栏 —— 本机自己的队列是前端 pending,不会经这两条回来,不重复。
+          case "msg_queue":
+          case "peer_pending": dispatch({ type: "set_peer_queue", id: m.sessionId, items: m.items || [] }); break;
           case "auth_status": {
             const prev = stateRef.current.auth;
             dispatch({ type: "auth_status", status: m.status });
@@ -1278,6 +1284,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
     }
   }, [state.sessions, state.connected]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 把本机待发队列镜像广播给别端(手机/另一台电脑)只读显示。本机队列是纯前端 pending,
+  // 不进 sidecar,不广播的话别端根本不知道 —— 就是「手机看不到 PC 排队」那个问题。
+  // 放这个 effect 里而不是逐个 enqueue/cancel/出队点手动发:pending 变化的入口太多(入队、取消、
+  // 自动出队、断线重连后重建),一处监听全覆盖。空快照只在「刚从非空清空」时补一次,让对端清掉那栏;
+  // 平时(一直空)不发,免得每次 state 刷新给每个会话刷一串空包。
+  const peerSentSig = useRef(new Map<string, string>());
+  useEffect(() => {
+    for (const s of Object.values(state.sessions)) {
+      const items = (s.pending ?? []).map((p) => ({ pid: p.pid, text: p.text }));
+      const sig = JSON.stringify(items);
+      const prev = peerSentSig.current.get(s.id);
+      if (sig === prev) continue;                       // 内容没变,别重发
+      if (items.length === 0 && prev === undefined) continue; // 从没发过又是空的:跳过,不刷空包
+      peerSentSig.current.set(s.id, sig);
+      send({ type: "peer_pending", sessionId: s.id, items });
+    }
+  }, [state.sessions]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // bgWait 闩锁兜底。闩锁只由「后台任务续跑的 result」清,可后台任务退出后 SDK 不一定再起一轮 ——
   // 那条 result 永远不来,闩锁就把待发队列锁死:界面上 status 是 idle、后台任务条也没了(bgTasks 已被

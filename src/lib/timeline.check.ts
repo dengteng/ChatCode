@@ -107,6 +107,7 @@ const t = ((k: string, p?: any) => (p ? `${k}:${JSON.stringify(p)}` : k)) as any
   const say = (text: string) => [it({ kind: "agent_text", text })];
   eq(nextSteps(say("正文\n本轮建议：提交并推送 | 加个测试")), ["提交并推送", "加个测试"], "半角竖线分隔");
   eq(nextSteps(say("**本轮建议**：甲｜乙")), ["甲", "乙"], "强调只包标签、全角竖线也要认");
+  eq(nextSteps(say("本轮建议：甲丨乙丨丙")), ["甲", "乙", "丙"], "「丨」U+4E28 汉字竖也切");
   eq(nextSteps(say("本轮建议：1 | 2 | 3 | 4")), ["1", "2", "3"], "最多留 3 条");
   eq(nextSteps(say("本轮建议：早的\n后面还有话\n本轮建议：晚的")), ["晚的"], "从后往前找,取最后一行");
   eq(nextSteps(say("没有建议行")), [], "没有就空数组");

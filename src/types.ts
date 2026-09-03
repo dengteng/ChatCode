@@ -135,6 +135,7 @@ export interface Session {
   casual?: boolean;          // 闲聊会话:无工作目录/git,隐藏目录栏与项目详情
   loadingHistory?: boolean;  // 重开会话:等 sidecar 回放历史期间为 true,timeline 空时显示"加载中"而非白屏
   pending?: PendingMsg[];    // 待发队列:agent 忙时排队,完成后自动发下一条(最多 3 条)
+  peerQueue?: { pid: string; text: string }[]; // 别的端(手机 / 另一台电脑)排在这个会话上的待发,只读显示
   bgTasks?: string[];        // SDK background_tasks_changed 电平(REPLACE):当前在跑的后台任务 id 集,空=无
   bgWait?: boolean;          // 上一轮有后台任务,轮次还没完全了结(还在等后台任务及它的续跑)→ 禁止待发队列出队
   compactRetried?: boolean;  // /compact 被并进别人的轮次、已自动重发过一次 —— 防重发死循环,压缩真做成了就清

@@ -1216,7 +1216,16 @@ async function reportModels(ws, sessionId, q) {
   const manualBy = new Map(CLAUDE_MANUAL_MODELS.flatMap((m) => [[m.value, m], [m.model, m]]));
   const merged = base.map((b) => {
     const m = manualBy.get(modelKey(b)) || manualBy.get(b.model);
-    return m?.contextWindow && !b.contextWindow ? { ...b, contextWindow: m.contextWindow } : b;
+    if (!m) return b;
+    // SDK 上报的具体版本 id(如 claude-fable-5-1)displayName 只给「Fable」,丢了版本号,
+    // 跟手工补的「Opus 5」「Sonnet 5」风格不一。手工表名字更规范,拿它盖过去。
+    // sonnet / haiku / opus[1m] / default 是别名(永远指向最新版),手工表里没有对应条目,
+    // 不受影响 —— 别名本来就不该带版本号,带了明天漂移就成了错的。
+    return {
+      ...b,
+      displayName: m.displayName || b.displayName,
+      contextWindow: b.contextWindow || m.contextWindow,
+    };
   });
   const have = new Set(base.map(modelKey));
   const manual = CLAUDE_MANUAL_MODELS.filter((m) => !have.has(m.value) && !base.some((b) => modelKey(b) === m.model));
@@ -1652,6 +1661,8 @@ function makeInputQueue() {
 
 // ---------- session 管理 ----------
 const sessions = new Map(); // id -> { queue, q, sdkSessionId, pendingPerms: Map }
+// 别端(电脑前端本地待发队列)的最新镜像,按会话。纯显示中转 + 给手机 reopen 补发,不参与真正的出队。
+const peerPendingSnap = new Map(); // sessionId -> [{ pid, text }]
 
 // Claude 可以并发提出多个工具授权。SDK 层允许并行，但 UI 同时显示多张卡片
 // 容易让用户误以为重复弹窗，因此在桥接层串行化为“一次确认一个”。
@@ -2460,6 +2471,9 @@ wss.on("connection", (ws) => {
         // 回显当前"自动同意"开关(内存优先,未启动则读持久化的 index),让重连端同步显示
         send(ws, { type: "auto_approve", sessionId: entry.id, on: s ? !!s.autoApprove : !!entry.autoApprove });
         send(ws, { type: "msg_queue", sessionId: entry.id, items: (s?.msgQueue || []).map((x) => ({ pid: x.pid, text: x.text })) }); // 重连要看到还压着的待发
+        // 别端(电脑前端本地队列)的镜像只补给手机:m.limit 是手机端的标记(见上面 buildMobileHistory)。
+        // 桌面自己就是这份快照的来源,补给它会把它自己排的又显示一遍(本地 pending + 收回来的镜像)。
+        if (m.limit && peerPendingSnap.has(entry.id)) send(ws, { type: "peer_pending", sessionId: entry.id, items: peerPendingSnap.get(entry.id) });
         send(ws, { type: "perm_mode", sessionId: entry.id, mode: s?.permMode || entry.permMode || "default" });
         if (entry.spend) send(ws, { type: "spend", sessionId: entry.id, spend: entry.spend }); // 花费是落盘累计,重开要接上
         if (s?.ssh) send(ws, { type: "ssh_status", sessionId: entry.id, ssh: pubSsh(s.ssh) }); // 恢复 SSH 显示
@@ -2488,6 +2502,17 @@ wss.on("connection", (ws) => {
         if (!sess) return;
         sess.msgQueue = sess.msgQueue.filter((x) => x.pid !== m.pid);
         broadcastMsgQueue(m.sessionId, sess);
+        break;
+      }
+      // 桌面前端的待发队列是纯前端状态(不进 sess.msgQueue —— 它那套出队要处理后台任务续跑等边界),
+      // 手机看不到。这里纯转发它的队列快照给别端只读显示,不存:发送方自己有真实状态,存了反而要
+      // 处理它断线后的清理。手机排的走 sess.msgQueue(broadcastMsgQueue),两条通路不重叠。
+      // ponytail: 不带来源 id,多台桌面会互相覆盖对端那栏;发送端断线残留由它恢复后的快照覆盖,不主动清
+      case "peer_pending": {
+        // 存最新快照:手机进会话/重连时要能看到别端「已经排着」的队列(reopen 时补发),
+        // 不存的话只有「进会话之后新排的」才广播得到。ponytail: 无来源 id,多端会互相覆盖这份快照
+        peerPendingSnap.set(m.sessionId, m.items || []);
+        broadcastExcept(ws, { type: "peer_pending", sessionId: m.sessionId, items: m.items || [] });
         break;
       }
       case "permission_response": {
