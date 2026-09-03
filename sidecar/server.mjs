@@ -2160,6 +2160,21 @@ async function snapshot(pageUrl) {
   return { html, base, truncated: budget <= 0 };
 }
 
+// 快照页里的 fetch() 隧道:页面本身在手机上跑,它按相对路径去取 data/*.json 之类时,
+// 打到的是手机自己的 localhost。手机端把这类请求 postMessage 出来经 relay 打到这儿,
+// 由这台机代取,回包再灌回页面 —— 只有 JS 拉数据渲染的页(SPA、参数表)才能看到主体内容。
+// 只代取本机/私网地址:公网的手机自己能直连,而且这条口子不该变成任意 URL 的代理。
+// ponytail: 只管 GET,不转 method/body/headers,页面要 POST 时再补
+async function previewFetch(url) {
+  let u;
+  try { u = new URL(url); } catch { throw new Error("bad url"); }
+  if (!LOCAL_HOST.test(u.hostname)) throw new Error("not a local url");
+  const r = await fetch(u.href, { signal: AbortSignal.timeout(SNAP_TIMEOUT) });
+  const buf = Buffer.from(await r.arrayBuffer());
+  if (buf.length > SNAP_MAX) throw new Error(`too large: ${buf.length}`);
+  return { status: r.status, mime: r.headers.get("content-type") || "", body: buf.toString("base64") };
+}
+
 function send(ws, obj) {
   // ws 可能是 null:待发队列里的消息重放时,当初那条连接早断了(手机息屏),这时只走 broadcast
   if (ws?.readyState === 1) ws.send(JSON.stringify(obj));
@@ -2375,6 +2390,13 @@ wss.on("connection", (ws) => {
         snapshot(m.url)
           .then((r) => send(ws, { type: "preview_snapshot", url: m.url, ...r }))
           .catch((e) => send(ws, { type: "preview_snapshot", url: m.url, error: e?.message || String(e) }));
+        break;
+      }
+      case "preview_fetch": {
+        // 快照页里 JS 发起的本地请求(见 previewFetch)。失败同样回包,页面那头的 Promise 在等
+        previewFetch(m.url)
+          .then((r) => send(ws, { type: "preview_fetch", id: m.id, ...r }))
+          .catch((e) => send(ws, { type: "preview_fetch", id: m.id, error: e?.message || String(e) }));
         break;
       }
       case "blob_get": {
