@@ -2168,7 +2168,57 @@ async function snapshot(pageUrl) {
   html = await replaceAsync(html, /<style\b[^>]*>([\s\S]*?)<\/style>/gi,
     async (tag, css) => (css.includes("url(") ? tag.replace(css, await inlineCssUrls(css, base)) : tag));
 
+  // 5. fetch 隧道 shim 写进 <head> 最前:必须在页面任何脚本之前跑,把 window.fetch 换掉。
+  //    早先靠手机端 injectedJavaScriptBeforeContentLoaded 注入 —— 那是 onPageStarted 里
+  //    异步 evaluateJavascript,和页面 inline 脚本抢跑,输了就走原生 fetch 打手机 localhost、
+  //    "Failed to fetch",于是时灵时不灵。写进文档 <head> 首位则按文档顺序保证最先执行,零竞态。
+  const shim = `<script>${snapFetchShim(base)}</script>`;
+  html = /<head[^>]*>/i.test(html)
+    ? html.replace(/<head[^>]*>/i, (m) => m + shim)
+    : shim + html;
+
   return { html, base, truncated: budget <= 0 };
+}
+
+// 隧道 shim(页内那半边)。base 烤进来算同源基准 —— loadDataWithBaseURL 下
+// location.origin/document.baseURI 不可靠。页面 relative fetch(data/*.json)解析到 base 同源,
+// 截下来 postMessage 出去由这台机代取(preview_fetch),回包灌进 __snapReply 兑现 Promise。
+// 公网绝对地址 origin 不同,放行给原生 fetch。出错底部弹红条,免得整页静默空白。
+// ponytail: 只截 GET,XHR/POST 不管,碰到再补
+function snapFetchShim(base) {
+  return `(function () {
+  var BASE = ${JSON.stringify(base)}, baseOrigin;
+  try { baseOrigin = new URL(BASE).origin; } catch (e) { baseOrigin = ""; }
+  var pending = {}, n = 0, orig = window.fetch;
+  function banner(msg) {
+    try {
+      var d = document.getElementById("__snapErr");
+      if (!d) { d = document.createElement("div"); d.id = "__snapErr";
+        d.style.cssText = "position:fixed;left:0;right:0;bottom:0;z-index:99999;background:#b00;color:#fff;font:12px monospace;padding:6px;white-space:pre-wrap";
+        (document.body || document.documentElement).appendChild(d); }
+      d.textContent = String(msg);
+    } catch (e) {}
+  }
+  window.addEventListener("unhandledrejection", function (e) { banner("fetch fail: " + ((e.reason && e.reason.message) || e.reason)); });
+  window.__snapReply = function (id, r) {
+    var p = pending[id]; if (!p) return; delete pending[id];
+    if (r.error) return p.rej(new TypeError(r.error));
+    var bin = atob(r.body || ""), bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    p.res(new Response(bytes, { status: r.status || 200, headers: { "content-type": r.mime || "" } }));
+  };
+  window.fetch = function (input, init) {
+    var raw = typeof input === "string" ? input : (input && input.url), u;
+    try { u = new URL(raw, BASE); } catch (e) { return orig.apply(this, arguments); }
+    var m = (init && init.method ? init.method : "GET").toUpperCase();
+    if (u.origin !== baseOrigin || m !== "GET") return orig.apply(this, arguments);
+    var id = ++n;
+    return new Promise(function (res, rej) {
+      pending[id] = { res: res, rej: rej };
+      window.ReactNativeWebView.postMessage(JSON.stringify({ snapFetch: { id: id, url: u.href } }));
+    });
+  };
+})();`.replace(/<\/script/gi, "<\\/script");
 }
 
 // 快照页里的 fetch() 隧道:页面本身在手机上跑,它按相对路径去取 data/*.json 之类时,
