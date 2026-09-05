@@ -107,7 +107,8 @@ export interface ResumePrompt { tokens: number; ageMs: number }
 export type ResumeChoice = "summary" | "full" | "fresh";
 
 // 待发消息:agent 工作时继续发的消息进队列,完成后自动依次发出。html/imgs 供发出后"编辑"完整还原
-export interface PendingMsg { pid: string; blocks: ContentBlock[]; text: string; html?: string; imgs?: Record<string, { media_type: string; data: string }> }
+// at = 定时发送的时刻(ms):到点之前不出队,队列里排在它后面的普通消息可以先走。
+export interface PendingMsg { pid: string; blocks: ContentBlock[]; text: string; html?: string; imgs?: Record<string, { media_type: string; data: string }>; at?: number }
 
 export interface Session {
   id: string;

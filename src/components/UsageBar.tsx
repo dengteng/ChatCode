@@ -200,7 +200,7 @@ function fmtAge(ms: number) {
 // 就按周期补到下一个未来边界,让倒计时立即重启,不再卡在"剩 0m"。
 // ponytail: 固定周期假设;探针拿到真·新窗口后,后端 better() 会用精确值覆盖显示。
 const WIN_PERIOD: Record<string, number> = { "5h": 5 * 3600_000, "周": 7 * 24 * 3600_000 };
-function rollReset(resetAt: number | null, label: string): number | null {
+export function rollReset(resetAt: number | null, label: string): number | null {
   if (!resetAt) return null;
   const now = Date.now();
   if (resetAt > now) return resetAt;
@@ -208,7 +208,7 @@ function rollReset(resetAt: number | null, label: string): number | null {
   if (!p) return null;
   return resetAt + Math.ceil((now - resetAt) / p) * p;
 }
-function fmtReset(ts: number) {
+export function fmtReset(ts: number) {
   const min = Math.max(0, Math.round((ts - Date.now()) / 60000));
   if (min < 60) return `${min}m`;
   const h = Math.floor(min / 60);

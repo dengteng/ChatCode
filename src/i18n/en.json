@@ -783,5 +783,13 @@
   "准备中…": "Preparing…",
   "安装中…": "Installing…",
   "正在下载 Claude Code（约 270MB），首次安装通常需要 1–5 分钟，网络慢时更久。请耐心等待，别关闭窗口 —— 关了要重新下。": "Downloading Claude Code (~270MB). First install usually takes 1–5 minutes, longer on a slow connection. Please wait and keep this window open — closing it means starting over.",
-  "已等待 {{s}} 秒": "{{s}}s elapsed"
+  "已等待 {{s}} 秒": "{{s}}s elapsed",
+  "定时": "Timed",
+  "{{clock}} 发出": "sends at {{clock}}",
+  "定时发送": "Schedule send",
+  "5h 额度重置后": "After the 5h limit resets",
+  " · {{clock}}(还剩 {{left}})": " · {{clock}} ({{left}} left)",
+  " · 还没拿到额度窗口,等用量条加载出来再试": " · No limit window yet — wait for the usage bar to load",
+  "这个时间已经过去了": "That time is already in the past",
+  "到点前 app 得开着 —— 定时只存在内存里,退出就没了": "Keep the app open until then — schedules live in memory and are lost on quit"
 }

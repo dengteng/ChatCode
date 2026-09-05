@@ -685,7 +685,8 @@ interface Api {
   // 返回 false = 与 sidecar 断连、这条没发出去。调用方必须据此保住原文(别清输入框)。
   sendMessage: (id: string, blocks: any[], meta?: { html?: string; imgs?: Record<string, { media_type: string; data: string }> }) => boolean;
   // 返回 false = 队列已满、这条没进去。调用方必须据此提示用户并保住原文(别清输入框)。
-  enqueuePending: (id: string, item: { blocks: any[]; text: string; html?: string; imgs?: Record<string, { media_type: string; data: string }> }) => boolean;
+  // at:定时发送的时刻(ms),到点前不出队;不给就是普通排队(agent 一空闲就发)
+  enqueuePending: (id: string, item: { blocks: any[]; text: string; html?: string; imgs?: Record<string, { media_type: string; data: string }>; at?: number }) => boolean;
   cancelPending: (id: string, pid: string) => void;
   respondPermission: (id: string, requestId: string, behavior: "allow" | "deny", message?: string, remember?: RememberChoice) => void;
   interrupt: (id: string) => void;
@@ -1265,6 +1266,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     },
   }), []); // eslint-disable-line react-hooks/exhaustive-deps -- 见上:身份必须永远不变
 
+  // 定时待发到点的那一刻没有任何 state 变化,下面的出队 effect 不会自己重跑 —— 有定时项时每 15s 打一拍。
+  // 用 interval 而不是精确 setTimeout:睡一夜那种长定时会被后台节流/系统睡眠掐停,醒来根本不响;
+  // interval 在唤醒后立刻补一拍,最多晚一拍就发出去。
+  const [timedTick, setTimedTick] = useState(0);
+  const hasTimedPending = Object.values(state.sessions).some((s) => s.pending?.some((p) => p.at));
+  useEffect(() => {
+    if (!hasTimedPending) return;
+    const iv = setInterval(() => setTimedTick((n) => n + 1), 15_000);
+    return () => clearInterval(iv);
+  }, [hasTimedPending]);
+
   // 待发队列自动出队:某会话变空闲(agent 完成上一轮)、没有后台任务、且上一轮已彻底了结(含后台续跑)时,发出队首。
   // bgWait = 上一轮还挂着后台任务,轮次未完全了结 —— 不能放队列出去,否则会在后台任务续跑前把下一条消息切进来。
   // 压缩上下文期间 status 也是 idle,同样要按住:压到一半插进新一轮,压缩就白做了。
@@ -1274,7 +1286,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const compacting = s.timeline.some((t) => t.kind === "compact" && t.running);
       // 断连时不出队:sendMessage 会失败,而这条已经从队列里摘掉了 —— 用户排的消息就凭空没了。
       if (state.connected && s.status === "idle" && !s.bgWait && !compacting && (s.bgTasks?.length ?? 0) === 0 && s.pending && s.pending.length > 0) {
-        const next = s.pending[0];
+        // 定时消息没到点就跳过它,取后面第一条到点的 —— 否则一条约在凌晨的消息会把整条队列堵到凌晨
+        const next = s.pending.find((p) => !p.at || p.at <= Date.now());
+        if (!next) continue;
         dispatch({ type: "remove_pending", id: s.id, pid: next.pid });
         api.sendMessage(s.id, next.blocks, { html: next.html, imgs: next.imgs });
         // 排队发出的 /compact 也要起进度条:它同时是"这轮到底压没压成"的判据 —— 没有这条,
@@ -1283,7 +1297,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           dispatch({ type: "compact_start", id: s.id });
       }
     }
-  }, [state.sessions, state.connected]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [state.sessions, state.connected, timedTick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 把本机待发队列镜像广播给别端(手机/另一台电脑)只读显示。本机队列是纯前端 pending,
   // 不进 sidecar,不广播的话别端根本不知道 —— 就是「手机看不到 PC 排队」那个问题。

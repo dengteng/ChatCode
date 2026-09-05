@@ -693,7 +693,7 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 /* 待发队列:紧贴输入框上方,左侧相对缩进,左缘 accent 竖条暗示"排队中"+顺序方向 */
 .pending-queue { display: flex; flex-direction: column; gap: 3px; margin: 0 0 6px 12px; }
 .pending-row { display: flex; align-items: center; gap: 8px; padding: 5px 8px 5px 10px; font-size: 12.5px; color: var(--muted); background: color-mix(in srgb, var(--panel) 68%, transparent); border: 1px solid var(--border); border-radius: 8px; animation: pending-in .16s var(--ease-out, ease); }
-.pending-tag { flex: none; font-size: 11px; font-family: Menlo, monospace; color: var(--accent); padding: 1px 6px; border-radius: 5px; background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.pending-tag { flex: none; display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-family: Menlo, monospace; color: var(--accent); padding: 1px 6px; border-radius: 5px; background: color-mix(in srgb, var(--accent) 14%, transparent); }
 .pending-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: Menlo, monospace; }
 .pending-note { flex: none; font-size: 11px; color: var(--muted); opacity: .8; }
 .pending-cancel { flex: none; padding: 2px; border: none; background: transparent; color: var(--muted); border-radius: 5px; display: inline-flex; align-items: center; opacity: .55; }
@@ -717,17 +717,23 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 .input-box.shell-mode .ghost-overlay { font-family: "SF Mono", Menlo, monospace; }
 /* 紫线止于发送按钮前:按钮绝对定位在右下,margin-right 让提示框(连带 border-top)避开按钮区,不再相交 */
 .shell-mode-hint { margin-top: 8px; margin-right: 88px; padding-top: 6px; border-top: 1px solid #ff4db8; color: #ff77c7; font: 12px "SF Mono", Menlo, monospace; }
-.input-box.two-actions .shell-mode-hint { margin-right: 158px; }
+.input-box.two-actions .shell-mode-hint { margin-right: 194px; }
 .editor { min-height: 3.6em; max-height: 200px; overflow-y: auto; outline: none;
   white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5;
   scrollbar-width: none; /* 隐藏滚动条视觉,但内容超高时仍可滚(滚轮/方向键) */ }
 .editor::-webkit-scrollbar { display: none; } /* WKWebView / WebKit */
 .editor-ph { position: absolute; left: 10px; top: 8px; color: var(--muted); pointer-events: none; line-height: 1.5; }
-.input-box.has-actions .editor { padding-right: 80px; }.input-box.two-actions .editor { padding-right: 150px; }
+.input-box.has-actions .editor { padding-right: 116px; }.input-box.two-actions .editor { padding-right: 186px; }
 .input-actions { position: absolute; right: 8px; bottom: 8px; display: flex; gap: 6px; }
 .input-btn { box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; height: 28px; border: 1px solid transparent; border-radius: 6px; font-size: 12px; line-height: 1; padding: 0 12px; cursor: pointer; }
 .input-btn.send { background: var(--accent); color: #fff; }
 .input-btn.send:hover { filter: brightness(1.06); }
+/* 定时发送:图标按钮,挨着发送键。宽度算进上面几处 padding-right(80→116) */
+.input-btn.sched { background: transparent; border-color: var(--border); color: var(--muted); padding: 0 9px; }
+.input-btn.sched:hover { border-color: var(--accent); color: var(--text); }
+.sched-menu .sched-custom { display: flex; align-items: center; gap: 8px; }
+.sched-menu .sched-custom input { flex: 1; background: transparent; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; font: inherit; font-size: 12px; }
+.sched-menu .sched-custom button { background: var(--accent); color: #fff; border: 0; border-radius: 6px; padding: 5px 10px; font-size: 12px; cursor: pointer; }
 .input-btn.interrupt { background: transparent; border-color: var(--border); color: var(--text); gap: 7px; }
 .input-btn.interrupt:hover { border-color: var(--accent); }
 /* 停止标记:纯 CSS 小正方形(近直角),别用带圆角描边的方块图标 —— 暗色下那个太像未勾选的 checkbox */
@@ -737,8 +743,8 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 /* bottom + overflow:自己把超出输入框的部分裁掉(父级不再 overflow:hidden,那会连边缘光一起裁) */
 .ghost-overlay { position: absolute; left: 10px; top: 8px; right: 10px; bottom: 8px; overflow: hidden; z-index: 1;
   font: inherit; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; pointer-events: none; }
-.input-box.has-actions .ghost-overlay { right: 80px; } /* 让灰字建议避开发送/打断按钮,不叠到按钮下面 */
-.input-box.two-actions .ghost-overlay { right: 150px; }
+.input-box.has-actions .ghost-overlay { right: 116px; } /* 让灰字建议避开发送/打断按钮,不叠到按钮下面 */
+.input-box.two-actions .ghost-overlay { right: 186px; }
 .ghost-typed { color: transparent; }
 .ghost-sug { color: var(--muted); opacity: .7; }
 /* 会话断开后的重连入口(替代被禁用的输入框) */

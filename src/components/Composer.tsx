@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Folder, File, CornerLeftUp, RotateCw, ChevronDown, X, Sparkles } from "lucide-react";
+import { Folder, File, CornerLeftUp, RotateCw, ChevronDown, X, Sparkles, Clock } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Session } from "../types";
-import { BUILTIN_COMMANDS, modelLabel, modelName, contextWindowOf, canSendImage } from "../types";
+import { BUILTIN_COMMANDS, modelLabel, modelName, contextWindowOf, canSendImage, sessionProvider } from "../types";
 import { useStore, fetchBlob, sessionBusy, PENDING_MAX } from "../store";
-import { UsageBar } from "./UsageBar";
+import { UsageBar, rollReset, fmtReset } from "./UsageBar";
 import { openImageWindow } from "../popout";
 import { onEdgeGlow } from "../lib/edgeGlow";
 import { unwrapSoftBreaks, htmlHasBlocks } from "../lib/unwrap";
@@ -13,6 +13,13 @@ import { extNote, skillDescs } from "../extensions";
 import { useTranslation } from "react-i18next";
 
 interface Img { media_type: string; data: string }
+
+// 定时时刻的显示:今天内只给 HH:MM;跨天补上月-日 —— 睡前排的消息多半落在明天凌晨,不写日期会看错成"马上发"
+function clockOf(ts: number) {
+  const d = new Date(ts);
+  const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return d.toDateString() === new Date().toDateString() ? hm : `${d.getMonth() + 1}-${d.getDate()} ${hm}`;
+}
 
 // 需要跟参数才有意义的内置命令:回车不直接执行,只把命令回显到输入框等用户补参数(如 /goal <目标>)
 const ARG_CMDS = new Set(["/goal"]);
@@ -210,6 +217,10 @@ export function Composer({ session }: { session: Session }) {
   const [modelMenu, setModelMenu] = useState(false); // /model 选择器打开中
   const modelMenuRef = useRef<HTMLDivElement>(null);
   const modelBtnRef = useRef<HTMLButtonElement>(null);
+  const [schedMenu, setSchedMenu] = useState(false); // 定时发送菜单打开中
+  const [schedAt, setSchedAt] = useState("");        // 自定义时刻(datetime-local 的值)
+  const schedMenuRef = useRef<HTMLDivElement>(null);
+  const schedBtnRef = useRef<HTMLButtonElement>(null);
   const [text, setText] = useState("");     // 纯文本镜像(驱动命令面板/占位符,不回写编辑器)
   const [imgCount, setImgCount] = useState(0);
   const [preview, setPreview] = useState<{ src: string; left: number; top: number } | null>(null); // 悬浮预览
@@ -457,8 +468,9 @@ export function Composer({ session }: { session: Session }) {
   function pushHistory(h: HistEntry) {
     if (h.text || hasImgs(h)) liveHist().unshift(h);
   }
-  // ↑ 回显上一条:整体还原 HTML + 图片数据,图片标签因此不会丢
-  function restoreHistory(h: HistEntry) {
+  // ↑/↓ 回显一条:整体还原 HTML + 图片数据,图片标签因此不会丢
+  // toStart:↑ 来的钉行首、↓ 来的钉行尾 —— 光标停在下一次翻页判据的那一头,连按才翻得动
+  function restoreHistory(h: HistEntry, toStart = true) {
     const ed = edRef.current; if (!ed) return;
     ed.innerHTML = h.html;
     imgData.current = new Map(Object.entries(h.imgs));
@@ -466,12 +478,10 @@ export function Composer({ session }: { session: Session }) {
     idc.current = maxId + 1; // 新插入的图片不能和还原出来的 chip id 撞
     renumber();
     ed.focus();
-    // 光标一律落在最前面。翻历史时光标停在末尾的话,下一下 ↑ 就成了"把光标往上移一行",
-    // 一条就翻不动了 —— 钉在第一位,连按 ↑ 才能一路往上翻。
     const sel = window.getSelection();
-    const r = document.createRange(); r.selectNodeContents(ed); r.collapse(true);
+    const r = document.createRange(); r.selectNodeContents(ed); r.collapse(toStart);
     sel?.removeAllRanges(); sel?.addRange(r);
-    ed.scrollTop = 0;
+    ed.scrollTop = toStart ? 0 : ed.scrollHeight;
     syncText();
   }
 
@@ -576,8 +586,27 @@ export function Composer({ session }: { session: Session }) {
     return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
   }, [modelMenu]);
 
+  // 定时菜单同样:点别处 / esc 收起
+  useEffect(() => {
+    if (!schedMenu) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (schedMenuRef.current?.contains(t) || schedBtnRef.current?.contains(t) || edRef.current?.contains(t)) return;
+      setSchedMenu(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.preventDefault(); setSchedMenu(false); } };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
+  }, [schedMenu]);
+
   // 换会话时收起:Composer 不随会话 remount,菜单会挂在新会话上还显示旧列表
-  useEffect(() => { setModelMenu(false); }, [session.id]);
+  useEffect(() => { setModelMenu(false); setSchedMenu(false); }, [session.id]);
+
+  // 本会话 provider 的 5h 额度重置时刻。已过点的 resetAt 按 5h 周期推到下一个未来边界 ——
+  // 和用量条的倒计时共用 rollReset,免得菜单里写出"剩 0m"这种立刻就发的选项。
+  const usage = sessionProvider(session) === "kimi" ? state.usageKimi : state.usage;
+  const limitResetAt = rollReset(usage.session.resetAt, "5h");
 
   function openModelMenu() {
     if (modelMenu) { setModelMenu(false); return; } // 再点一次收起
@@ -770,12 +799,14 @@ export function Composer({ session }: { session: Session }) {
     return () => { window.removeEventListener("cc-insert-snippet", onSnip); window.removeEventListener("cc-fill-composer", onFill); };
   }, [session.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  function submit() {
+  // at:定时发送的时刻(ms)。给了就一律进待发队列,到点再发。
+  function submit(at?: number) {
     const ed = edRef.current; if (!ed) return;
     let compactCmd = false;
 
     // ! 前缀 = 终端命令(仿 Claude Code CLI 的 bash 模式),不发给 agent
-    if (imgCount === 0) {
+    // 定时发送时整段跳过:这些都是前端就地执行的(开菜单、跑终端命令),按"定时"却立刻执行终端命令太吓人
+    if (imgCount === 0 && at === undefined) {
       const input = getText().trim();
       // 需要跟参数的命令(如 /goal <条件>):只有命令本身、没参数时,回车不发送,等用户补参数
       if (ARG_CMDS.has(input)) return;
@@ -826,9 +857,10 @@ export function Composer({ session }: { session: Session }) {
     const snap = snapshot(); // 快照编辑器(含图片/引用 chip 的 html),给"编辑"按钮完整还原
     // agent 正在工作、上一轮还挂着后台任务在续跑(轮次未彻底了结)、或正在压缩上下文:
     // 都不打断,消息进待发区排队(最多 3),彻底完成后自动依次发出(闸见 sessionBusy)
-    if (sessionBusy(session)) {
+    // 定时发送(at)也走同一条队列:到点前 store 的出队 effect 会跳过它
+    if (at !== undefined || sessionBusy(session)) {
       // 没排上就别清编辑器 —— 用户写的东西还在框里,清一条待发就能直接再按一次
-      if (!enqueuePending(session.id, { blocks: outBlocks, text: snap.text, html: snap.html, imgs: snap.imgs })) {
+      if (!enqueuePending(session.id, { blocks: outBlocks, text: snap.text, html: snap.html, imgs: snap.imgs, at })) {
         toast(t("待发已满（最多 {{n}} 条）", { n: PENDING_MAX }));
         return;
       }
@@ -840,6 +872,11 @@ export function Composer({ session }: { session: Session }) {
     if (compactCmd) dispatch({ type: "compact_start", id: session.id }); // 进度条要排在 /compact 这条消息之后
     pushHistory(snap); // 先快照(含图片),再清空
     clearEditor();
+  }
+
+  function scheduleSend(at: number) {
+    setSchedMenu(false);
+    submit(at);
   }
 
   function onKeyDown(e: React.KeyboardEvent) {
@@ -913,19 +950,21 @@ export function Composer({ session }: { session: Session }) {
     }
     // 模型菜单打开时:esc 关闭
     if (modelMenu && e.key === "Escape") { e.preventDefault(); setModelMenu(false); return; }
-    // 输入历史:光标停在第一位时 ↑/↓ 翻历史,不限次数。判据从"框里是空的"改成"光标在最前面",
-    // 加上每翻一条都把光标钉回第一位,连按 ↑ 就能一路往上翻;光标不在第一位时方向键照常移动光标,
-    // 两种意图不会打架。
-    if ((e.key === "ArrowUp" || e.key === "ArrowDown") && caretAtStart()) {
+    // 输入历史:↑ 只在光标停在最前面时往上翻、↓ 只在光标停在最末尾时往下翻,不限次数。
+    // 两端各认一头,是因为多行回显后光标钉在第一位:那时 ↓ 的本意一定是"往下移一行",
+    // 拿它翻历史会把刚回显出来的整条内容换掉。翻上一条后光标钉首、翻下一条后光标钉尾,
+    // 连按同一个键就能一路翻到底;不在那一头时方向键照常移动光标,两种意图不会打架。
+    if ((e.key === "ArrowUp" && caretAtStart()) || (e.key === "ArrowDown" && caretAtEnd())) {
       const h = hist();
-      const next = histIdx.current + (e.key === "ArrowUp" ? 1 : -1);
+      const up = e.key === "ArrowUp";
+      const next = histIdx.current + (up ? 1 : -1);
       if (next < -1) return;                            // 已经在最新一条之下:↓ 交还给光标
       if (next >= h.length) { e.preventDefault(); return; } // 到头了就停住,别掉回"移动光标"
       e.preventDefault();
       if (histIdx.current === -1) histDraft.current = snapshot(); // 开始翻之前先把手上这份收好
       histIdx.current = next;
-      if (next >= 0) restoreHistory(h[next]);
-      else if (histDraft.current && (histDraft.current.text || hasImgs(histDraft.current))) restoreHistory(histDraft.current);
+      if (next >= 0) restoreHistory(h[next], up);
+      else if (histDraft.current && (histDraft.current.text || hasImgs(histDraft.current))) restoreHistory(histDraft.current, up);
       else clearEditor();
       return;
     }
@@ -1001,6 +1040,27 @@ export function Composer({ session }: { session: Session }) {
           sel.modify("move", dir, "character");
         if (sel.anchorNode === beforeN && sel.anchorOffset === beforeO) return; // 到边界没动,交回默认
         e.preventDefault(); return;
+      }
+    }
+    // shift+⏎ 换行自己插 <br>,不走 WKWebView 的默认换行 —— 它在行中换行时会先分行、
+    // 紧接着又拿"合并相邻段落"那套 fixup 把行首那截文字连同换行一起吞掉(报文:在「3、|指纹锁」
+    // 处换行,回头「3、」没了、下一行被提了上来)。自己插节点、自己放光标,行为就确定了。
+    if (e.key === "Enter" && e.shiftKey) {
+      const sel = window.getSelection(); const ed = edRef.current;
+      if (sel && sel.rangeCount && ed && ed.contains(sel.anchorNode)) {
+        e.preventDefault();
+        const r = sel.getRangeAt(0); r.deleteContents();
+        const br = document.createElement("br");
+        r.insertNode(br);
+        // 在末尾换行时补第二个 <br>:HTML 里结尾的单个 <br> 不占行高,新起的空行看不见、光标像没动
+        let after = br.nextSibling;
+        if (!after) { const pad = document.createElement("br"); br.after(pad); after = pad; }
+        const nr = document.createRange(); nr.setStartBefore(after); nr.collapse(true);
+        sel.removeAllRanges(); sel.addRange(nr);
+        // 手改 DOM 不触发 input 事件,onInput 里那两件事在这儿补上
+        histIdx.current = -1; histDraft.current = null;
+        syncText(); refreshMention();
+        return;
       }
     }
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
@@ -1169,12 +1229,14 @@ export function Composer({ session }: { session: Session }) {
         <div className="pending-queue">
           {session.pending!.map((p, i) => (
             <div key={p.pid} className="pending-row">
-              <span className="pending-tag">{t("排队{{n}}", { n: i + 1 })}</span>
+              <span className="pending-tag">{p.at ? <><Clock size={11} /> {t("定时")}</> : t("排队{{n}}", { n: i + 1 })}</span>
               {/* title:这行是 nowrap + 省略号,长消息看不全;悬停给全文,选中复制拿到的也是全文 */}
               <span className="pending-text" title={p.text}>{p.text || t("（图片）")}</span>
               {/* 斜杠命令排队时点明"本轮结束后执行":否则用户看不出命令是被吞了还是在等,
                   /compact 尤其容易误以为"任务被打断了/命令没生效" */}
-              {/^\/\S+$/.test(p.text.trim()) && <span className="pending-note">{t("本轮结束后执行")}</span>}
+              {p.at
+                ? <span className="pending-note">{t("{{clock}} 发出", { clock: clockOf(p.at) })}</span>
+                : /^\/\S+$/.test(p.text.trim()) && <span className="pending-note">{t("本轮结束后执行")}</span>}
               <button className="pending-cancel" title={t("取消这条待发消息")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); cancelPending(session.id, p.pid); } }}><X size={13} /></button>
             </div>
           ))}
@@ -1272,6 +1334,30 @@ export function Composer({ session }: { session: Session }) {
           <div className="palette-hint">{t("↑↓ 选择 · ⏎/Tab 插入 · esc 关闭 · 发送时自动转成显式调用")}</div>
         </div>
       )}
+      {schedMenu && (
+        // 定时发送:选一个时刻,消息进待发队列,到点自动发出(会话那时在忙就等它闲下来)
+        <div className="palette sched-menu" ref={schedMenuRef}>
+          <div className="palette-head"><Clock size={13} /> {t("定时发送")}</div>
+          <div className={`palette-item ${limitResetAt ? "" : "muted"}`}
+            onMouseDown={(e) => { e.preventDefault(); if (limitResetAt) scheduleSend(limitResetAt + 60_000); }}>
+            <b>{t("5h 额度重置后")}</b>
+            <span className="muted">{limitResetAt
+              ? t(" · {{clock}}(还剩 {{left}})", { clock: clockOf(limitResetAt + 60_000), left: fmtReset(limitResetAt) })
+              : t(" · 还没拿到额度窗口,等用量条加载出来再试")}</span>
+          </div>
+          <div className="palette-item sched-custom">
+            <input type="datetime-local" value={schedAt} onChange={(e) => setSchedAt(e.target.value)} />
+            <button onMouseDown={(e) => {
+              e.preventDefault();
+              const ts = new Date(schedAt).getTime();
+              if (!schedAt || isNaN(ts)) return;
+              if (ts <= Date.now()) { toast(t("这个时间已经过去了")); return; }
+              scheduleSend(ts);
+            }}>{t("定时")}</button>
+          </div>
+          <div className="palette-hint">{t("到点前 app 得开着 —— 定时只存在内存里,退出就没了")}</div>
+        </div>
+      )}
       {session.status === "closed" ? (
         <div className="reconnect-bar" onMouseDown={(e) => { if (e.button === 0) reopenSession(session.id); }}><RotateCw size={14} /> {t("会话已断开 · 点此重连")}</div>
       ) : (
@@ -1331,6 +1417,10 @@ export function Composer({ session }: { session: Session }) {
               <button className="input-btn interrupt"
                 title={session.status === "running" ? t("打断 (⌘C)") : t("不等后台任务了,立刻放行待发消息")}
                 onMouseDown={(e) => { e.preventDefault(); interrupt(session.id); }}><span className="stop-dot" /> {session.status === "running" ? t("打断") : t("不等了")}</button>
+            )}
+            {!isEmpty && (
+              <button className="input-btn sched" ref={schedBtnRef} title={t("定时发送")}
+                onMouseDown={(e) => { e.preventDefault(); setSchedMenu((v) => !v); }}><Clock size={14} /></button>
             )}
             {!isEmpty && (
               <button className="input-btn send" title={t("发送 (⏎)")} onMouseDown={(e) => { e.preventDefault(); submit(); }}>{t("发送")}</button>
