@@ -610,13 +610,21 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
   // 所有「编程式钉到底部」都走这儿:钉完必须补重绘那一脚,少一处那一处就白屏。
   // 同一时刻只留一个待执行的 poke —— ResizeObserver 在流式回复时每帧都会叫好几次,
   // 不去重就攒出一堆 rAF 做同一件事。
+  // live=true(流式增长/历史回放这类"连续钉底"):这一脚要延到静默 150ms 之后再补。
+  // 每次增量都立刻补的话,pokeRepaint 的"先滚 1px 再滚回"每帧来一遍 —— 正在工作的气泡
+  // 一旦长到 max-height 封顶、不再变高,这 1px 就成了画面上唯一的位移,看着就是气泡持续抖动。
+  // 而且内容还在长的时候 webview 本来就在重绘,这一脚本就多余,只有停下来那一刻才需要。
   const pokeRaf = useRef<() => void>(() => {});
-  const pinBottom = (el: HTMLElement) => {
+  const pokeTimer = useRef(0);
+  const cancelPoke = () => { clearTimeout(pokeTimer.current); pokeRaf.current(); pokeRaf.current = () => {}; };
+  const pinBottom = (el: HTMLElement, live = false) => {
     el.scrollTop = el.scrollHeight;
-    pokeRaf.current();
+    cancelPoke();
     // ok 守卫:这一脚落在下一帧,期间用户已手动往上翻(stick=false)就别硬拽回底部
-    pokeRaf.current = pokeRepaint(el, () => el.scrollHeight, () => stick.current);
-    return pokeRaf.current;
+    const poke = () => { pokeRaf.current = pokeRepaint(el, () => el.scrollHeight, () => stick.current); };
+    if (live) pokeTimer.current = window.setTimeout(poke, 150);
+    else poke();
+    return cancelPoke;
   };
   // 切会话:同步(paint 前)定位。有上次的浏览位置就回到那儿,没有(或当时就贴着底)才钉到底。
   // 之前用 useEffect + sentinel.scrollIntoView 有两个毛病:① useEffect 在 paint 之后跑,
@@ -651,7 +659,7 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
   // 这条路径以前没补重绘那一脚,所以每次切到还没加载过的会话都是"滚动条对、内容一片空白"。
   useEffect(() => {
     const el = timelineRef.current;
-    if (stick.current && el) pinBottom(el);
+    if (stick.current && el) pinBottom(el, true);
   }, [session.timeline]);
   // 流式回复时 agent 卡片高度是"逐帧长大"的(markdown/工具卡/图片异步撑高),单靠 timeline 变更的 effect
   // 在那一拍 paint 时高度还没长完就钉不到真底,用户得手动往下拉。用 ResizeObserver 盯每个子元素的尺寸变化,
@@ -659,7 +667,7 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
   useEffect(() => {
     const el = timelineRef.current;
     if (!el) return;
-    const pin = () => { if (stick.current) pinBottom(el); };
+    const pin = () => { if (stick.current) pinBottom(el, true); };
     const ro = new ResizeObserver(pin);
     const sync = () => { ro.disconnect(); for (const c of el.children) ro.observe(c); };
     sync();

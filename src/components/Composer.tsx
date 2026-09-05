@@ -890,7 +890,10 @@ export function Composer({ session }: { session: Session }) {
     // 紧跟在组合结束后的回车视为"上屏确认",吞掉;真要发送再按一次。
     // 用 performance.now() 而不是 e.timeStamp:合成事件的 timeStamp 可能是 0 或另一套时钟,
     // 一旦算出负的时间差,这里就会把之后每一个回车都吃掉。
-    if (e.key === "Enter" && performance.now() - compEndAt.current < 100) { e.preventDefault(); return; }
+    // 只吞裸回车:输入法上屏用的是裸 ⏎,shift+⏎ 从来不是候选词确认键,没有误发风险。
+    // WKWebView 有时把 compositionend 拖到下一个非组合键的 keydown 之前才发,放行 shift 免得
+    // 中文刚打完那一下的换行被这条闸门连坐吃掉。
+    if (e.key === "Enter" && !e.shiftKey && performance.now() - compEndAt.current < 100) { e.preventDefault(); return; }
 
     // agent 运行中:Esc 不打断任务(已按用户要求禁用)
 
@@ -1052,9 +1055,16 @@ export function Composer({ session }: { session: Session }) {
         const r = sel.getRangeAt(0); r.deleteContents();
         const br = document.createElement("br");
         r.insertNode(br);
-        // 在末尾换行时补第二个 <br>:HTML 里结尾的单个 <br> 不占行高,新起的空行看不见、光标像没动
-        let after = br.nextSibling;
-        if (!after) { const pad = document.createElement("br"); br.after(pad); after = pad; }
+        // 在末尾换行时补第二个 <br>:HTML 里结尾的单个 <br> 不占行高,新起的空行看不见、光标像没动。
+        // "在末尾"不能判 nextSibling 为 null —— 光标在文本节点末尾时 insertNode 会按规范把它切开,
+        // br 后面留下一个空文本节点,判空就漏了,于是行尾第一次 shift+⏎ 看着没反应、要按第二下。
+        let atEnd = true;
+        for (let n = br.nextSibling; n; n = n.nextSibling)
+          if (n.nodeType !== Node.TEXT_NODE || n.textContent) { atEnd = false; break; }
+        let pad: HTMLBRElement | null = null;
+        if (atEnd) { pad = document.createElement("br"); br.after(pad); }
+        // atEnd 为真时必然刚补过 pad;为假时 br 后面一定还有兄弟节点,两条路都拿得到落点
+        const after = pad ?? br.nextSibling!;
         const nr = document.createRange(); nr.setStartBefore(after); nr.collapse(true);
         sel.removeAllRanges(); sel.addRange(nr);
         // 手改 DOM 不触发 input 事件,onInput 里那两件事在这儿补上
