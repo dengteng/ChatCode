@@ -131,6 +131,15 @@ const t = ((k: string, p?: any) => (p ? `${k}:${JSON.stringify(p)}` : k)) as any
     it({ kind: "tool", name: "Write", input: { file_path: "/Users/me/.claude/projects/p/memory/a.md", content: "新正文" } }),
   ]);
   eq([both.length, both[0].action], [1, "write"], "既读又写按更新算,且只留一条");
+  // Edit:old/new 收进 edits;本轮读过就把替换套到正文上,body = 改完后的全文
+  const P = "/Users/me/.claude/projects/p/memory/a.md";
+  const edit = (old_string: string, new_string: string, extra = {}) => it({ kind: "tool", name: "Edit", input: { file_path: P, old_string, new_string, ...extra } });
+  const e1 = usedMemories([edit("旧", "新")]);
+  eq([e1[0].action, e1[0].body, e1[0].edits], ["edit", "", [{ old: "旧", new: "新" }]], "没读过:全文空,改动块留着");
+  const e2 = usedMemories([read(P, "---\nname: x\n---\n旧的 旧"), edit("旧", "新"), edit("新", "更新", { replace_all: true })]);
+  eq([e2.length, e2[0].body, e2[0].edits.length], [1, "更新的 旧", 2], "读过再连改两次:替换逐次套上(默认只换首个),edits 累计");
+  const e3 = usedMemories([it({ kind: "tool", name: "MultiEdit", input: { file_path: P, edits: [{ old_string: "a", new_string: "b" }, { old_string: "c", new_string: "d" }] } })]);
+  eq(e3[0].edits.length, 2, "MultiEdit 的 edits 数组逐条收");
 }
 
 // ---------- usedSkillsMcp:没回结果的要标成"正在跑" ----------

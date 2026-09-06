@@ -1491,9 +1491,16 @@ function MemoryRefs({ memories, kind, cwd }: { memories: MemRef[]; kind: "ref" |
                     <ChevronRight size={12} />
                   </button>
                   <div className="mem-ref-file" title={m.file}>{m.file}</div>
+                  {/* Edit 的改动块:改前一段(删)、改后一段(增)。有全文时改动块放上面,全文在下面 */}
+                  {m.edits.map((e, i) => (
+                    <div key={i} className="mem-ref-diff">
+                      {e.old && <pre className="mem-ref-del">{e.old}</pre>}
+                      {e.new && <pre className="mem-ref-add">{e.new}</pre>}
+                    </div>
+                  ))}
                   {m.body
                     ? <div className="mem-ref-body md"><Markdown remarkPlugins={[remarkGfm]} rehypePlugins={rawHtml} components={md}>{m.body}</Markdown></div>
-                    : <div className="mem-ref-none">{t("这条本轮被改写过，正文到记忆中心看")}</div>}
+                    : !m.edits.length && <div className="mem-ref-none">{t("这条本轮被改写过，正文到记忆中心看")}</div>}
                 </article>
               ))}
             </div>

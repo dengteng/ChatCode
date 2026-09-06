@@ -1483,6 +1483,11 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 .mem-ref-body > :last-child { margin-bottom: 0; }
 /* Edit 拿不到全文时的占位,别留一片空白让人以为坏了 */
 .mem-ref-none { font-size: 12px; font-style: italic; color: var(--muted); }
+/* Edit 的改动块:改前红、改后绿,左侧色条 + 淡底,和 git diff 一个读法 */
+.mem-ref-diff { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.mem-ref-diff pre { margin: 0; padding: 5px 8px; border-radius: 5px; border-left: 3px solid; font: 11.5px/1.55 Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.mem-ref-del { border-color: #d64545; background: color-mix(in srgb, #d64545 9%, transparent); text-decoration: line-through; text-decoration-color: color-mix(in srgb, #d64545 45%, transparent); }
+.mem-ref-add { border-color: #3a9a4a; background: color-mix(in srgb, #3a9a4a 10%, transparent); }
 
 /* 记忆中心(InfoPanel 记忆 tab) */
 .mem-tab { padding: 12px 14px; }

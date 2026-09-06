@@ -104,8 +104,11 @@ export function toolResultText(result: any): string {
   return String(result);
 }
 export type MemAction = "read" | "write" | "edit";
-export interface MemRef { file: string; title: string; body: string; action: MemAction }
+export interface MemEdit { old: string; new: string }
+export interface MemRef { file: string; title: string; body: string; action: MemAction; edits: MemEdit[] }
 // 一轮里对记忆文件的所有动作:Read=引用,Write/Edit=更新。同一文件按"更新 > 引用"合并(既读又写算更新)。
+// Edit 拿不到全文,但 old_string/new_string 就是这次改了什么,收进 edits 给弹窗显示;
+// 本轮先 Read 过的话再把替换套到读到的正文上,body 就是改完后的全文。
 export function usedMemories(items: TimelineItem[]): MemRef[] {
   const map = new Map<string, MemRef>();
   const rank: Record<MemAction, number> = { read: 0, write: 1, edit: 1 };
@@ -117,14 +120,26 @@ export function usedMemories(items: TimelineItem[]): MemRef[] {
     if (!action) continue;
     const file = memoryFileOf(it.input?.file_path);
     if (!file) continue;
-    const raw = action === "read" ? stripLineNums(toolResultText(it.result)).trim()
-      : action === "write" ? String(it.input?.content ?? "").trim() : ""; // edit 拿不到全文,留空,点开去编辑器看
-    const { title, body } = cleanMemory(raw, file); // 剥 system-reminder + frontmatter,顺带取标题
-
     const prev = map.get(file);
-    if (!prev || rank[action] >= rank[prev.action]) {
-      map.set(file, { file, title: title || prev?.title || file, body: body || prev?.body || "", action });
+    if (prev && rank[action] < rank[prev.action]) continue;
+
+    if (action === "edit") {
+      const inp = it.input ?? {};
+      const list: any[] = Array.isArray(inp.edits) ? inp.edits : [inp]; // MultiEdit 是 edits 数组,Edit 就是 input 本身
+      let body = prev?.body ?? "";
+      const edits = prev?.action === "edit" ? [...prev.edits] : [];
+      for (const e of list) {
+        const o = String(e?.old_string ?? ""), n = String(e?.new_string ?? "");
+        if (!o && !n) continue;
+        edits.push({ old: o, new: n });
+        if (body && o && body.includes(o)) body = e?.replace_all ? body.split(o).join(n) : body.replace(o, n);
+      }
+      map.set(file, { file, title: prev?.title || file, body, action, edits });
+      continue;
     }
+    const raw = action === "read" ? stripLineNums(toolResultText(it.result)).trim() : String(it.input?.content ?? "").trim();
+    const { title, body } = cleanMemory(raw, file); // 剥 system-reminder + frontmatter,顺带取标题
+    map.set(file, { file, title: title || prev?.title || file, body: body || prev?.body || "", action, edits: [] });
   }
   return [...map.values()];
 }
