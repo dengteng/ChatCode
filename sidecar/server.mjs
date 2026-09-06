@@ -1912,8 +1912,11 @@ const queueText = (content) => (Array.isArray(content) ? content : [])
   .filter((b) => b.type === "text").map((b) => b.text).join(" ").trim()
   || ((Array.isArray(content) && content.some((b) => b.type === "image")) ? "[图片]" : "");
 
+// at = 定时发送的时刻(ms):到点之前不出队,排在它后面的普通消息可以先走。
+// 桌面前端那套定时(见 types.ts PendingMsg.at)只活在它自己的内存里,手机不能照抄 ——
+// 手机一息屏 JS 就被冻住,约在凌晨的消息根本不会响。所以手机的定时落在这里。
 function broadcastMsgQueue(id, sess) {
-  broadcast({ type: "msg_queue", sessionId: id, items: sess.msgQueue.map((x) => ({ pid: x.pid, text: x.text })) });
+  broadcast({ type: "msg_queue", sessionId: id, items: sess.msgQueue.map((x) => ({ pid: x.pid, text: x.text, at: x.at })) });
 }
 
 function enqueueMsg(ws, sess, m) {
@@ -1922,18 +1925,31 @@ function enqueueMsg(ws, sess, m) {
     return;
   }
   // pid 由 sidecar 发,两端都拿这个来取消 —— 手机自己编的 id 换台设备就对不上了
-  sess.msgQueue.push({ pid: `${Date.now()}-${sess.msgQueue.length}`, text: queueText(m.content), ws, m });
+  sess.msgQueue.push({ pid: `${Date.now()}-${sess.msgQueue.length}`, text: queueText(m.content), at: m.at || undefined, ws, m });
   broadcastMsgQueue(m.sessionId, sess);
 }
 
 function drainMsgQueue(id, sess) {
-  const next = sess.msgQueue.shift();
-  if (!next) return;
+  // 取第一条「到点的」而不是队首:一条约在凌晨的消息排在前面时,shift 会把整条队列堵到凌晨
+  const i = sess.msgQueue.findIndex((x) => !x.at || x.at <= Date.now());
+  if (i < 0) return;
+  const [next] = sess.msgQueue.splice(i, 1);
   broadcastMsgQueue(id, sess);
   // 不带发送方 ws:排队期间发送方没有乐观渲染过这条(它当时只画了「排队中」那一行),
   // 广播给所有端才看得到气泡;当初那条连接多半也已经断了(手机息屏)。
   deliverUserMessage(null, next.m);
 }
+
+// 定时到点的那一刻不会有任何事件发生 —— drainMsgQueue 只在本轮跑完时被调一次,
+// 空闲会话上排的定时消息没人去碰它。每 15s 扫一遍到点的。
+// 用 interval 而不是给每条排精确 setTimeout:睡一夜那种长定时跨越系统睡眠会不响,
+// 而且取消/重排都得跟着清 timer,一个 interval 省掉这一整套。
+setInterval(() => {
+  for (const [id, sess] of sessions) {
+    if (sess.running) continue; // 忙着的会话由 turn_ended 那条路 drain
+    if (sess.msgQueue.some((x) => x.at && x.at <= Date.now())) drainMsgQueue(id, sess);
+  }
+}, 15_000);
 
 // 把一条用户消息真正送进 agent(落盘 + 回显 + 注入动态上下文 + pushTurn)。
 // 单独抽出来是因为 agent 忙的时候这条消息要先躺进 sess.msgQueue,等本轮跑完再原样走一遍这里。
@@ -2520,7 +2536,7 @@ wss.on("connection", (ws) => {
         const s = sessions.get(entry.id);
         // 回显当前"自动同意"开关(内存优先,未启动则读持久化的 index),让重连端同步显示
         send(ws, { type: "auto_approve", sessionId: entry.id, on: s ? !!s.autoApprove : !!entry.autoApprove });
-        send(ws, { type: "msg_queue", sessionId: entry.id, items: (s?.msgQueue || []).map((x) => ({ pid: x.pid, text: x.text })) }); // 重连要看到还压着的待发
+        send(ws, { type: "msg_queue", sessionId: entry.id, items: (s?.msgQueue || []).map((x) => ({ pid: x.pid, text: x.text, at: x.at })) }); // 重连要看到还压着的待发(含定时)
         // 别端(电脑前端本地队列)的镜像只补给手机:m.limit 是手机端的标记(见上面 buildMobileHistory)。
         // 桌面自己就是这份快照的来源,补给它会把它自己排的又显示一遍(本地 pending + 收回来的镜像)。
         if (m.limit && peerPendingSnap.has(entry.id)) send(ws, { type: "peer_pending", sessionId: entry.id, items: peerPendingSnap.get(entry.id) });
@@ -2543,6 +2559,13 @@ wss.on("connection", (ws) => {
         // 以前排队是压在手机 App 的内存里 —— 手机一息屏/切后台就没人盯着"跑完了没",
         // 晚上发的消息能一直躺到第二天早上重新打开 App 才发出去。
         const q = sessions.get(m.sessionId);
+        // 定时发送(m.at,手机端「⏱」):不管忙不忙都先进队列,到点由 drainMsgQueue / 上面那个 interval 放出去。
+        // 会话不在内存里就没地方存 —— 与其静默丢掉,不如说清楚让用户重开会话再约。
+        if (m.at && m.at > Date.now()) {
+          if (!q) { send(ws, { type: "system_note", sessionId: m.sessionId, text: tr("会话未连接,无法定时发送 —— 重开这个会话再试") }); break; }
+          enqueueMsg(ws, q, m);
+          break;
+        }
         if (q?.running) { enqueueMsg(ws, q, m); break; }
         deliverUserMessage(ws, m);
         break;

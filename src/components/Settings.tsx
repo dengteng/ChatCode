@@ -7,7 +7,7 @@ import { X, RotateCw, Plus, Check, GitBranch, Pencil, Copy, Search, Trash2, Down
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { rawHtml, useMdImages } from "../lib/mdhtml";
-import { useStore, useApi, DOCK_BOUNCE_KEY, dockBounceOn, SOUND_KEY, soundOn, playDing } from "../store";
+import { useStore, useApi, DOCK_BOUNCE_KEY, dockBounceOn, SOUND_KEY, soundOn, playDing, AUTO_RESUME_KEY, autoResumeOn } from "../store";
 import { toast } from "./Toast";
 import { THEMES, type SshHost, type ThemeId, type CustomArt } from "../types";
 import { loadExtensions, loadMarketplace, marketplaceNames, installPlugin, uninstallPlugin, enablePlugin, disablePlugin, addMarketplace, removeMarketplace, installSkillGit, setSkillOn, removeSkill, setMcpOn, removeMcp, loadExtNotes, saveExtNote, SEED_MARKETPLACES, type Exts, type MarketPlugin } from "../extensions";
@@ -273,6 +273,8 @@ function AccountTab() {
   const provs = state.auth?.providers ?? {};
   const cnList = Object.values(provs).filter((p) => p.cnAvailable || p.baseUrlCN).map((p) => p.label);
   const [edit, setEdit] = useState<{ id: string; mode: "key" | "config" } | null>(null);
+  const [autoResume, setAutoResume] = useState(autoResumeOn);
+  const toggleAutoResume = (v: boolean) => { localStorage.setItem(AUTO_RESUME_KEY, v ? "1" : "0"); setAutoResume(v); };
   if (edit) return <ProviderEditPage id={edit.id} mode={edit.mode} onDone={() => setEdit(null)} />;
   return (
     <section className="settings-section">
@@ -304,6 +306,13 @@ function AccountTab() {
       <p className="settings-note">{t("国际站和国内站是两套账号,同一把 key 只在其中一边有效。配好 key 后会自动试出该走哪边,上面每家显示的域名就是实际连的那个 —— 这个勾只决定先试哪边。")}</p>
 
       <p className="settings-note">{t("Claude 登录走系统终端真实 OAuth。第三方 key 只存本地 settings 文件(仅本机,不进仓库/keychain)。 标「经本地代理」的(Grok/OpenAI/Gemini)只有 OpenAI 兼容端点,由本机把 Anthropic 请求转译过去,CLI 无感。 baseUrl / 模型表会随版本漂移 —— 连不上时点「配置」改。配好在 /model 菜单选对应模型即切换,换 provider 会开启全新对话。")}</p>
+
+      <h4>{t("额度用尽后自动继续")}</h4>
+      <label className="profile-kb">
+        <input type="checkbox" checked={autoResume} onChange={(e) => toggleAutoResume(e.target.checked)} />
+        {t("额度恢复时自动接着跑被中断的任务")}
+      </label>
+      <p className="settings-note">{t("5 小时额度或周额度用尽把一轮顶掉时,自动排一条「继续」等到额度恢复(再多等 1 分钟避开时钟差)后发出,接着往下跑。排队那条会显示在输入框上方,不想跑随时可以取消。默认关 —— 开了就等于无人看管时自动接着烧额度。")}</p>
     </section>
   );
 }

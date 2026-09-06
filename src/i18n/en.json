@@ -791,5 +791,10 @@
   " · {{clock}}(还剩 {{left}})": " · {{clock}} ({{left}} left)",
   " · 还没拿到额度窗口,等用量条加载出来再试": " · No limit window yet — wait for the usage bar to load",
   "这个时间已经过去了": "That time is already in the past",
-  "到点前 app 得开着 —— 定时只存在内存里,退出就没了": "Keep the app open until then — schedules live in memory and are lost on quit"
+  "到点前 app 得开着 —— 定时只存在内存里,退出就没了": "Keep the app open until then — schedules live in memory and are lost on quit",
+  "继续": "Continue",
+  "额度用尽,已排到 {{time}} 自动继续这一轮(设置 › 账号里可关)": "Usage limit reached — queued to continue this turn automatically at {{time}} (turn it off in Settings › Account)",
+  "额度用尽后自动继续": "Auto-continue after usage limit",
+  "额度恢复时自动接着跑被中断的任务": "Resume the interrupted task when the limit resets",
+  "5 小时额度或周额度用尽把一轮顶掉时,自动排一条「继续」等到额度恢复(再多等 1 分钟避开时钟差)后发出,接着往下跑。排队那条会显示在输入框上方,不想跑随时可以取消。默认关 —— 开了就等于无人看管时自动接着烧额度。": "When the 5-hour or weekly limit cuts a turn short, a \"Continue\" message is queued and sent once the limit resets (plus one minute of slack for clock skew), picking the task back up. The queued message shows above the composer and can be cancelled any time. Off by default — turning it on means unattended runs keep burning quota."
 }
