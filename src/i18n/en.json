@@ -652,6 +652,7 @@
   "配置会随会话保存。私钥路径只保存在本机；请确保文件权限正确。": "Config is saved with the session. The key path stays on this machine; make sure file permissions are correct.",
   "保存并连接": "Save and connect",
   "从摘要恢复(推荐)": "Resume from summary (recommended)",
+  "全新对话": "Start fresh",
   "先接回上下文再立刻压缩,后续每轮只带摘要": "Reattaches context then compacts right away; later turns only carry the summary",
   "完整恢复": "Full restore",
   "保留全部对话,这一轮就要吃掉整块上下文": "Keeps the whole conversation; this turn consumes the full context",

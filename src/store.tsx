@@ -1015,8 +1015,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             if (w) { blobWaiters.delete(id); w(m.data ? `data:${m.media_type};base64,${m.data}` : null); }
             break;
           }
-          case "session_ctx": // 重开时日志实算的上下文体积,回填进度条(单调守卫挡掉比现值小的)
-            dispatch({ type: "set_context", id: m.sessionId, contextTokens: m.tokens });
+          case "session_ctx": // 重开时日志实算的上下文体积,回填进度条(单调守卫挡掉比现值小的);reset = 起了全新上下文,归零
+            dispatch({ type: "set_context", id: m.sessionId, contextTokens: m.tokens, allowShrink: !!m.reset });
             break;
           case "sdk":
             handleSdkMessage(dispatch, m.sessionId, m.message, true, stateRef);

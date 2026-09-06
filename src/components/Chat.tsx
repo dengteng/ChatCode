@@ -1082,7 +1082,8 @@ function ResumeCard({ prompt, onChoose }: { prompt: ResumePrompt; onChoose: (c: 
   const opts: { c: ResumeChoice; label: string; desc?: string }[] = [
     { c: "summary", label: t("从摘要恢复(推荐)"), desc: t("先接回上下文再立刻压缩,后续每轮只带摘要") },
     { c: "full", label: t("完整恢复"), desc: t("保留全部对话,这一轮就要吃掉整块上下文") },
-    { c: "fresh", label: t("取消"), desc: t("不加载历史、不压缩,在该项目下作为全新对话开始") },
+    // 别叫「取消」:它不是关弹窗,是真的起新上下文(旧对话模型看不见了)。之前有人当成关掉,接着 /compact 压了个空
+    { c: "fresh", label: t("全新对话"), desc: t("不加载历史、不压缩,在该项目下作为全新对话开始") },
   ];
   const [idx, setIdx] = useState(0);
   const ref = useRef<HTMLDivElement>(null);

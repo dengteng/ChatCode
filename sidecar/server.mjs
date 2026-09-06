@@ -1832,8 +1832,10 @@ function spawnAgent(ws, sess, { id, resume }) {
           sess.sdkSessionId = msg.session_id;
           const idx = loadIndex();
           const entry = idx.find((e) => e.id === id);
-          // 同步落盘 sdkSessionId 与 agent 的真实工作目录:重连要按同一目录 resume,否则找不到 transcript
-          if (entry) { entry.sdkSessionId = msg.session_id; entry.cwd = sess.agentCwd; saveIndex(idx); }
+          // 同步落盘 sdkSessionId 与 agent 的真实工作目录:重连要按同一目录 resume,否则找不到 transcript。
+          // 例外:「全新对话」起的空上下文(没 resume、用户还没真发过一句话,只有 /compact 之类的命令)不落盘 ——
+          // 否则旧上下文的指针被空会话顶掉,下次「从摘要恢复」resume 到的是空会话,/compact 只会回 Not enough messages。
+          if (entry && (resume || sess.hadUserTurn || !entry.sdkSessionId)) { entry.sdkSessionId = msg.session_id; entry.cwd = sess.agentCwd; saveIndex(idx); }
           // CLI 报的权限模式才是真的(我们传进去的它可能拒了/改了),按它对齐并广播,别让界面显示一个假档位。
           // 每次 init 都广播(不只在变化时):这是"CLI 真的以这个模式起来了"的唯一凭据。
           if (msg.permissionMode) {
@@ -2028,7 +2030,7 @@ function deliverUserMessage(ws, m) {
         ? tr("📁 已将 agent 工作目录切到 {{target}}(在该目录重开上下文,之前的对话记忆不带过来)", { target })
         : tr("📁 已将 agent 工作目录设为 {{target}}", { target }) });
     }
-    sess.hadUserTurn = true;
+    if (!isSlashCmd) sess.hadUserTurn = true; // 光发 /compact 这类命令不算"聊过":上下文里没有可保的内容
     // git 现状放在**用户文本之后**:它可能有几十行,搁最前面会把用户真正问的那句挤到很远;
     // 且这是"事实校正",紧贴问题后面近因更强。取 cwd 必须在上面的 pendingCwd 迁移之后。
     const brief = isSlashCmd ? null : await gitBrief(sess.agentCwd || resolveCwd(m.sessionId), sess);
@@ -2527,6 +2529,9 @@ wss.on("connection", (ws) => {
           // 取消 = 这一轮开全新对话:不接历史上下文(resume: undefined),但旧日志一个字都不动 ——
           // 用户明确要留着旧记录。代价是下次重开这个会话仍会按旧历史体积再弹一次恢复卡,这是用户接受的。
           const fresh = m.choice === "fresh";
+          // 全新上下文:进度条得归零,否则上面按旧日志算的体积一直挂着,用户以为还有 26% 要压、
+          // 而 CLI 那边是空对话(/compact 只会回 Not enough messages)。reset 让前端绕过单调守卫。
+          if (fresh) broadcast({ type: "session_ctx", sessionId: entry.id, tokens: 0, reset: true });
           startSession(ws, {
             id: entry.id, cwd: entry.cwd,
             resume: fresh ? undefined : (entry.sdkSessionId ?? undefined),
