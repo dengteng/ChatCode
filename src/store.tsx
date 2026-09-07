@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useReducer, useRef, useS
 import { flushSync } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import type { AccountUsage, AuthStatus, ClosedEntry, GitCommitDetail, GitDiffData, GitInfo, GitLogData, IndexEntry, LimitUsage, ModelInfo, PermissionSuggestion, ResumeChoice, SearchResult, Session, SessionGroup, SessionInfo, Spend, SshHost, TimelineItem, Wallet } from "./types";
-import { sessionProvider, modelName } from "./types";
+import { sessionProvider, modelName, modelLabel } from "./types";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { toast, dismissToast } from "./components/Toast";
 import i18n, { getLang } from "./i18n";
@@ -478,8 +478,14 @@ function armAutoResume(dispatch: (a: Action) => void, id: string, resetAt: numbe
   if (stateRef?.current.sessions[id]?.pending?.some((p) => p.pid === AUTO_RESUME_PID)) return;
   const go = i18n.t("继续");
   dispatch({ type: "enqueue_pending", id, item: { pid: AUTO_RESUME_PID, text: go, blocks: [{ type: "text", text: go }], at } });
+  // 带上模型名:限流多半是当前模型的专属限额(如 "Fable 额度"),底部订阅用量条可能还很空 ——
+  // 光说"额度用尽"会和底部对不上,让人以为是软件算错了。拿不到模型名就退回泛称。
+  const sess = stateRef?.current.sessions[id];
+  const model = sess ? modelLabel(sess) : "";
   dispatch({ type: "append", id, item: { kind: "system", ts: Date.now(),
-    text: i18n.t("额度用尽,已排到 {{time}} 自动继续这一轮(设置 › 账号里可关)", { time: new Date(at).toLocaleString() }) } });
+    text: model
+      ? i18n.t("{{model}} 额度用尽,已排到 {{time}} 自动继续这一轮(设置 › 账号里可关)", { model, time: new Date(at).toLocaleString() })
+      : i18n.t("额度用尽,已排到 {{time}} 自动继续这一轮(设置 › 账号里可关)", { time: new Date(at).toLocaleString() }) } });
 }
 
 function handleSdkMessage(dispatch: (a: Action) => void, id: string, msg: any, live: boolean, stateRef?: MutableRefObject<State>) {
