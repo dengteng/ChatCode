@@ -885,6 +885,13 @@ async function buildCommitMessage(cwd, id, force) {
 // 纯交互式 shell:cwd 命中只是因为用户在这个目录开了个终端,不是"会话跑起来的进程",
 // 列出来只会淹没真正想找的那个,而且误杀掉是用户自己的终端。
 const SHELL_NAMES = new Set(["zsh", "-zsh", "bash", "-bash", "sh", "-sh", "fish", "-fish", "login"]);
+// 已装的 GUI 应用(Chrome / VS Code / Docker Desktop…)同理不是"会话跑起来的进程":
+// 从项目目录启过一次,它的 helper 子进程就全继承了这个 cwd,于是被 cwd 认领进来。
+// 三重坏处:淹没真正的后台任务、误杀掉用户正在用的浏览器、而且杀了也白杀 ——
+// 主进程会立刻重开一个新 helper(表现就是"点了停止全部,进程还在那儿"，新进程 etime 只有几秒)。
+// 判 /Applications/ 而不是 .app/Contents/:项目自带的 Electron
+// (node_modules/electron/dist/Electron.app/…)是真该列出来的会话进程,不能一起剔掉。
+const isInstalledApp = (command) => command.split(/\s+/)[0].includes("/Applications/");
 
 async function runtimeInfo(cwd, sessionId) {
   const [processes, listeners, cwds, docker] = await Promise.all([
@@ -929,6 +936,7 @@ async function runtimeInfo(cwd, sessionId) {
     .filter((row) => !mine.has(row.pid) && row.pid !== String(process.pid))
     .filter((row) => inCwd.has(row.pid) || row.command.includes(cwd))
     .filter((row) => !SHELL_NAMES.has(row.command.split(/\s+/)[0].split("/").pop()))
+    .filter((row) => !isInstalledApp(row.command))
     .slice(0, 20);
   const pids = new Set(rows.map((row) => row.pid));
   const ports = listeners.stdout.split("\n").slice(1).map((line) => {

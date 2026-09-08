@@ -456,6 +456,7 @@
   "复制路径": "Copy path",
   "在 Finder 中打开": "Reveal in Finder",
   "会话进程（{{num}}）": "Session processes ({{num}})",
+  "{{name}} 停掉后立刻又起来了 —— 有父进程或守护在拉它,要停得先停掉那个(如 nodemon / supervisor / docker 重启策略 / 浏览器主进程)": "{{name}} came right back after being stopped — a parent process or supervisor is restarting it. Stop that one first (nodemon / supervisor / a docker restart policy / the browser's main process).",
   "停止列出的全部进程": "Stop all listed processes",
   "停止全部": "Stop all",
   "结束进程": "End process",
