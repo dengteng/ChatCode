@@ -694,6 +694,9 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
 
   const doneCount = session.todos.filter((t) => t.status === "completed").length;
   const parent = session.inheritFrom ? state.index.find((e) => e.id === session.inheritFrom) : null;
+  // 顶栏这一行确实一个字都没有(闲聊会话没目录/没分支/没「项目详情」,也没继承标签和任务进度)。
+  // 此时顶栏既不该占位、也不该画渐变托底 —— 具体两条规则在 styles.css 的 .chat.bare-top 下。
+  const bareTop = session.casual && !parent && session.todos.length === 0;
   const git = state.git[session.id];
   const branch = git?.local?.find((b) => b.name === git.current);
   // 工作区有未提交内容(含未跟踪文件)。unborn 分支和正常分支两条渲染路径共用同一个判据。
@@ -716,15 +719,13 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
   const sshPath = session.termCwd?.startsWith(`${sshLabel}:`) ? session.termCwd : `${sshLabel}:~`;
 
   return (
-    <div className="chat">
+    <div className={`chat ${bareTop ? "bare-top" : ""}`}>
       {/* data-tauri-drag-region:按住顶栏空白处即可拖动整个窗口(Tauri v2 内置手势,只对带该属性的
           元素本身生效)。所以标题/继承标签/任务进度这些"纯展示"元素都挂上,而"项目详情"是可点按钮 —— 不挂,
           点它只触发点击、不拖窗。浏览器模式下这只是个无意义 data 属性,无副作用。 */}
       {/* 顶栏合成一行:左=当前工作目录+本地/SSH 切换▾(会话名侧栏已有,这里不重复,目录直接和下方头像/输入框左对齐),右=分支信息+项目详情。
           不用横线分隔,自定义主题下用顶部渐变托底(同输入框底部处理),背景图再花也看得清上方文字。 */}
-      {/* bare = 顶栏这一行确实一个字都没有(闲聊会话没目录/没分支/没「项目详情」)。
-          自定义背景图主题下顶栏带渐变托底,是为了把文字从花背景上托清楚;没文字时它只是白白糊掉一条背景图。 */}
-      <div className={`chat-topbar ${session.casual && !parent && session.todos.length === 0 ? "bare" : ""}`} data-tauri-drag-region>
+      <div className="chat-topbar" data-tauri-drag-region>
         <div className="topbar-left" data-tauri-drag-region>
           {parent && <span className="inherit-tag" data-tauri-drag-region title={t("继承自 {{title}} 的上下文", { title: parent.title })}><GitFork size={13} /> {t("继承自 {{title}}", { title: parent.title })}</span>}
           {/* 当前工作目录 + 本地/SSH 切换▾,和标题同一行左侧 */}
