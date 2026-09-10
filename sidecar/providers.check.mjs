@@ -95,11 +95,12 @@ console.log("✓ Claude 会话 env 不受影响");
 // 4. 能不能发图的声明(前端 canSendImage 据此拦图片)
 assert.strictEqual(PROVIDERS.deepseek.vision, false);
 assert.strictEqual(PROVIDERS.gemini.vision, undefined, "没声明 = 放行,别误拦");
-// 模型级 vision 盖 provider 级:DeepSeek 只有 vision-exp 收图,provider 那级仍是 false。
+// 模型级 vision 盖 provider 级:DeepSeek 只有这两个收图,provider 那级仍是 false。
 // 丢了这个 true,输入框会把图片拦在外面(canSendImage 先读模型级);而 provider 那级若被改成 true,
-// 另外两个模型收到图片会静默丢弃、照样编答案(实测不回 400) —— 两边都得钉住。
+// 其余模型收到图片会静默丢弃、照样编答案(实测不回 400) —— 两边都得钉住。
+// deepseek-flash(V4.1)原生多模态;vision-exp 是它之前那个实验版,官方现在把它路由到 flash。
 const dsVision = PROVIDERS.deepseek.models.filter((m) => m.vision === true).map((m) => m.model);
-assert.deepStrictEqual(dsVision, ["deepseek-v4-flash-vision-exp"], "DeepSeek 收图的模型只该有这一个");
+assert.deepStrictEqual(dsVision, ["deepseek-flash", "deepseek-v4-flash-vision-exp"], "DeepSeek 收图的模型只该有这两个");
 console.log("✓ vision 声明就位");
 
 // 4.5 远程模型清单:能加新模型,但**碰不到 baseUrl**
@@ -131,7 +132,9 @@ assert.ok(rp.models.some((m) => m.model === "deepseek-v4-flash"), "内置的不�
 const patched = resolvedProvider("deepseek", { ...keys, modelCatalog: { deepseek: [{ model: "deepseek-v4-flash", contextWindow: 42 }] } })
   .models.find((m) => m.model === "deepseek-v4-flash");
 assert.strictEqual(patched.contextWindow, 42, "清单给的字段要生效");
-assert.strictEqual(patched.description, "deepseek-v4-flash · 快", "没给的字段沿用内置");
+// 期望值从内置表现取,不照抄字面量 —— 改一句 description 的文案不该让这条合并断言变红
+const builtinDesc = PROVIDERS.deepseek.models.find((m) => m.model === "deepseek-v4-flash").description;
+assert.strictEqual(patched.description, builtinDesc, "没给的字段沿用内置");
 // 用户手填:逐个模型压过远程和内置,但**不**整表替换 —— 没填到的那些照常跟着清单更新。
 // (整表替换的老做法有个哑巴坑:动过一次模型表的那家从此永久冻结,清单拉到了也不生效,还没提示。)
 const withManual = resolvedProvider("deepseek", {

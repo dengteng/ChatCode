@@ -48,6 +48,7 @@ export interface RememberChoice { updates: PermissionSuggestion[]; label: string
 // 端口分开,装好的 app 和正在跑的 tauri dev 才能并存,不会 EADDRINUSE。
 export const SIDECAR_PORT = import.meta.env.DEV ? 8975 : 8976;
 const WS_DOWN = "ws-down"; // 断连常驻 toast 的 key,重连时按它收掉
+const CATALOG_TOAST = "catalog-refresh"; // 手动刷模型清单的进度 toast:回包到了按它收掉换成结果
 
 // ws 握手令牌:Rust 每次启动随机生成,只经 tauri command 发给自家 webview —— 浏览器网页调不到 IPC,
 // 也就连不上这个固定的 loopback 端口(WebSocket 不受同源策略约束,不校验等于本机任意网页可执行命令)。
@@ -747,6 +748,7 @@ interface Api {
   requestAuthStatus: () => void;
   syncUiLang: (lang: string) => void; // 语言切换后同步给 sidecar
   refreshUsage: () => void; // 限额窗口重置时即时拉一次新用量
+  refreshModelCatalog: () => void; // 设置里手动拉远程模型清单(绕过一天的 TTL)
   authAction: (provider: "claude" | "github", action: "login" | "logout") => void;
   setProviderKey: (provider: string, apiKey: string) => void; // 存/清 其他 LLM provider 的 API key(本地 settings)
   setProviderConfig: (provider: string, config: { baseUrl?: string; smallFast?: string; models?: any[] } | null) => void; // 覆盖/重置 provider 的 baseUrl/模型表
@@ -908,6 +910,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               const aid = stateRef.current.activeId;
               if (aid) api.setModel(aid, pick.value, modelName(stateRef.current.homeModels, pick));
             }
+            break;
+          }
+          case "catalog_refreshed": {
+            dismissToast(CATALOG_TOAST);
+            // "没变化"不是失败:多数时候各家确实没上新,说清楚是「已是最新」而不是让人以为没生效。
+            if (!m.ok) toast(i18n.t("模型列表拉取失败：{{err}}", { err: m.error || i18n.t("网络不通") }), "error");
+            else if (m.changed) toast(i18n.t("模型列表已更新（{{n}} 个）", { n: m.count }), "success");
+            else toast(i18n.t("模型列表已是最新"), "success");
             break;
           }
           case "ssh_hosts": dispatch({ type: "ssh_hosts", hosts: m.hosts }); break;
@@ -1252,6 +1262,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     requestAuthStatus() { send({ type: "auth_status" }); },
     syncUiLang(lang) { send({ type: "set_lang", lang }); }, // 语言切换后让 sidecar 同步出消息
     refreshUsage() { send({ type: "usage_refresh" }); },
+    refreshModelCatalog() {
+      toast(i18n.t("正在拉取模型列表…"), "info", CATALOG_TOAST); // 带 key:回包到了就地替换,不叠两条
+      send({ type: "refresh_catalog" });
+    },
     authAction(provider, action) { send({ type: "auth_action", provider, action }); },
     setProviderKey(provider, apiKey) { send({ type: "set_provider_key", provider, apiKey }); },
     setProviderConfig(provider, config) { send({ type: "set_provider_config", provider, config: config ?? {} }); },

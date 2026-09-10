@@ -287,6 +287,7 @@ export interface AuthStatus {
   github: { installed: boolean; loggedIn: boolean; account?: string; detail?: string };
   providers?: Record<string, ProviderState>;
   cnEndpoint?: boolean;           // 国内节点总开关
+  catalogAt?: number;             // 远程模型清单上次拉成功的时刻(0/缺 = 还没拉到过)
 }
 // 设置:全局 SSH 主机预设(独立于会话,可复用)
 export interface SshHost { id?: string; label?: string; host: string; username?: string; port?: string; keyPath?: string }

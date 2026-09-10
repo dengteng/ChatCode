@@ -1785,6 +1785,9 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 .provider-logo.claude { background: #D97757; }.provider-logo.openai { background: #000; }.provider-logo.gemini { background: #1A73E8; }.provider-logo.github { background: #24292f; }.provider-logo.deepseek { background: #4d6bfe; }
 .provider-status { font-size: 12px; display: flex; align-items: center; gap: 5px; white-space: nowrap; }
 .provider-actions { display: flex; gap: 6px; align-items: center; }
+/* 账号页下半截那三组设置(国内节点/模型列表/自动继续)复用 provider 卡片:左边「名字 + 一行 muted」,
+   右边控件列。开关在这儿是垂直居中的行控件,要抵掉 .ext-switch 给插件列表首行对齐留的 margin-top。 */
+.setting-row .ext-switch { margin-top: 0; }
 .provider-key-input { width: 100%; box-sizing: border-box; padding: 6px 9px; font-size: 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); outline: none; }
 .auth-dot.on { color: var(--green); }.auth-dot.off { color: var(--muted); }
 

@@ -1023,9 +1023,11 @@ function saveSettings(s) {
 const CATALOG_URL = "https://api.dengteng.xyz/api/public/model-catalog?project=chat-code";
 const CATALOG_TTL = 86400_000; // 一天
 
-async function refreshCatalog() {
-  const s = loadSettings();
-  if (Date.now() - (s.modelCatalogAt || 0) < CATALOG_TTL) return;
+// 回值给调用方用来决定「要不要重播模型列表 / toast 说什么」,三种结局分开:
+//   { ok:true, skipped:true }  TTL 还没到,压根没发请求(不是失败,别报错)
+//   { ok:true, changed }       拉到了;changed = 内容和上一份不一样
+//   { ok:false, error }        网络/格式问题,本地那份原样留着
+async function fetchCatalog() {
   const get = async (url) => {
     const ac = new AbortController();
     const t = setTimeout(() => ac.abort(), 8000);
@@ -1036,17 +1038,27 @@ async function refreshCatalog() {
     } finally { clearTimeout(t); }
   };
   let j;
-  try { j = await get(CATALOG_URL); } catch { return; } // 拉不通:静默,下次再说
+  try { j = await get(CATALOG_URL); } catch (e) { return { ok: false, error: String(e?.message || e) }; }
   // 形状不对就整份丢掉,别把半份垃圾写进 settings —— 宁可没有清单,也不要一份烂的赖在那儿。
-  if (!j || typeof j.providers !== "object" || Array.isArray(j.providers)) return;
+  if (!j || typeof j.providers !== "object" || Array.isArray(j.providers)) return { ok: false, error: "清单格式不对" };
   const catalog = {};
   for (const [id, list] of Object.entries(j.providers)) {
     if (!PROVIDERS[id] || id === "claude") continue; // 只认识的家;claude 的列表来自 SDK,不受清单管
     const clean = sanitizeCatalogModels(id, list);
     if (clean.length) catalog[id] = clean;
   }
+  const s = loadSettings();
+  const changed = JSON.stringify(catalog) !== JSON.stringify(s.modelCatalog || {});
   // 时间戳照记:清单是空的(比如全被 sanitize 掉了)也算这次拉过了,别每次启动重打。
-  saveSettings({ ...loadSettings(), modelCatalog: catalog, modelCatalogAt: Date.now() });
+  saveSettings({ ...s, modelCatalog: catalog, modelCatalogAt: Date.now() });
+  return { ok: true, changed, count: Object.values(catalog).reduce((n, l) => n + l.length, 0) };
+}
+let catalogInflight = null; // 只在真的发出请求时占位(TTL 跳过的那条不占,否则会把随后的 force 也吞掉)
+async function refreshCatalog({ force = false } = {}) {
+  if (!force && Date.now() - (loadSettings().modelCatalogAt || 0) < CATALOG_TTL) return { ok: true, skipped: true, changed: false };
+  if (catalogInflight) return catalogInflight; // 并发合并:开菜单和点按钮撞一起时只打一次网络
+  catalogInflight = fetchCatalog();
+  try { return await catalogInflight; } finally { catalogInflight = null; }
 }
 // 新清单不主动推给前端:reportModels 每次都现读 settings,用户下次打开模型菜单就是新的。
 setTimeout(() => { refreshCatalog().catch(() => {}); }, 4000);
@@ -1190,7 +1202,9 @@ async function authStatus() {
       subscriptionUsage: !!r.subscriptionUsage,
     };
   }
-  return { claude, github, providers, cnEndpoint: !!settings.cnEndpoint };
+  // catalogAt:远程模型清单上次拉成功的时刻(0 = 还没拉到过)。设置页拿它显示「上次更新」,
+  // 让「立即刷新」这个按钮有个可对照的状态,而不是点完只看见一句 toast。
+  return { claude, github, providers, cnEndpoint: !!settings.cnEndpoint, catalogAt: settings.modelCatalogAt || 0 };
 }
 
 // 新发布但 SDK supportedModels 还没上报(后端按账户放量,菜单里看不到)的 Claude 模型手动补进来。
@@ -2662,6 +2676,24 @@ wss.on("connection", (ws) => {
       }
       case "get_models": {
         reportModels(ws, m.sessionId, sessions.get(m.sessionId)?.q);
+        // 顺手看一眼远程清单。打开模型菜单是唯一能确定「用户此刻正在挑模型」的时机,
+        // 而原先只在 sidecar 启动后拉一次 —— 长期不退出的客户端永远等不到新模型。
+        // TTL(一天)照旧管着,所以这不是"每次开菜单都发请求"。
+        // 先报后拉:菜单立刻出来,不等那 8 秒网络;真拉到新东西再广播一次盖掉。
+        refreshCatalog()
+          .then((r) => { if (r?.changed) reportModels(ws, m.sessionId, sessions.get(m.sessionId)?.q); })
+          .catch(() => {});
+        break;
+      }
+      case "refresh_catalog": {
+        // 设置里的「立即刷新模型列表」:绕过 TTL 强拉一次。有这个入口是因为 TTL 没到时
+        // 连重启都不管用 —— 用户看着官网已经发了新模型,却没有任何办法让客户端去取。
+        refreshCatalog({ force: true }).then((r) => {
+          send(ws, { type: "catalog_refreshed", ok: !!r.ok, changed: !!r.changed, count: r.count ?? 0, error: r.error });
+          if (r.changed) for (const [sid, sess] of sessions) reportModels(ws, sid, sess.q);
+          // 配置页那份 models 是从 authStatus 来的,清单变了得跟着重发,否则设置里看到的还是旧表
+          authStatus().then((status) => send(ws, { type: "auth_status", status })).catch(() => {});
+        }).catch((e) => send(ws, { type: "catalog_refreshed", ok: false, error: String(e?.message || e) }));
         break;
       }
       case "set_model": {

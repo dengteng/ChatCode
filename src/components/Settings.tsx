@@ -268,9 +268,10 @@ const PROVIDER_META: { id: string; ini: string; cls: string }[] = [
 // 账号:Claude 登录 + 各第三方 LLM(key + baseUrl/模型可编辑)
 function AccountTab() {
   const { t } = useTranslation();
-  const { state, authAction, setCnEndpoint } = useStore();
+  const { state, authAction, setCnEndpoint, refreshModelCatalog } = useStore();
   const c = state.auth?.claude;
   const provs = state.auth?.providers ?? {};
+  const catalogAt = state.auth?.catalogAt ?? 0;
   const cnList = Object.values(provs).filter((p) => p.cnAvailable || p.baseUrlCN).map((p) => p.label);
   const [edit, setEdit] = useState<{ id: string; mode: "key" | "config" } | null>(null);
   const [autoResume, setAutoResume] = useState(autoResumeOn);
@@ -296,26 +297,54 @@ function AccountTab() {
 
       {PROVIDER_META.filter((m) => provs[m.id]).map((m) => <ProviderRow key={m.id} meta={m} onEdit={(mode) => setEdit({ id: m.id, mode })} />)}
 
+      {/* 下面三组(国内节点 / 模型列表 / 自动继续)统一成同一套排版:h4 分组名 + 一张 setting-row 卡片,
+          卡片左边「设置名 + 一行 muted 元信息」,右边是控件列(开关或按钮)。三组各写各的样式时
+          (裸 checkbox / 带边框的卡 / 又一个裸 checkbox)看着像三个不同页面拼起来的。 */}
+      <h4>{t("国内节点")}</h4>
       {/* 国内节点:只影响自带国内域名的那几家(GLM/Qwen/MiniMax),其余不受影响。
           现在只是探测的优先顺序 —— 存 key 时会两个域名都试,哪个认这把 key 就用哪个,勾错也不会连不上。 */}
-      <label className="profile-kb">
-        <input type="checkbox" checked={!!state.auth?.cnEndpoint} onChange={(e) => setCnEndpoint(e.target.checked)} />
-        {t("优先国内节点")}
-        <span className="muted"> {cnList.length ? cnList.join(" / ") : ""}</span>
-      </label>
+      <div className="provider-row setting-row">
+        <div className="provider-id"><div>
+          <b>{t("优先国内节点")}</b>
+          <div className="muted">{cnList.length ? cnList.join(" / ") : t("当前没有支持国内站的 provider")}</div>
+        </div></div>
+        <div className="provider-actions">
+          <button type="button" role="switch" aria-checked={!!state.auth?.cnEndpoint} aria-label={t("优先国内节点")}
+            className={`ext-switch${state.auth?.cnEndpoint ? " on" : ""}`}
+            {...btnPress(() => setCnEndpoint(!state.auth?.cnEndpoint))} />
+        </div>
+      </div>
       <p className="settings-note">{t("国际站和国内站是两套账号,同一把 key 只在其中一边有效。配好 key 后会自动试出该走哪边,上面每家显示的域名就是实际连的那个 —— 这个勾只决定先试哪边。")}</p>
 
-      <p className="settings-note">{t("Claude 登录走系统终端真实 OAuth。第三方 key 只存本地 settings 文件(仅本机,不进仓库/keychain)。 标「经本地代理」的(Grok/OpenAI/Gemini)只有 OpenAI 兼容端点,由本机把 Anthropic 请求转译过去,CLI 无感。 baseUrl / 模型表会随版本漂移 —— 连不上时点「配置」改。配好在 /model 菜单选对应模型即切换,换 provider 会开启全新对话。")}</p>
+      <h4>{t("模型列表")}</h4>
+      <div className="provider-row setting-row">
+        <div className="provider-id"><div><b>{t("远程模型清单")}</b><div className="muted">{catalogAt ? t("上次更新 {{when}}", { when: fmtWhen(catalogAt) }) : t("还没拉取过")}</div></div></div>
+        <div className="provider-actions"><button {...btnPress(refreshModelCatalog)}>{t("立即刷新")}</button></div>
+      </div>
 
       <h4>{t("额度用尽后自动继续")}</h4>
-      <label className="profile-kb">
-        <input type="checkbox" checked={autoResume} onChange={(e) => toggleAutoResume(e.target.checked)} />
-        {t("额度恢复时自动接着跑被中断的任务")}
-      </label>
-      <p className="settings-note">{t("5 小时额度或周额度用尽把一轮顶掉时,自动排一条「继续」等到额度恢复(再多等 1 分钟避开时钟差)后发出,接着往下跑。排队那条会显示在输入框上方,不想跑随时可以取消。默认关 —— 开了就等于无人看管时自动接着烧额度。")}</p>
+      <div className="provider-row setting-row">
+        <div className="provider-id"><div>
+          <b>{t("额度恢复时自动接着跑")}</b>
+          <div className="muted">{t("被中断的那一轮自动补发「继续」")}</div>
+        </div></div>
+        <div className="provider-actions">
+          <button type="button" role="switch" aria-checked={autoResume} aria-label={t("额度恢复时自动接着跑")}
+            className={`ext-switch${autoResume ? " on" : ""}`}
+            {...btnPress(() => toggleAutoResume(!autoResume))} />
+        </div>
+      </div>
     </section>
   );
 }
+
+// 清单拉取时刻:当天只给时分(看的是"今天刷过没"),隔天补上日期。
+const fmtWhen = (ts: number) => {
+  const d = new Date(ts);
+  const today = new Date().toDateString() === d.toDateString();
+  const loc = getLang() === "zh" ? "zh-CN" : "en-US";
+  return d.toLocaleString(loc, today ? { hour: "2-digit", minute: "2-digit" } : { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+};
 
 // baseUrl 只取域名显示。用户可以手填任意串,URL() 解析不了就原样截断,别让设置页整块崩掉。
 function hostOf(u: string) {
