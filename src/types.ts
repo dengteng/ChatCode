@@ -152,7 +152,13 @@ export interface ApiRetry { attempt: number; max: number; status: number | null 
 // info.model 只在 SDK init(首条消息后才发)才有值。空窗期回退到 models 列表的默认行,
 // 而不是干等显示"连接中"。有值时优先用列表里的 displayName,退回原始 id。
 function modelInList(models: ModelInfo[], modelValue: string): ModelInfo | undefined {
-  return models.find((m) => m.value === modelValue || m.resolvedModel === modelValue || m.model === modelValue);
+  const hit = models.find((m) => m.value === modelValue || m.resolvedModel === modelValue || m.model === modelValue);
+  if (hit || !modelValue) return hit;
+  // 精确匹配落空的常见原因:菜单已把同一个模型的多条入口去重(见 sidecar 的 dedupeModels),
+  // 只剩别名那条,而老会话存的是被去掉的固定 id(claude-opus-5 / claude-haiku-4-5-20251001)。
+  // 按同一套归一化(扔掉 [1m] 与尾部日期戳)再找一遍,否则会话头显示成裸 id、上下文窗口也掉回默认值。
+  const base = (s?: string) => String(s ?? "").replace(/\[.*$/, "").replace(/-\d{8}$/, "");
+  return models.find((m) => base(m.resolvedModel ?? m.model ?? m.value) === base(modelValue));
 }
 
 export function modelLabel(session: Session): string {
@@ -197,9 +203,41 @@ export function modelName(models: ModelInfo[], m: ModelInfo): string {
   const real = m.resolvedModel;
   // 排除 default 自己:它的 resolvedModel 就是 real,不排会匹配到自身、绕回 "Default (recommended)"
   const hit = real ? models.find((x) => x.value !== "default" && (x.value === real || x.resolvedModel === real || x.model === real)) : undefined;
-  const short = (hit ? withVer(hit).replace(/\s*[(（].*$/, "") : real ?? "").trim();
+  // 查不到 hit 是常态,不是意外:sidecar 的 dedupeModels 把同一个模型的别名行合成一条,
+  // 留下的往往就是 default 自己。此时用它自己的 displayName —— sidecar 已经拿手工表的规范名
+  // (Opus 5)盖过 SDK 的 "Default (recommended)";还是那句英文原名就说明没盖上,退回裸 id。
+  const own = /^default\b/i.test(m.displayName) ? "" : withVer(m).replace(/\s*[(（].*$/, "").trim();
+  const short = (hit ? withVer(hit).replace(/\s*[(（].*$/, "").trim() : own || (real ?? "")).trim();
   // 半角括号:这一串中英混排(默认 / Opus 5),全角括号在 en 界面下会变成「Default（Opus 5）」
   return short ? `${i18n.t("默认")} (${short})` : i18n.t("默认");
+}
+
+// provider id → 厂商名。菜单一行要写清"这是谁家的模型",而 providers 表里的 label
+// 写的是产品名(claude 那条叫 "Claude"、openai 那条叫 "OpenAI Codex"),不是厂商。
+const PROVIDER_BRAND: Record<string, string> = {
+  claude: "Anthropic", deepseek: "DeepSeek", kimi: "Moonshot", glm: "Zhipu",
+  qwen: "Alibaba", minimax: "MiniMax", grok: "xAI", openai: "OpenAI", gemini: "Google",
+};
+export function providerBrand(id: string): string { return PROVIDER_BRAND[id] ?? id; }
+
+// 条目属于哪个 provider。provider 字段是 sidecar 填的,SDK 直接上报的 Claude 模型没有这一栏 ——
+// 非 Claude 的 value 一律是 "provider/model",不带斜杠的就是 Claude 自家的。
+export function modelProvider(m: ModelInfo): string {
+  return m.provider || (m.value.includes("/") ? m.value.split("/")[0] : "claude");
+}
+
+// 模型菜单一行拆成:模型名 + 括号里的补充说明。
+// 括号只有一种用途:标出哪条是「默认」。别的补充(1M context / 手动指定 / 快 / 最强)一律不进行内 ——
+// 同一个模型的多条入口已经在 sidecar 去重成一条(见 dedupeModels),不再需要靠标注区分选哪条,
+// 完整 description 留给 title 悬浮看。
+export function modelRow(models: ModelInfo[], m: ModelInfo): { name: string; note: string } {
+  const full = modelName(models, m);
+  // default 那条 modelName 给的是「默认 (Opus 5)」:名字要和别的行对齐,标注挪进括号
+  if (m.value === "default") {
+    const inner = full.match(/[(（](.+)[)）]\s*$/);
+    return { name: inner ? inner[1] : full, note: i18n.t("默认") };
+  }
+  return { name: full.replace(/\s*[(（].*$/, "").trim(), note: "" };
 }
 
 // 某个具体模型 id → 展示名(如 "claude-opus-4-8" → "Opus 4.8"、"deepseek-v4-pro" → "DeepSeek V4 Pro")。

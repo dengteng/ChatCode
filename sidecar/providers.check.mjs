@@ -98,9 +98,10 @@ assert.strictEqual(PROVIDERS.gemini.vision, undefined, "没声明 = 放行,别�
 // 模型级 vision 盖 provider 级:DeepSeek 只有这两个收图,provider 那级仍是 false。
 // 丢了这个 true,输入框会把图片拦在外面(canSendImage 先读模型级);而 provider 那级若被改成 true,
 // 其余模型收到图片会静默丢弃、照样编答案(实测不回 400) —— 两边都得钉住。
-// deepseek-flash(V4.1)原生多模态;vision-exp 是它之前那个实验版,官方现在把它路由到 flash。
+// deepseek-flash(V4.1)原生多模态,是 DeepSeek 这边唯一收图的
+// (之前那个实验版 vision-exp 已被官方路由到 flash,同一个模型两条入口,已从表里删掉)。
 const dsVision = PROVIDERS.deepseek.models.filter((m) => m.vision === true).map((m) => m.model);
-assert.deepStrictEqual(dsVision, ["deepseek-flash", "deepseek-v4-flash-vision-exp"], "DeepSeek 收图的模型只该有这两个");
+assert.deepStrictEqual(dsVision, ["deepseek-flash"], "DeepSeek 收图的模型只该有这一个");
 console.log("✓ vision 声明就位");
 
 // 4.5 远程模型清单:能加新模型,但**碰不到 baseUrl**
@@ -171,6 +172,9 @@ console.log("✓ 清单优先级:用户手填 > 远程 > 内置(逐个模型合�
     const want = new Set(lists.flat().map((m) => m.model));
     const got = new Set((shipped.providers?.[p.id] || []).map((m) => m.model));
     for (const m of want) assert.ok(got.has(m), `catalog/models.json 缺 ${p.id} 的 ${m} —— 跑一下 node scripts/gen-catalog.mjs`);
+    // 多出来的也是错:清单压在内置表之上,从内置表删掉一条模型而清单还留着,
+    // 用户菜单里那条永远不消失(deepseek-v4-flash-vision-exp 就这么活了一版)。
+    for (const m of got) assert.ok(want.has(m), `catalog/models.json 多出 ${p.id} 的 ${m} —— 内置表已删,跑一下 node scripts/gen-catalog.mjs`);
   }
   assert.ok(!JSON.stringify(shipped).includes("baseUrl"), "清单里不该出现 baseUrl,一个字都不行");
   console.log("✓ 仓库里的 catalog/models.json 与内置表同步");

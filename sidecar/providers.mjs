@@ -53,18 +53,17 @@ export const PROVIDERS = {
     // 别只记高峰价,那会把大多数时段的花费翻倍报。各模型共用同一个高峰窗口。
     // 注意:peakHours 只表达"每天的哪几个小时",表达不了"周一至周五" —— 周末会被按高峰价报(偏高)。
     models: [
-      // V4.1 Flash(2026-09-10 发布)。官方推荐名就叫 deepseek-flash,不带版本号 —— 后续版本沿用同一个名字。
-      // 描述里补一句「V4.1」:选择器里它排在 "DeepSeek V4 Flash"(旧名)上面,光看名字新的反倒像旧的,
-      // 找 V4.1 的人会以为列表里没有。displayName 仍按官方不写版本号,版本只作为副行的说明。
+      // V4.1 Flash(2026-09-10 发布)。官方推荐名就叫 deepseek-flash,不带版本号,但菜单里它挨着旧名
+      // "DeepSeek V4 Flash",光看名字新的反倒像旧的 —— displayName 里显式写上 V4.1。
       // 原生多模态,所以 vision: true(provider 那级是 false,不写会被输入框拦掉图片,见顶部 vision 说明)。
-      { value: "deepseek/deepseek-flash", model: "deepseek-flash", displayName: "DeepSeek Flash", description: "deepseek-flash · V4.1 · 快 · 看图", provider: "deepseek", contextWindow: 1_000_000, vision: true, price: { in: 2, out: 8, cacheRead: 0.04, currency: "¥", offPeak: { in: 1, out: 4, cacheRead: 0.02, peakHours: DS_PEAK } } },
+      { value: "deepseek/deepseek-flash", model: "deepseek-flash", displayName: "DeepSeek V4.1 Flash", description: "deepseek-flash · 快 · 看图", provider: "deepseek", contextWindow: 1_000_000, vision: true, price: { in: 2, out: 8, cacheRead: 0.04, currency: "¥", offPeak: { in: 1, out: 4, cacheRead: 0.02, peakHours: DS_PEAK } } },
       { value: "deepseek/deepseek-v4-pro",   model: "deepseek-v4-pro",   displayName: "DeepSeek V4 Pro",   description: "deepseek-v4-pro · 最强", provider: "deepseek", contextWindow: 1_000_000, price: { in: 9, out: 27, cacheRead: 0.3, currency: "¥", offPeak: { in: 4.5, out: 13.5, cacheRead: 0.15, peakHours: DS_PEAK } } },
-      // 下面两个是 V4.1 之前的旧名。官方已把它们**路由到 V4.1 Flash 并按 Flash 计价**,所以单价跟着改成
-      // Flash 那档 —— 留着旧价会把老会话的花费按早已不存在的价目表报高一半。
-      // 留在表里而不是删掉:已经选中它们的会话删了就会在模型选择器里显示成空。官方说是"临时路由",
-      // 哪天真下线了再删。vision 保持 false:路由是临时的,不拿一个随时会变的行为去放行图片。
+      // V4.1 之前的旧名。官方已把它**路由到 V4.1 Flash 并按 Flash 计价**,所以单价跟着改成 Flash 那档
+      // —— 留着旧价会把老会话的花费按早已不存在的价目表报高一半。
+      // 留在表里而不是删掉:已经选中它的会话删了就会在模型选择器里显示成空。
+      // vision 保持 false:路由是临时的,不拿一个随时会变的行为去放行图片。
+      // (同批的 deepseek-v4-flash-vision-exp 已从表里删掉 —— 实验版旧名,和上面 Flash 同一个模型。)
       { value: "deepseek/deepseek-v4-flash", model: "deepseek-v4-flash", displayName: "DeepSeek V4 Flash", description: "deepseek-v4-flash · 旧名,已路由到 Flash", provider: "deepseek", contextWindow: 1_000_000, price: { in: 2, out: 8, cacheRead: 0.04, currency: "¥", offPeak: { in: 1, out: 4, cacheRead: 0.02, peakHours: DS_PEAK } } },
-      { value: "deepseek/deepseek-v4-flash-vision-exp", model: "deepseek-v4-flash-vision-exp", displayName: "DeepSeek V4 Flash Vision", description: "deepseek-v4-flash-vision-exp · 旧名,已路由到 Flash", provider: "deepseek", contextWindow: 1_000_000, vision: true, price: { in: 2, out: 8, cacheRead: 0.04, currency: "¥", offPeak: { in: 1, out: 4, cacheRead: 0.02, peakHours: DS_PEAK } } },
     ],
   },
   kimi: {

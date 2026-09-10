@@ -4,8 +4,8 @@
     "deepseek": [
       {
         "model": "deepseek-flash",
-        "displayName": "DeepSeek Flash",
-        "description": "deepseek-flash · V4.1 · 快 · 看图",
+        "displayName": "DeepSeek V4.1 Flash",
+        "description": "deepseek-flash · 快 · 看图",
         "contextWindow": 1000000,
         "vision": true,
         "price": {
@@ -62,34 +62,6 @@
         "displayName": "DeepSeek V4 Flash",
         "description": "deepseek-v4-flash · 旧名,已路由到 Flash",
         "contextWindow": 1000000,
-        "price": {
-          "in": 2,
-          "out": 8,
-          "cacheRead": 0.04,
-          "currency": "¥",
-          "offPeak": {
-            "in": 1,
-            "out": 4,
-            "cacheRead": 0.02,
-            "peakHours": [
-              [
-                9,
-                12
-              ],
-              [
-                14,
-                18
-              ]
-            ]
-          }
-        }
-      },
-      {
-        "model": "deepseek-v4-flash-vision-exp",
-        "displayName": "DeepSeek V4 Flash Vision",
-        "description": "deepseek-v4-flash-vision-exp · 旧名,已路由到 Flash",
-        "contextWindow": 1000000,
-        "vision": true,
         "price": {
           "in": 2,
           "out": 8,

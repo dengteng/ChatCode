@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Folder, File, CornerLeftUp, RotateCw, ChevronDown, X, Sparkles, Clock } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Session } from "../types";
-import { BUILTIN_COMMANDS, modelLabel, modelName, contextWindowOf, canSendImage, sessionProvider } from "../types";
+import { BUILTIN_COMMANDS, modelLabel, modelRow, modelProvider, providerBrand, contextWindowOf, canSendImage, sessionProvider } from "../types";
+import { ModelLogo } from "./Avatar";
 import { useStore, fetchBlob, sessionBusy, PENDING_MAX } from "../store";
 import { UsageBar, rollReset, fmtReset } from "./UsageBar";
 import { openImageWindow } from "../popout";
@@ -1282,17 +1283,23 @@ export function Composer({ session }: { session: Session }) {
       {modelMenu && (
         <div className="palette" ref={modelMenuRef}>
           <div className="palette-scroll">
-            {session.models.map((m, i) => (
-              <div key={m.value} ref={i === palIdx ? selItemRef : undefined}
-                className={`palette-item ${i === palIdx ? "sel" : ""}`}
-                onMouseEnter={() => setPalIdx(i)}
-                // mousedown 而非 click:WKWebView 里编辑器聚焦时首个 click 只挪光标/激活焦点被吞,要点两次
-                onMouseDown={(e) => { e.preventDefault(); setModel(session.id, m.value); setModelMenu(false); }}>
-                {/* 菜单里也走 modelName:选中后底栏显示什么,菜单里就该长什么样(default 那条尤其) */}
-                <div><b>{modelName(session.models, m)}</b>{m.value === session.info.model && <span className="muted">{t(" · 当前")}</span>}
-                {m.description && <div className="muted">{m.description}</div>}</div>
-              </div>
-            ))}
+            {/* 一条一行:logo + 厂商 + 模型名(含版本号)+ 括号补充。完整 description 留在 title 里 */}
+            {session.models.map((m, i) => {
+              const row = modelRow(session.models, m), prov = modelProvider(m);
+              return (
+                <div key={m.value} ref={i === palIdx ? selItemRef : undefined}
+                  className={`palette-item model-item ${i === palIdx ? "sel" : ""}`}
+                  onMouseEnter={() => setPalIdx(i)} title={m.description}
+                  // mousedown 而非 click:WKWebView 里编辑器聚焦时首个 click 只挪光标/激活焦点被吞,要点两次
+                  onMouseDown={(e) => { e.preventDefault(); setModel(session.id, m.value); setModelMenu(false); }}>
+                  <ModelLogo provider={prov} />
+                  <span className="muted">{providerBrand(prov)} -</span>
+                  <b className="model-name">{row.name}</b>
+                  {row.note && <span className="muted">({row.note})</span>}
+                  {m.value === session.info.model && <span className="muted">{t(" · 当前")}</span>}
+                </div>
+              );
+            })}
             {session.models.length === 0 && <div className="palette-item muted">{t("模型列表加载中…")}</div>}
           </div>
           <div className="palette-hint">{t("点击选择 · esc 取消")}</div>

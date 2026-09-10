@@ -25,7 +25,7 @@ export function ComputerAvatar({ ssh }: { ssh?: boolean }) {
 // 侧栏"Agent服务"、会话头像、设置账号列表都复用这一份,保证同一个 logo。
 export function modelLogo(model?: string): string | null {
   const m = (model || "").toLowerCase();
-  if (/claude|anthropic|opus|sonnet|haiku/.test(m)) return claudeLogo;
+  if (/claude|anthropic|opus|sonnet|haiku|fable/.test(m)) return claudeLogo;
   if (/deepseek/.test(m)) return deepseekLogo;
   if (/gpt|openai|codex|\bo1\b|\bo3\b|\bo4\b/.test(m)) return codexLogo;
   if (/gemini|google|palm|bard/.test(m)) return geminiLogo;
@@ -35,6 +35,13 @@ export function modelLogo(model?: string): string | null {
   if (/grok|xai/.test(m)) return grokLogo;
   if (/minimax/.test(m)) return minimaxLogo;
   return null;
+}
+
+// 模型菜单行首的小 logo。和设置页那颗共用 .provider-logo 的配色,只是缩到跟一行文字齐平。
+// provider id 同时当 css class 用(claude/deepseek/kimi…),没有官方图时退回首字母底色块。
+export function ModelLogo({ provider }: { provider: string }) {
+  const logo = modelLogo(provider);
+  return <span className={`provider-logo model-logo ${provider}`}>{logo ? <img src={logo} alt="" /> : provider.slice(0, 1).toUpperCase()}</span>;
 }
 
 // 头像:左侧气泡。"我"可点头像自设图片(存 localStorage);agent 按模型显示对应 logo。

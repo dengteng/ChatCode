@@ -758,6 +758,10 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 .palette-item { padding: 7px 12px; cursor: pointer; display: flex; gap: 10px; }
 .palette-item.sel { background: color-mix(in srgb, var(--accent) 16%, var(--panel)); }
 .palette-hint { padding: 5px 12px; font-size: 11px; color: var(--muted); border-top: 1px solid var(--border); }
+/* 模型菜单一行:logo + 厂商 + 模型名 + 括号补充。不换行,挤不下先切模型名(厂商和标注更短、更该整个留住) */
+.model-item { align-items: center; gap: 6px; font-size: 12.5px; white-space: nowrap; }
+.model-item .model-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.model-logo { width: 16px; height: 16px; border-radius: 4px; font-size: 9px; }
 /* @ 文件选择菜单:一行 = 图标 + 文件名 + 灰色所在目录 */
 .palette-head { padding: 6px 12px; font-size: 11px; color: var(--muted); border-bottom: 1px solid var(--border); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mention-item { align-items: baseline; gap: 7px; font-size: 12.5px; }

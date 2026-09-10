@@ -1219,6 +1219,26 @@ const CLAUDE_MANUAL_MODELS = [
   { value: "claude-haiku-4-5-20251001", model: "claude-haiku-4-5-20251001", displayName: "Haiku 4.5", description: "claude-haiku-4-5 · 手动指定", provider: "claude" },
 ];
 const modelKey = (m) => m?.value || m?.resolvedModel || m?.model;
+// 同一个模型在菜单里会出现好几条入口:别名 default、别名 opus[1m]、手工固定 id claude-opus-5,
+// 三条最后跑的是同一个模型、显示名也一模一样("Opus 5"),用户只会问"为什么重复"。按真实模型 id 归一后只留一条。
+// 归一化要扔掉 [1m] 后缀和尾部日期戳:claude-opus-5[1m] 与 claude-opus-5 是同一个模型的两种窗口,
+// claude-haiku-4-5-20251001 与别名 haiku 也只是写法不同。
+// 留哪条:数组顺序天然是 SDK 别名在前、手工表在后,先到先得正好留下别名(永远跟随最新版,不会随版本漂移作废),
+// 其中 default 又排在最前 —— 于是"默认"那个模型只会出现一次、且带 (默认) 标注。
+// 窗口/vision 取组内更宽松的那个:default 那条不带 contextWindow,不合并的话 1M 会掉回 200k。
+const baseModelId = (m) => String(m?.resolvedModel || m?.model || m?.value || "").replace(/\[.*$/, "").replace(/-\d{8}$/, "");
+function dedupeModels(list) {
+  const out = [], at = new Map();
+  for (const m of list) {
+    const k = baseModelId(m);
+    const i = at.get(k);
+    if (i === undefined) { at.set(k, out.length); out.push({ ...m }); continue; }
+    const keep = out[i];
+    keep.contextWindow = Math.max(keep.contextWindow || 0, m.contextWindow || 0) || undefined;
+    keep.vision = keep.vision ?? m.vision;
+  }
+  return out;
+}
 // /model 菜单 = Claude 动态模型(SDK 上报)+ 已配置 key 的其他 provider 静态模型。
 // DeepSeek 会话的 q.supportedModels() 打的是 DeepSeek endpoint、多半拿不到,失败就退回上次缓存的 Claude 列表。
 // 落盘缓存:首页(还没开任何会话)问模型列表时没有 q 可问,纯内存变量在 sidecar 刚起时是空的,
@@ -1237,7 +1257,10 @@ async function reportModels(ws, sessionId, q) {
   // 直接原样用会让 opus5 的 1M 掉回默认 200k —— 所以把手工表里知道的窗口大小合并上去。
   const manualBy = new Map(CLAUDE_MANUAL_MODELS.flatMap((m) => [[m.value, m], [m.model, m]]));
   const merged = base.map((b) => {
-    const m = manualBy.get(modelKey(b)) || manualBy.get(b.model);
+    // 第三个 key 是归一化 id:SDK 的别名行(default → claude-opus-5[1m]、fable → claude-fable-5-1[1m])
+    // 精确 key 一个都对不上,不按 baseModelId 兜一手,default 那条就只剩英文原名,
+    // 去重又把带规范名的兄弟行合掉 —— 菜单里默认那行会显示成裸 id "claude-opus-5[1m]"。
+    const m = manualBy.get(modelKey(b)) || manualBy.get(b.model) || manualBy.get(baseModelId(b));
     if (!m) return b;
     // SDK 上报的具体版本 id(如 claude-fable-5-1)displayName 只给「Fable」,丢了版本号,
     // 跟手工补的「Opus 5」「Sonnet 5」风格不一。手工表名字更规范,拿它盖过去。
@@ -1253,7 +1276,7 @@ async function reportModels(ws, sessionId, q) {
   const manual = CLAUDE_MANUAL_MODELS.filter((m) => !have.has(m.value) && !base.some((b) => modelKey(b) === m.model));
   // 广播而非单播:改 settings/key 或重开会话时,所有客户端(桌面/手机)的该会话列表都同步更新,
   // 不再只发给触发的那个连接 —— 否则别的端一直用旧快照(kimi 新增模型选了却显示旧窗口)。
-  broadcast({ type: "models", sessionId, models: [...merged, ...manual, ...extraModels(loadSettings())].map((m) => ({ ...m, description: localizeModelDesc(m.description) })) });
+  broadcast({ type: "models", sessionId, models: dedupeModels([...merged, ...manual, ...extraModels(loadSettings())]).map((m) => ({ ...m, description: localizeModelDesc(m.description) })) });
 }
 // AppleScript 字符串转义(仅 macOS)
 const asStr = (s) => `"${String(s).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;

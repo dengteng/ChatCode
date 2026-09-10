@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { FolderOpen, ArrowUp, X, ChevronDown, Info, Folder, File, CornerLeftUp, Sparkles, History } from "lucide-react";
-import { BUILTIN_COMMANDS, modelName } from "../types";
+import { BUILTIN_COMMANDS, modelName, modelRow, modelProvider, providerBrand } from "../types";
+import { ModelLogo } from "./Avatar";
 import { useStore } from "../store";
 import { openImageWindow } from "../popout";
 import { onEdgeGlow } from "../lib/edgeGlow";
@@ -360,13 +361,20 @@ export function EmptyComposer() {
           {modelMenu && (
             <div className="palette empty-model-menu">
               <div className="palette-scroll">
-                {state.homeModels.map((m) => (
-                  <div key={m.value} className={`palette-item ${m.value === state.homeModel ? "sel" : ""}`}
-                    onMouseDown={(e) => { e.preventDefault(); setHomeModel(m.value); setModelMenu(false); }}>
-                    <div><b>{modelName(state.homeModels, m)}</b>{m.value === state.homeModel && <span className="muted">{t(" · 当前")}</span>}
-                    {m.description && <div className="muted">{m.description}</div>}</div>
-                  </div>
-                ))}
+                {state.homeModels.map((m) => {
+                  const row = modelRow(state.homeModels, m), prov = modelProvider(m);
+                  return (
+                    <div key={m.value} className={`palette-item model-item ${m.value === state.homeModel ? "sel" : ""}`}
+                      title={m.description}
+                      onMouseDown={(e) => { e.preventDefault(); setHomeModel(m.value); setModelMenu(false); }}>
+                      <ModelLogo provider={prov} />
+                      <span className="muted">{providerBrand(prov)} -</span>
+                      <b className="model-name">{row.name}</b>
+                      {row.note && <span className="muted">({row.note})</span>}
+                      {m.value === state.homeModel && <span className="muted">{t(" · 当前")}</span>}
+                    </div>
+                  );
+                })}
                 {state.homeModels.length === 0 && <div className="palette-item muted">{t("模型列表加载中…")}</div>}
               </div>
             </div>
