@@ -302,24 +302,72 @@ export function FileEditor({ path, name, onClose, windowed }: { path: string; na
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") { e.preventDefault(); saveRef.current(); }
   };
 
-  // 左右同步滚动(仅 md 双栏):按滚动进度百分比对齐。
-  // 为什么不做"源码行号 → 预览元素"的精确映射:编辑区是软换行的(一行长文本占好几行显示),
-  // scrollTop 反推不出源码行号,要精确映射得先给每行做布局测量,代价远大于收益。
-  // 百分比对齐的代价是:遇到长代码块/图片这类"源码短、渲染高"的内容,两边会有偏移。够用。
-  const cmScrollerRef = useRef<HTMLElement | null>(null); // CodeMirror 的滚动容器(.cm-scroller),onCreateEditor 里拿到
+  // 左右同步滚动(仅 md 双栏):按**源码行号**对齐,不按滚动进度百分比。
+  // 百分比对齐早先够用,遇到表格/长代码块/图片就散架 —— 这类内容"源码几行、渲染几屏",
+  // 两栏的总高比例完全不同,进度 50% 落到的根本不是同一段话(一份满是大表格的 README 能差出十几屏)。
+  // 现在复用预览里本来就有的 data-cc-line 锚点(rehypeLine 给每个元素打的,原是给点击跳转用的):
+  // 「行号 → 预览内偏移」建成对照表,两边都在这张表上线性插值,来回都走同一条映射,不会漂。
+  const cmViewRef = useRef<EV | null>(null); // CodeMirror 实例,onCreateEditor 里拿到(滚动容器是它的 scrollDOM)
   const prevRef = useRef<HTMLDivElement>(null);
   // 谁在被滚:同步会给对面派发 scroll 事件,对面若也去同步回来,两边就会互相推着抖。
   // 以鼠标所在的那一栏为准 —— 滚轮事件本来就只发给指针底下的元素。
   const driver = useRef<"src" | "prev" | null>(null);
+  // 对照表缓存。一次滚动要查一遍,每次都 querySelectorAll + 逐个量 rect 会掉帧。
+  // 失效判据取 scrollHeight:改字、拖分栏、图片加载完都会让它变 —— 比挨个监听那些事件省事,也不会漏。
+  const anchorsRef = useRef<{ h: number; pts: { line: number; top: number }[] } | null>(null);
+  const anchors = (lastLine: number) => {
+    const root = prevRef.current;
+    if (!root) return [];
+    if (anchorsRef.current?.h === root.scrollHeight) return anchorsRef.current.pts;
+    const zero = root.getBoundingClientRect().top - root.scrollTop; // 内容坐标系的原点
+    const pts = [{ line: 1, top: 0 }];
+    root.querySelectorAll<HTMLElement>("[data-cc-line]").forEach((el) => {
+      const line = +el.getAttribute("data-cc-line")!;
+      const top = el.getBoundingClientRect().top - zero;
+      // 只收行号和位置双双递增的点:嵌套元素(表格的 td、段落里的 code)会和父元素同起点甚至插队,
+      // 混进来会让插值忽上忽下。父元素先到,子元素自然被这条判断挡掉。
+      const last = pts[pts.length - 1];
+      if (line > last.line && top > last.top) pts.push({ line, top });
+    });
+    pts.push({ line: lastLine + 1, top: root.scrollHeight }); // 末尾虚拟点:文末对文档底
+    anchorsRef.current = { h: root.scrollHeight, pts };
+    return pts;
+  };
+  // 对照表上的线性插值。from="line" 时按行号查偏移,from="top" 时反过来。
+  const interp = (pts: { line: number; top: number }[], from: "line" | "top", v: number) => {
+    const to = from === "line" ? "top" : "line";
+    let i = 1;
+    while (i < pts.length - 1 && pts[i][from] <= v) i++;
+    const p = pts[i - 1], q = pts[i];
+    const span = q[from] - p[from];
+    const r = span > 0 ? Math.max(0, Math.min(1, (v - p[from]) / span)) : 0;
+    return p[to] + r * (q[to] - p[to]);
+  };
+  // 编辑区顶边那一行(带小数:行只露出一半时算 .5,不然滚动会一格一格地跳)。
+  // 用 CodeMirror 的高度模型而不是 scrollTop 比例 —— 软换行下一个源码行可能占好几行显示高度。
+  const srcTopLine = (view: EV) => {
+    const h = view.scrollDOM.getBoundingClientRect().top - view.documentTop; // 视口顶边在文档坐标系里的高度
+    const b = view.lineBlockAtHeight(h);
+    return view.state.doc.lineAt(b.from).number + (b.height > 0 ? Math.max(0, Math.min(1, (h - b.top) / b.height)) : 0);
+  };
+  // 反过来:把某一行(带小数)顶到编辑区顶边
+  const scrollSrcToLine = (view: EV, line: number) => {
+    const doc = view.state.doc;
+    const n = Math.max(1, Math.min(doc.lines, Math.floor(line)));
+    const b = view.lineBlockAt(doc.line(n).from);
+    const h = b.top + (line - n) * b.height;
+    view.scrollDOM.scrollTop += view.documentTop + h - view.scrollDOM.getBoundingClientRect().top;
+  };
   const align = (side: "src" | "prev") => {
     if (!isMd || driver.current !== side) return;
-    const from = side === "src" ? cmScrollerRef.current : prevRef.current;
-    const to = side === "src" ? prevRef.current : cmScrollerRef.current;
-    if (!from || !to) return;
-    const fMax = from.scrollHeight - from.clientHeight;
-    const tMax = to.scrollHeight - to.clientHeight;
-    if (fMax <= 0 || tMax <= 0) return; // 有一边没得滚,别把它顶到 0
-    to.scrollTop = (from.scrollTop / fMax) * tMax;
+    const view = cmViewRef.current, root = prevRef.current;
+    if (!view || !root) return;
+    const prevMax = root.scrollHeight - root.clientHeight;
+    const srcMax = view.scrollDOM.scrollHeight - view.scrollDOM.clientHeight;
+    if (prevMax <= 0 || srcMax <= 0) return; // 有一边没得滚,别把它顶到 0
+    const pts = anchors(view.state.doc.lines);
+    if (side === "src") root.scrollTop = Math.max(0, Math.min(prevMax, interp(pts, "line", srcTopLine(view))));
+    else scrollSrcToLine(view, interp(pts, "top", root.scrollTop));
   };
   // CodeMirror 的滚动发生在内部 .cm-scroller 上(scroll 事件不冒泡),React 的 onScroll 挂外层拿不到,
   // 所以挂载时直接给 scrollDOM 绑原生监听。
@@ -348,7 +396,7 @@ export function FileEditor({ path, name, onClose, windowed }: { path: string; na
   jumpRef.current = jumpTo;
 
   const onCreate = (view: EV) => {
-    cmScrollerRef.current = view.scrollDOM;
+    cmViewRef.current = view;
     view.scrollDOM.addEventListener("scroll", () => align("src"));
     view.scrollDOM.addEventListener("mouseenter", () => (driver.current = "src"));
     // 打字把光标顶出可视区时浏览器会自己滚,那时鼠标可能正停在右栏 —— 键入也算"在滚左栏"
