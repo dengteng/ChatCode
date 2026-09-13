@@ -49,8 +49,9 @@ export interface ModelInfo { value: string; resolvedModel?: string; displayName:
 // 会话当前选中的那条模型信息(models 列表还没到时可能查不到)
 export function sessionModel(session: Session): ModelInfo | undefined {
   const m = session.info.model;
-  return session.models.find((x) => x.value === m || x.resolvedModel === m || x.model === m)
-    ?? (m ? undefined : session.models.find((x) => x.value === "default"));
+  // 走 modelInList 而不是自己再写一遍精确匹配:别名(opus[1m])、被去重掉的固定 id 都要能找回来。
+  // 找不到的代价不只是名字难看 —— vision / contextWindow 都挂在这条上,查空会按 provider 默认拦图片。
+  return m ? modelInList(session.models, m) : session.models.find((x) => x.value === "default");
 }
 
 // 能不能往这个会话发图片。模型表里显式写了就听它的,否则看 provider 声明;都没有一律放行 ——
@@ -158,14 +159,23 @@ function modelInList(models: ModelInfo[], modelValue: string): ModelInfo | undef
   // 只剩别名那条,而老会话存的是被去掉的固定 id(claude-opus-5 / claude-haiku-4-5-20251001)。
   // 按同一套归一化(扔掉 [1m] 与尾部日期戳)再找一遍,否则会话头显示成裸 id、上下文窗口也掉回默认值。
   const base = (s?: string) => String(s ?? "").replace(/\[.*$/, "").replace(/-\d{8}$/, "");
-  return models.find((m) => base(m.resolvedModel ?? m.model ?? m.value) === base(modelValue));
+  const byBase = models.find((m) => base(m.resolvedModel ?? m.model ?? m.value) === base(modelValue));
+  if (byBase) return byBase;
+  // 最后一手:别名(opus / sonnet / haiku / opus[1m])既不是菜单 value 也不是模型 id,归一化后还是对不上
+  // ——"opus" 和 "claude-opus-5" 不相等。别名永远指向该家族最新版,按家族名找 claude-<家族> 开头的第一条。
+  // 只对"一个单词"的值这么兜:带 - 或 / 的是真 id(deepseek/deepseek-flash),按家族名瞎配会串到别家。
+  const fam = base(modelValue).toLowerCase();
+  if (fam.includes("-") || fam.includes("/")) return undefined;
+  return models.find((m) => base(m.resolvedModel ?? m.model ?? m.value).toLowerCase().startsWith(`claude-${fam}`));
 }
 
+// 底部模型条 / 额度提示里的当前模型名。和模型菜单里那一行取同一个名字(modelRow 的 name)——
+// 用户就是照着菜单选的,菜单叫「Opus 5」、模型条却写 "opus[1m]" 或「默认」,看着像两个东西。
 export function modelLabel(session: Session): string {
   const byId = session.info.model ? modelInList(session.models, session.info.model) : undefined;
-  if (session.info.model) return byId ? modelName(session.models, byId) : session.info.model;
+  if (session.info.model) return byId ? modelRow(session.models, byId).name : session.info.model;
   const def = session.models.find((m) => m.value === "default") ?? session.models[0];
-  return def ? modelName(session.models, def) : "";
+  return def ? modelRow(session.models, def).name : "";
 }
 
 // 模型 id → 版本号("claude-opus-5[1m]" → "5"、"claude-haiku-4-5-20251001" → "4.5")。
@@ -195,9 +205,10 @@ function withVer(m: ModelInfo): string {
 //
 // default 那条特殊:SDK 给的是写死的英文 "Default (recommended)",两个毛病 ——
 // ① 不跟界面语言走;② "recommended" 对用户零信息量,他真正想知道的是"default 现在到底跑哪个模型"。
-// 换成「默认 (Opus 5)」:括号里放 resolvedModel 对应那条模型的显示名,并剥掉它自己的括号补充
-// (SDK 的 "Opus (1M context)" 直接嵌进去会套成「默认 (Opus (1M context))」,上下文窗口用量条那儿已经写了)。
-// 列表里找不到对应条目就退回裸的模型 id —— 再难看也比 "recommended" 有用。
+// 直接给出它实际跑的那个模型名(「Opus 5」),不再包一层「默认 (…)」:这个名字要出现在底部模型条、
+// 会话气泡头、额度提示里,那些地方读者问的都是"现在用的是哪个模型",「默认」两字既不回答问题,
+// 又让同一个模型在菜单里叫 A、在模型条上叫 B。"是默认项"这件事只在菜单里有意义,由 modelRow 另给标注。
+// 连模型名都解析不出来才退回裸 id,再退回「默认」—— 再难看也比 "recommended" 有用。
 export function modelName(models: ModelInfo[], m: ModelInfo): string {
   if (m.value !== "default") return withVer(m);
   const real = m.resolvedModel;
@@ -208,8 +219,7 @@ export function modelName(models: ModelInfo[], m: ModelInfo): string {
   // (Opus 5)盖过 SDK 的 "Default (recommended)";还是那句英文原名就说明没盖上,退回裸 id。
   const own = /^default\b/i.test(m.displayName) ? "" : withVer(m).replace(/\s*[(（].*$/, "").trim();
   const short = (hit ? withVer(hit).replace(/\s*[(（].*$/, "").trim() : own || (real ?? "")).trim();
-  // 半角括号:这一串中英混排(默认 / Opus 5),全角括号在 en 界面下会变成「Default（Opus 5）」
-  return short ? `${i18n.t("默认")} (${short})` : i18n.t("默认");
+  return short || i18n.t("默认");
 }
 
 // provider id → 厂商名。菜单一行要写清"这是谁家的模型",而 providers 表里的 label
@@ -231,13 +241,9 @@ export function modelProvider(m: ModelInfo): string {
 // 同一个模型的多条入口已经在 sidecar 去重成一条(见 dedupeModels),不再需要靠标注区分选哪条,
 // 完整 description 留给 title 悬浮看。
 export function modelRow(models: ModelInfo[], m: ModelInfo): { name: string; note: string } {
-  const full = modelName(models, m);
-  // default 那条 modelName 给的是「默认 (Opus 5)」:名字要和别的行对齐,标注挪进括号
-  if (m.value === "default") {
-    const inner = full.match(/[(（](.+)[)）]\s*$/);
-    return { name: inner ? inner[1] : full, note: i18n.t("默认") };
-  }
-  return { name: full.replace(/\s*[(（].*$/, "").trim(), note: "" };
+  // 名字一律是纯模型名(modelName 对 default 也只给「Opus 5」),「默认」作为标注单独给出 ——
+  // 菜单这一行是唯一需要区分"哪条是默认项"的地方,别的地方(模型条/气泡头)只想知道跑的是谁。
+  return { name: modelName(models, m).replace(/\s*[(（].*$/, "").trim(), note: m.value === "default" ? i18n.t("默认") : "" };
 }
 
 // 某个具体模型 id → 展示名(如 "claude-opus-4-8" → "Opus 4.8"、"deepseek-v4-pro" → "DeepSeek V4 Pro")。

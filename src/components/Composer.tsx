@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Folder, File, CornerLeftUp, RotateCw, ChevronDown, X, Sparkles, Clock } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Session } from "../types";
-import { BUILTIN_COMMANDS, modelLabel, modelRow, modelProvider, providerBrand, contextWindowOf, canSendImage, sessionProvider } from "../types";
+import { BUILTIN_COMMANDS, modelLabel, modelRow, modelProvider, providerBrand, contextWindowOf, canSendImage, sessionProvider, sessionModel } from "../types";
 import { ModelLogo } from "./Avatar";
 import { useStore, fetchBlob, sessionBusy, PENDING_MAX } from "../store";
 import { UsageBar, rollReset, fmtReset } from "./UsageBar";
@@ -609,6 +609,14 @@ export function Composer({ session }: { session: Session }) {
   const usage = sessionProvider(session) === "kimi" ? state.usageKimi : state.usage;
   const limitResetAt = rollReset(usage.session.resetAt, "5h");
 
+  // 模型菜单的行:原列表一条不动(顺序、条目都保持),把当前选中的那条**复制**一份钉在最前面。
+  // 不是"把它挪上去":挪的话列表会随选择变形,用户记的位置每次都不一样;而且当前模型可能压根不在
+  // 可见区(列表长、选中项滚在屏幕外),第一眼看不到自己在用谁。
+  const menuModels = useMemo(() => {
+    const cur = sessionModel(session);
+    return cur ? [cur, ...session.models] : session.models;
+  }, [session.models, session.info.model]);
+
   function openModelMenu() {
     if (modelMenu) { setModelMenu(false); return; } // 再点一次收起
     // 每次打开都刷新:运行中会话的列表是启动快照,用户后来改 settings 新增/改窗口的模型不在其中
@@ -928,11 +936,11 @@ export function Composer({ session }: { session: Session }) {
     }
 
     // 模型菜单打开时:↑↓ 选择、⏎ 确认、esc 关闭(优先级高于输入历史)
-    if (modelMenu && session.models.length > 0) {
-      const n = session.models.length;
+    if (modelMenu && menuModels.length > 0) {
+      const n = menuModels.length;
       if (e.key === "ArrowDown") { e.preventDefault(); setPalIdx((i) => (i + 1) % n); return; }
       if (e.key === "ArrowUp") { e.preventDefault(); setPalIdx((i) => (i - 1 + n) % n); return; }
-      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); setModel(session.id, session.models[palIdx % n].value); setModelMenu(false); return; }
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); setModel(session.id, menuModels[palIdx % n].value); setModelMenu(false); return; }
     }
 
     // 权限快捷键(完全空时)—— AskUserQuestion 交给问答卡自己处理,不在此拦截
@@ -1283,11 +1291,12 @@ export function Composer({ session }: { session: Session }) {
       {modelMenu && (
         <div className="palette" ref={modelMenuRef}>
           <div className="palette-scroll">
-            {/* 一条一行:logo + 厂商 + 模型名(含版本号)+ 括号补充。完整 description 留在 title 里 */}
-            {session.models.map((m, i) => {
+            {/* 一条一行:logo + 厂商 + 模型名(含版本号)+ 括号补充。完整 description 留在 title 里。
+                第 0 行是当前模型的副本(见 menuModels),和原列表里那条指向同一个 value,选哪个都一样 */}
+            {menuModels.map((m, i) => {
               const row = modelRow(session.models, m), prov = modelProvider(m);
               return (
-                <div key={m.value} ref={i === palIdx ? selItemRef : undefined}
+                <div key={`${i}:${m.value}`} ref={i === palIdx ? selItemRef : undefined}
                   className={`palette-item model-item ${i === palIdx ? "sel" : ""}`}
                   onMouseEnter={() => setPalIdx(i)} title={m.description}
                   // mousedown 而非 click:WKWebView 里编辑器聚焦时首个 click 只挪光标/激活焦点被吞,要点两次
@@ -1296,11 +1305,13 @@ export function Composer({ session }: { session: Session }) {
                   <span className="muted">{providerBrand(prov)} -</span>
                   <b className="model-name">{row.name}</b>
                   {row.note && <span className="muted">({row.note})</span>}
-                  {m.value === session.info.model && <span className="muted">{t(" · 当前")}</span>}
+                  {/* 按对象身份比,不比 value:info.model 存的可能是别名(opus[1m])或被去重掉的固定 id,
+                      比字符串会漏标。钉在最前面那条和原列表里的是同一个对象,两处都会带上「当前」 */}
+                  {m === sessionModel(session) && <span className="muted">{t(" · 当前")}</span>}
                 </div>
               );
             })}
-            {session.models.length === 0 && <div className="palette-item muted">{t("模型列表加载中…")}</div>}
+            {menuModels.length === 0 && <div className="palette-item muted">{t("模型列表加载中…")}</div>}
           </div>
           <div className="palette-hint">{t("点击选择 · esc 取消")}</div>
         </div>

@@ -35,7 +35,7 @@ const modelName = (models, m) => {
   const hit = real ? models.find((x) => x.value !== "default" && (x.value === real || x.resolvedModel === real || x.model === real)) : undefined;
   const own = /^default\b/i.test(m.displayName) ? "" : withVer(m).replace(/\s*[(（].*$/, "").trim();
   const short = (hit ? withVer(hit).replace(/\s*[(（].*$/, "").trim() : own || (real ?? "")).trim();
-  return short ? `${t("默认")} (${short})` : t("默认");
+  return short || t("默认");
 };
 
 // SDK 真实上报的那份列表
@@ -48,10 +48,11 @@ const LIST = [
 ];
 const by = (v) => LIST.find((m) => m.value === v);
 
-// —— 核心:default 要说清自己实际跑哪个(带版本号),且不能套两层括号 ——
-assert.equal(modelName(LIST, by("default")), "Default (Opus 5)");
+// —— 核心:default 直接给出它实际跑的那个模型名(带版本号),不包「默认 (…)」——
+// 这个名字会出现在底部模型条、气泡头、额度提示里,那些地方问的都是"现在用哪个模型"。
+assert.equal(modelName(LIST, by("default")), "Opus 5");
 assert.ok(!modelName(LIST, by("default")).includes("recommended"), "recommended 对用户零信息量,必须换掉");
-assert.ok(!/\(.*\(/.test(modelName(LIST, by("default"))), "「Default (Opus (1M context))」这种套娃不许出现");
+assert.ok(!/[(（]/.test(modelName(LIST, by("default"))), "default 那条不许再带括号 —— 「默认」只作为菜单标注出现");
 
 // —— 非 default:补版本号,其余原样 ——
 assert.equal(modelName(LIST, by("sonnet")), "Sonnet 5");
@@ -62,11 +63,11 @@ assert.equal(modelName(LIST, by("haiku")), "Haiku 4.5");
 
 // —— 只有 default 一条:不能匹配到自己,否则又绕回英文原名 ——
 const ONLY = [LIST[0]];
-assert.equal(modelName(ONLY, ONLY[0]), "Default (claude-opus-5[1m])", "查不到就退回裸 id,也好过 recommended");
+assert.equal(modelName(ONLY, ONLY[0]), "claude-opus-5[1m]", "查不到就退回裸 id,也好过 recommended");
 
 // —— 去重后菜单里只剩 default 一条(实际常态):sidecar 已把规范名盖到它自己的 displayName 上 ——
 const NAMED = { value: "default", resolvedModel: "claude-opus-5[1m]", displayName: "Opus 5" };
-assert.equal(modelName([NAMED], NAMED), "Default (Opus 5)", "菜单第一行不许出现裸 id claude-opus-5[1m]");
+assert.equal(modelName([NAMED], NAMED), "Opus 5", "菜单第一行不许出现裸 id claude-opus-5[1m]");
 
 // —— 非 claude 家族:切不出版本就别猜,原样用 SDK 的名字 ——
 assert.equal(modelName([], { value: "deepseek-v4-pro", resolvedModel: "deepseek-v4-pro", displayName: "DeepSeek V4 Pro" }), "DeepSeek V4 Pro");
@@ -79,11 +80,10 @@ assert.equal(modelName([], { value: "default", displayName: "Default (recommende
 // ---------- 菜单一行:modelRow / modelProvider / providerBrand ----------
 assert.ok(SRC.includes("export function modelRow"), "types.ts 的 modelRow 已漂移");
 
-const modelRow = (models, m) => {
-  const full = modelName(models, m);
-  if (m.value === "default") { const inner = full.match(/[(（](.+)[)）]\s*$/); return { name: inner ? inner[1] : full, note: t("默认") }; }
-  return { name: full.replace(/\s*[(（].*$/, "").trim(), note: "" };
-};
+const modelRow = (models, m) => ({
+  name: modelName(models, m).replace(/\s*[(（].*$/, "").trim(),
+  note: m.value === "default" ? t("默认") : "",
+});
 const modelProvider = (m) => m.provider || (m.value.includes("/") ? m.value.split("/")[0] : "claude");
 
 // 括号只留一种用途:标「默认」。名字要和别的行对齐成裸模型名,否则一行里会出现两层括号
@@ -97,6 +97,41 @@ assert.deepEqual(modelRow(LIST, { value: "claude-opus-5", model: "claude-opus-5"
 // 第三方:版本号写在 displayName 里(不是括号补充),原样显示
 assert.deepEqual(modelRow([], { value: "deepseek/deepseek-flash", displayName: "DeepSeek V4.1 Flash", description: "deepseek-flash · 快 · 看图" }),
   { name: "DeepSeek V4.1 Flash", note: "" });
+
+// ---------- 底部模型条:modelLabel / modelInList ----------
+// 模型条上的名字必须和菜单里那一行一模一样 —— 用户照着菜单选的,两处叫法不同会以为是两个模型。
+assert.ok(SRC.includes("export function modelLabel"), "types.ts 的 modelLabel 已漂移");
+assert.ok(SRC.includes("modelRow(session.models, byId).name"), "模型条必须复用菜单那一行的名字,别自己另算一份");
+assert.ok(SRC.includes('startsWith(`claude-${fam}`)'), "modelInList 的家族名兜底已漂移:选过 opus[1m] 的会话会显示成裸别名");
+
+const base = (s) => String(s ?? "").replace(/\[.*$/, "").replace(/-\d{8}$/, "");
+const modelInList = (models, v) => {
+  const hit = models.find((m) => m.value === v || m.resolvedModel === v || m.model === v);
+  if (hit || !v) return hit;
+  const byBase = models.find((m) => base(m.resolvedModel ?? m.model ?? m.value) === base(v));
+  if (byBase) return byBase;
+  const fam = base(v).toLowerCase();
+  if (fam.includes("-") || fam.includes("/")) return undefined;
+  return models.find((m) => base(m.resolvedModel ?? m.model ?? m.value).toLowerCase().startsWith(`claude-${fam}`));
+};
+const modelLabel = (models, cur) => {
+  const byId = cur ? modelInList(models, cur) : undefined;
+  if (cur) return byId ? modelRow(models, byId).name : cur;
+  const def = models.find((m) => m.value === "default") ?? models[0];
+  return def ? modelRow(models, def).name : "";
+};
+
+// 去重后的真实菜单:三条入口只剩 default 一条
+const MENU = [{ value: "default", resolvedModel: "claude-opus-5[1m]", displayName: "Opus 5", contextWindow: 1_000_000 }];
+assert.equal(modelLabel(MENU, "opus[1m]"), "Opus 5", "别名对不上任何一行时要按家族名兜住,不能吐 opus[1m]");
+assert.equal(modelLabel(MENU, "opus"), "Opus 5");
+assert.equal(modelLabel(MENU, "claude-opus-5"), "Opus 5", "老会话存的固定 id 靠归一化找回");
+assert.equal(modelLabel(MENU, "default"), "Opus 5", "用默认模型时也报模型名,不报「默认」");
+assert.equal(modelLabel(MENU, ""), "Opus 5", "SDK init 还没到(info.model 为空)时按默认行显示,不干等");
+// 家族名兜底不许串到别家:带 / 的第三方 id 查不到就老实吐原值
+assert.equal(modelLabel(MENU, "deepseek/deepseek-flash"), "deepseek/deepseek-flash");
+// 也不许把 sonnet 兜到 opus 上
+assert.equal(modelLabel(MENU, "sonnet"), "sonnet");
 
 // provider:SDK 上报的 claude 模型没有 provider 字段,靠 value 里有没有斜杠兜底
 assert.equal(modelProvider({ value: "opus[1m]" }), "claude");
@@ -151,4 +186,44 @@ assert.equal(DEDUP[2].vision, true);
 assert.ok(SRC.includes("base(m.resolvedModel ?? m.model ?? m.value) === base(modelValue)"),
   "modelInList 的归一化兜底已漂移:丢了它,选过 claude-opus-5 的老会话头会显示成裸 id");
 
-console.log("✅ model-name: default 解析 / 防套娃 / 非 default 原样 / 自匹配排除 / 无解析兜底 / 菜单单行 / 重复入口去重 全部通过");
+// ---------- supportedModels 只收 Claude 的行:sidecar 的 isClaudeModel ----------
+// 在 DeepSeek 会话里问 supportedModels,打的是 DeepSeek 的 anthropic 兼容端点,它会答自家模型。
+// 放进来的连锁伤:裸 id 行挂 Anthropic logo → 去重时排在前面把 catalog 正品挤掉 → vision/价格/正式名全丢。
+assert.ok(SIDECAR.includes("const isClaudeModel ="), "server.mjs 的 isClaudeModel 已漂移");
+assert.ok(SIDECAR.includes("claude = claude.filter(isClaudeModel)"), "SDK 现答的那份必须过滤,否则脏行当场进菜单");
+assert.ok(SIDECAR.includes("claudeModels ?? []).filter(isClaudeModel)"), "读缓存也要过滤,否则上一版存下的脏数据永远赖着");
+
+const isClaudeModel = (m) => /^(claude-|default$|opus|sonnet|haiku|fable)/.test(String(m?.resolvedModel || m?.model || m?.value || ""));
+// 真 Claude:具体 id 和别名都要留
+assert.ok(isClaudeModel({ value: "default", resolvedModel: "claude-opus-5[1m]" }));
+assert.ok(isClaudeModel({ value: "opus[1m]", resolvedModel: "claude-opus-5[1m]" }));
+assert.ok(isClaudeModel({ value: "haiku", resolvedModel: "claude-haiku-4-5-20251001" }));
+assert.ok(isClaudeModel({ value: "sonnet" }), "别名行万一不带 resolvedModel 也不能误杀");
+// 第三方端点答回来的:一律不收
+assert.ok(!isClaudeModel({ value: "deepseek-flash", displayName: "deepseek-flash" }));
+assert.ok(!isClaudeModel({ value: "deepseek-v4-pro" }));
+assert.ok(!isClaudeModel({ value: "glm-4.6" }));
+assert.ok(!isClaudeModel({ value: "kimi-k2.7-code" }));
+// 过滤必须发生在去重之前:两条的 baseModelId 都是 "deepseek-flash",脏行排在前面就被留下,
+// catalog 那条的 value/displayName/provider 一起陪葬(vision 会被合并捡回,但没人能查到这条了)。
+const POLLUTED = [{ value: "deepseek-flash", displayName: "deepseek-flash" }, DUP[5]];
+const KEPT = dedupeModels(POLLUTED)[0];
+assert.equal(KEPT.displayName, "deepseek-flash", "脏行排前面确实会顶掉正式名 —— 所以必须在入表前就滤掉");
+// 真正卡死图片的一环:会话存的是 "deepseek/deepseek-flash",在只剩裸 id 的列表里查不到 →
+// vision 无从得知 → 退回 provider 的 vision:false → 明明能看图的 V4.1 Flash 被输入框拦下
+assert.equal(modelInList([KEPT], "deepseek/deepseek-flash"), undefined);
+// 过滤只作用在 SDK 那半边(catalog 的第三方行本来就该留着,它们不走 supportedModels)
+const CLEAN = dedupeModels([...POLLUTED.slice(0, 1).filter(isClaudeModel), DUP[5]]);
+assert.equal(CLEAN[0].displayName, "DeepSeek V4.1 Flash", "滤干净后留下的是 catalog 那条");
+assert.equal(modelInList(CLEAN, "deepseek/deepseek-flash")?.vision, true, "查得到,vision 才跟得上");
+
+// ---------- 模型菜单:当前模型复制一份钉最前 ----------
+const COMPOSER = readFileSync("src/components/Composer.tsx", "utf8");
+assert.ok(COMPOSER.includes("const menuModels ="), "Composer 的 menuModels 已漂移");
+assert.ok(COMPOSER.includes("cur ? [cur, ...session.models] : session.models"),
+  "原列表必须原样保留在后面 —— 只在最前面加一份副本,不许挪动/删减原有条目");
+assert.ok(COMPOSER.includes("{menuModels.map("), "菜单要渲染 menuModels,不是 session.models");
+assert.ok(COMPOSER.includes("modelMenu && menuModels.length > 0") && COMPOSER.includes("menuModels[palIdx % n].value"),
+  "↑↓/⏎ 必须走同一份 menuModels,否则键盘选中项和眼睛看到的差一行");
+
+console.log("✅ model-name: default 解析 / 非 default 原样 / 自匹配排除 / 无解析兜底 / 菜单单行 / 模型条同名 / 别名家族兜底 / 重复入口去重 / 只收 Claude 行 / 当前模型钉顶 全部通过");

@@ -1243,11 +1243,18 @@ function dedupeModels(list) {
 // DeepSeek 会话的 q.supportedModels() 打的是 DeepSeek endpoint、多半拿不到,失败就退回上次缓存的 Claude 列表。
 // 落盘缓存:首页(还没开任何会话)问模型列表时没有 q 可问,纯内存变量在 sidecar 刚起时是空的,
 // 菜单就只剩手工表那一条 Opus 5。存进 settings,重启后照样能列出上次拿到的 Claude 全家桶。
-let lastClaudeModels = loadSettings().claudeModels ?? [];
+// supportedModels 打的是**当前会话的 endpoint**,而 DeepSeek/GLM 这些 anthropic 兼容端点也会认真作答 ——
+// 答回来的是它们自家的模型(无前缀裸 id,如 "deepseek-flash"),混进 Claude 列表后是一串连锁伤:
+// 菜单里那条挂着 Anthropic 的 logo;去重时它排在前面,把 catalog 里带 vision/价格/正式名的正品挤掉;
+// 于是 V4.1 Flash 明明能看图却被输入框拦下,名字也显示成裸 id。只收真 Claude 的行。
+// 也用在读缓存上:上一版把脏数据存进 settings.claudeModels 的机器,升级后第一次读就自动洗掉。
+const isClaudeModel = (m) => /^(claude-|default$|opus|sonnet|haiku|fable)/.test(String(m?.resolvedModel || m?.model || m?.value || ""));
+let lastClaudeModels = (loadSettings().claudeModels ?? []).filter(isClaudeModel);
 async function reportModels(ws, sessionId, q) {
   let claude = [];
-  // supportedModels 打的是当前会话 endpoint;DeepSeek 未必实现,加超时兜底别把菜单卡住
+  // 超时兜底:端点不实现 supportedModels 时别把菜单卡住
   try { claude = (await Promise.race([q?.supportedModels?.(), new Promise((r) => setTimeout(() => r([]), 3000))])) ?? []; } catch {}
+  claude = claude.filter(isClaudeModel);
   if (claude.length && JSON.stringify(claude) !== JSON.stringify(lastClaudeModels)) {
     lastClaudeModels = claude;
     saveSettings({ ...loadSettings(), claudeModels: claude });
