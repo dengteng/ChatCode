@@ -481,11 +481,16 @@ const pick = (fn: () => void) => (e: React.MouseEvent) => { if (e.button !== 0) 
 // (原来两句写在一个 rAF 里,所以有的路径补了这一脚还是白)。
 // 凡是编程式跳转滚动位置的地方都得跟一脚 —— 漏掉哪条路径,哪条路径就白屏(切会话、往前翻历史、
 // 回到底部、历史回放都踩过)。返回取消器。
-const pokeRepaint = (el: HTMLElement, top: () => number, ok: () => boolean = () => true) => {
+// ok 两帧各查一次:用户的手指/触控板每帧都在发滚动事件,只在第一帧查的话,"第一帧还贴着底、
+// 第二帧人已经翻上去了"这个窗口每次滚动都会撞上 —— 第二帧那句无条件的 scrollTop=底 就把人拽回底部,
+// 拽回去又让跟随重新亮起,下一块流式内容再拽一次,看着就是气泡不停上下抖。
+// mark:通知调用方"接下来这一下 scrollTop 是我们自己写的",别把它当成用户在滚(见 markProg)。
+const pokeRepaint = (el: HTMLElement, top: () => number, ok: () => boolean = () => true, mark: () => void = () => {}) => {
   let raf = requestAnimationFrame(() => {
     if (!ok()) return;
+    mark();
     el.scrollTop += el.scrollTop > 0 ? -1 : 1;
-    raf = requestAnimationFrame(() => { el.scrollTop = top(); });
+    raf = requestAnimationFrame(() => { if (!ok()) return; mark(); el.scrollTop = top(); });
   });
   return () => cancelAnimationFrame(raf);
 };
@@ -503,6 +508,11 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
   const bottomRef = useRef<HTMLDivElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   const stick = useRef(true); // 是否跟随底部:运行中往上翻历史时不该被新消息拽回去
+  // 编程式滚动的时刻 + 上一次的 scrollTop。判"用户是不是在往上翻"要靠这两个:
+  // 钉底、重绘补的那 1px、切会话恢复位置都会发 scroll 事件,拿它们当用户意图会把跟随状态搅乱。
+  const progAt = useRef(0);
+  const lastTop = useRef(0);
+  const markProg = () => { progAt.current = performance.now(); };
   const [showSshConfig, setShowSshConfig] = useState(false);
   const [showCommit, setShowCommit] = useState(false); // 顶栏 commit 弹窗
   const [showGitMap, setShowGitMap] = useState(false); // 顶栏 关联 Git 仓库弹窗(本地非 git 目录时)
@@ -539,10 +549,10 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
     const el = timelineRef.current, p = histRestore.current;
     if (el && p) {
       const target = el.scrollHeight - p.h + p.top;
-      el.scrollTop = target;
+      markProg(); el.scrollTop = target;
       histRestore.current = null;
       // 少了这一脚就是"点了加载更早,聊天区整片空白":内容和滚动条都对,WKWebView 就是不上色
-      pokeRepaint(el, () => target);
+      pokeRepaint(el, () => target, undefined, markProg);
     }
   }, [histCap]);
   // 搜索面板点结果:切到会话后要滚到那条消息。ts 由搜索结果给(ISO → 毫秒),命中的可能是
@@ -566,11 +576,11 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
       hit = rows[0];
     }
     stick.current = false;                                      // 别让"跟随底部"把视图又拽回去
-    hit.scrollIntoView({ block: "center" });
+    markProg(); hit.scrollIntoView({ block: "center" });
     // scrollIntoView 同样是编程式跳转,同样不保证重绘。落点得先读出来再传给 pokeRepaint ——
     // 它是在下一帧、"先滚 1px"之后才求值 top(),那时 el.scrollTop 已经被自己挪过了。
     const landed = el.scrollTop;
-    pokeRepaint(el, () => landed);
+    pokeRepaint(el, () => landed, undefined, markProg);
     hit.classList.add("msg-focus");
     setTimeout(() => hit?.classList.remove("msg-focus"), 2200);
     setFocusTs(null);
@@ -578,13 +588,23 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
   // 命令跑完(terminal_result)会自动刷新 git_info:push 成功则 ahead 归 0、按钮消失;失败则复位可再点。
   // commit 同理(成功后工作区干净、按钮消失),所以两个菊花共用这一处停表,不各自计时。
   useEffect(() => { setPushing(false); setCommitting(false); }, [state.git[session.id]]);
-  // 手动往上滑 = 想看历史,松开跟随;滑回底部附近(80px 内)再恢复跟随。
-  // 只在真正的滚动事件里判定 —— 自动滚到底也会触发一次,算出来仍是"贴底",不影响。
+  // 手动往上滑 = 想看历史,松开跟随;自己滑回底部附近(80px 内)再恢复跟随。
+  //
+  // 光看"离底多远"不够:流式回复时内容每帧都在长,用户往上滑的那几十像素常常还在 80px 以内,
+  // 于是跟随没断,下一帧又被钉回底 —— 滑一点、被拽回、再滑一点,就是用户说的气泡上下抖。
+  // 所以改成先看方向:scrollTop 变小 = 人在往上翻,立刻断开跟随,不管离底多近。
+  // 前提是能分清这一下是谁滚的 —— 钉底/补重绘那 1px/恢复位置都会发 scroll 事件,
+  // 尤其那 1px 是**往上**的,不排除掉就等于每次重绘都在替用户"往上翻"。
   const onTimelineScroll = () => {
     const el = timelineRef.current;
     if (!el) return;
     const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
-    stick.current = dist < 80;      // 贴底(80px 内)恢复跟随
+    const prog = performance.now() - progAt.current < 150; // 这一下是我们自己滚的,不代表用户意图
+    if (!prog) {
+      if (el.scrollTop < lastTop.current - 1) stick.current = false;
+      else if (dist < 80) stick.current = true;
+    }
+    lastTop.current = el.scrollTop;
     setShowJump(dist > 300);        // 离底 300px 以上,显示回到底部按钮
     rememberPos(el);
   };
@@ -618,10 +638,10 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
   const pokeTimer = useRef(0);
   const cancelPoke = () => { clearTimeout(pokeTimer.current); pokeRaf.current(); pokeRaf.current = () => {}; };
   const pinBottom = (el: HTMLElement, live = false) => {
-    el.scrollTop = el.scrollHeight;
+    markProg(); el.scrollTop = el.scrollHeight;
     cancelPoke();
     // ok 守卫:这一脚落在下一帧,期间用户已手动往上翻(stick=false)就别硬拽回底部
-    const poke = () => { pokeRaf.current = pokeRepaint(el, () => el.scrollHeight, () => stick.current); };
+    const poke = () => { pokeRaf.current = pokeRepaint(el, () => el.scrollHeight, () => stick.current, markProg); };
     if (live) pokeTimer.current = window.setTimeout(poke, 150);
     else poke();
     return cancelPoke;
@@ -645,11 +665,11 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
         ? el.scrollTop + (row.getBoundingClientRect().top - el.getBoundingClientRect().top) - p.off
         : p.top;
       const landed = Math.max(0, Math.min(top, el.scrollHeight - el.clientHeight));
-      el.scrollTop = landed;
+      markProg(); el.scrollTop = landed;
       setShowJump(el.scrollHeight - landed - el.clientHeight > 300);
       // 守卫用"落点没被别人挪过",不能用 stick —— 恢复的位置若正好离底 80px 内,
       // 紧跟着的 scroll 事件会把 stick 置回 true,拿 stick 当条件就会把这一脚重绘跳过去(白屏)。
-      return pokeRepaint(el, () => landed, () => Math.abs(el.scrollTop - landed) < 2);
+      return pokeRepaint(el, () => landed, () => Math.abs(el.scrollTop - landed) < 2, markProg);
     }
     stick.current = true;
     setShowJump(false);

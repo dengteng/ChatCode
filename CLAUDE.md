@@ -27,14 +27,11 @@
   node scripts/publish-pics.mjs 13-功能特性横版   # 只传这一期
   node scripts/publish-pics.mjs drop chatcode/12-   # 标删一批(前缀匹配)
   ```
-- 传到 tt-knowledge 的 `dengtengly@gmail.com` 空间，vault 路径 `chatcode/<期目录>/<文件>`。
-  **前缀只留一层 `chatcode/`**：客户端文件列表是单行截断的，前缀长了每行都是相同的那截，
-  看不出是哪一期哪张图（一开始写成 `packages/chatcode/product-intro/`，列表里全糊成一样）。
-- 客户端没有通用文件夹折叠 —— `knowledge.tsx` 里只硬编码了 `images/` 前缀折叠成
-  「文章采集的图片」，其余一律平铺。要真正的分组得改 tt-knowledge 那个项目。
-- 和 fortune-signal-app 的 `publish-apk.mjs` 同一套：`scripts/vault.mjs` 是从那边原样搬来的，
-  凭据共用 `~/.chatcode-publish.json`（已登录，别重登 —— refresh token 是轮换式的，
-  重登会把另一端顶下线）。
+- 「上传」= 复制进本机 Obsidian 库 `~/Documents/Obsidian Vault/chatcode/<期目录>/<文件>`
+  （`scripts/obsidian-vault.mjs`，`OBSIDIAN_VAULT_DIR` 可覆盖），Fast Note Sync 插件同步到 NAS 和手机。
+  Mac 上 Obsidian 得开着才会同步。2026-09-14 之前是经 public-services 的 `/api/vault` 传到 tt center，
+  知识库搬到 Obsidian 后废弃，`vault.mjs` 和登录凭据都不要了。
+  **前缀只留一层 `chatcode/`**，和 tt-center-app 的 `publish-apk.mjs`（`packages/tt-center-app/`）同一套。
 - 增量靠 `out/.published.json` 记 `mtime:size`，跟着产物走、在 `.gitignore` 里。
   图改了重跑即可，不会全量重传。
 
