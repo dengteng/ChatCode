@@ -129,7 +129,11 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
   const openCommit = (hash: string) => { setCommitView(hash); requestGitCommitDetail(session.id, hash); };
 
   if (!git) return <div className="info-scroll"><div className="muted branches-empty">{t("正在读取 Git 状态…")}</div></div>;
-  if (!git.isRepo) return <div className="info-scroll"><div className="muted branches-empty">{t("当前目录不是 Git 仓库。在活动页可关联远程仓库。")}</div></div>;
+  // git 跑不起来时别谎报"不是 Git 仓库"(目录里可能正躺着 .git):原样把 git 的报错摆出来,否则用户
+  // 只会反复点「关联」—— 关联同样是跑 git,同样失败,面板还是这句话,看着就像"关联了也不刷新"。
+  if (!git.isRepo) return <div className="info-scroll"><div className="muted branches-empty">
+    {git.error ? t("Git 命令执行失败：{{err}}", { err: git.error }) : t("当前目录不是 Git 仓库。在活动页可关联远程仓库。")}
+  </div></div>;
 
   const current = git.current || "";
   const changed = parseStatus(git.status);

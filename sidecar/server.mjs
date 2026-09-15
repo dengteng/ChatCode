@@ -637,7 +637,15 @@ function resolveCwd(sessionId) {
 async function gitInfo(cwd, sessionId) {
   const root = await execOut("git", ["rev-parse", "--show-toplevel"], cwd);
   const github = await ghInfo(cwd);
-  if (!root.ok) return { cwd, isRepo: false, local: [], remote: [], remotes: [], github, runtime: await runtimeInfo(cwd, sessionId) };
+  if (!root.ok) {
+    // 「git 自己跑不起来」和「这儿确实不是仓库」是两回事。典型:macOS 更新后没同意 Xcode 许可,
+    // 任何 git 都以 69 退出 —— 明明有 .git 的目录会被报成"不是 Git 仓库",用户点「关联」又静默失败,死循环。
+    // 认 git 的原话:非 "not a git repository" 一律当环境故障原样带给前端显示。
+    const why = (root.stderr || "").trim().split("\n")[0];
+    const broken = why && !/not a git repository/i.test(why);
+    return { cwd, isRepo: false, ...(broken ? { error: why } : {}),
+      local: [], remote: [], remotes: [], github, runtime: await runtimeInfo(cwd, sessionId) };
+  }
   const repo = root.stdout.trim();
   maybeFetch(repo); // 后台刷新 remote-tracking ref,让顶部 领先/落后 计数不至于长期过期
   const [current, status, locals, remote, remotesV, pushCfg, runtime] = await Promise.all([

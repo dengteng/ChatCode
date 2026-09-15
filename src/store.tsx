@@ -33,6 +33,9 @@ function applyMove(index: IndexEntry[], sessionId: string, groupId: string | nul
 // 跑完要给 toast 的 git 写操作。只认真正改仓库状态的这几个 —— status/log/diff 之类读命令不吵人。
 // commit 排在最前:顶栏的提交命令是 `git add -A && git commit -m '…'`,message 里带 "git push" 字样时优先按提交算。
 const GIT_OPS: [RegExp, string][] = [
+  // 「关联 Git 仓库」那条链子以 git init 打头。不认它的话,整条命令失败也只在消息流里留几行 git 报错,
+  // 顶栏/面板一声不吭 —— 用户只看得到"关联完还是没仓库"。
+  [/\bgit\s+init\b/, "关联仓库"],
   [/\bgit\s+commit\b/, "提交"],
   [/\bgit\s+push\b/, "推送"],
   [/\bgit\s+pull\b/, "拉取"],

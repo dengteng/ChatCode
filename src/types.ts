@@ -348,6 +348,9 @@ export interface GitDiffData { from: string; to: string; ahead: number; behind: 
 export interface GitCommitDetail { hash: string; parents?: string[]; author?: string; email?: string; date?: string; subject?: string; body?: string; files: GitDiffFile[]; error?: string }
 export interface GitInfo {
   cwd: string; isRepo: boolean; root?: string; current?: string; status?: string;
+  // isRepo=false 且有 error:不是"这儿没有仓库",而是 git 命令本身失败了(如没同意 Xcode 许可)。
+  // 两者的处置完全不同 —— 前者点「关联」能解决,后者点多少次都一样。
+  error?: string;
   local: GitBranch[]; remote: string[]; remotes: string[]; remoteUrl?: string;
   // 远程跟踪分支名 → 短 sha(和 GitBranch.sha 同一种短法,可直接比)
   remoteSha?: Record<string, string>;

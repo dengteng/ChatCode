@@ -807,7 +807,11 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
             </span>
           )}
         {!session.casual && !sshOn && <div className="workspace-status" title={git?.root || t("正在读取 Git 状态")}>
-          {!git ? <span className="muted">Git…</span> : !git.isRepo ? (
+          {!git ? <span className="muted">Git…</span> : git.error ? (
+            // git 本身就跑不起来(如没同意 Xcode 许可):这时给「关联」按钮是坑 —— 点了照样失败,
+            // 面板还写着"不是 Git 仓库",看上去就是"关联完不刷新"。直接把 git 的原话摆出来。
+            <span className="muted" title={git.error}>{t("Git 不可用：{{err}}", { err: git.error })}</span>
+          ) : !git.isRepo ? (
             // 本地目录还没纳入 git:给个入口,一键关联到已有的远程仓库(git init + remote add + fetch)
             <button className="branch-inline-btn git-map-trigger" title={t("把该本地目录关联到一个已有的远程 Git 仓库")}
               {...btnPress(() => setShowGitMap(true))}><GitBranch size={12} /> {t("关联 Git 仓库")}</button>
@@ -869,6 +873,9 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
             "; git branch -M \"$def\"" +
             "; git config branch.\"$def\".remote origin" +
             "; git config branch.\"$def\".merge \"refs/heads/$def\"" +
+            // 整条链子用 `;` 串着,前面全炸了最后这句 echo 照样会打印 —— 以前就是这样谎报"已关联",
+            // 而分支面板如实显示"不是 Git 仓库",两边对不上。收尾复核一次,失败就非零退出(store 顺手弹失败 toast)。
+            "; git rev-parse --git-dir >/dev/null || { echo \"✗ 关联失败,见上方 git 报错\"; exit 1; }" +
             "; echo \"✓ 已关联 origin,本地分支 $def 现在跟踪 origin/$def\"";
           runTerminal(session.id, cmd);
           setShowGitMap(false);
