@@ -35,6 +35,13 @@
 - 增量靠 `out/.published.json` 记 `mtime:size`，跟着产物走、在 `.gitignore` 里。
   图改了重跑即可，不会全量重传。
 
+## 记忆同步进 Obsidian
+- `node scripts/publish-memory.mjs`（`--dry` 试运行，可带项目目录参数）把
+  `~/.claude/projects/<编码>/memory/*.md` + `MEMORY.md` 镜像到库里 `memory/<项目名>/`。
+- **镜像**不是追加：本地删掉的记忆库里也删 —— 记忆被删多半是因为它错了，
+  留在手机上继续被当真比不同步更糟。内容没变的不写，免得 Fast Note Sync 白推一轮。
+- 记忆文件本身就是带 frontmatter 的 md，正文里的 `[[xxx]]` 正好是 Obsidian 双链，不用转换。
+
 ## 架构速记
 - 前端 Tauri webview（`src/`）连 `ws://127.0.0.1:PORT`（开发 8975 / 打包 8976）。
 - 后端 sidecar（`sidecar/server.mjs`）：每会话一个 SDK `query`，走 `@anthropic-ai/claude-agent-sdk`。
