@@ -1350,6 +1350,32 @@ function contextSize(messages) {
   return fallback;
 }
 
+// 会话的上下文窗口。手机端自己算不出来:它拿到的历史是 buildMobileHistory 裁过的气泡,而成功的
+// result(唯一带 modelUsage 的那种)在 bubbleRole 里就被滤掉了,于是窗口永远停在 200k 默认值 ——
+// 1M 会话的占比被放大 5 倍,20 万 token 就顶格报 100% 催压缩。这里在服务端算好,随 session_ctx 一起给。
+// 口径与桌面端 contextWindowOf(src/types.ts)一致:[1m] 后缀优先,modelUsage 只作兜底。
+function contextWindowOfLog(messages) {
+  const norm = (s) => String(s ?? "").replace(/\[1m\]$/, "");
+  let mainModel = null;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.type === "system" && m.subtype === "init" && m.model) { mainModel = m.model; break; }
+  }
+  // 后缀比 modelUsage 可信:modelUsage 有时仍把 1M 模型报成 200k(桌面端同名函数踩过)
+  if (mainModel && /\[1m\]/i.test(mainModel)) return 1_000_000;
+  const main = norm(mainModel);
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.type !== "result" || !m.modelUsage) continue;
+    // 先认主模型那一桶。直接取最大会让子 agent 的 haiku(200k)盖过 128k 的第三方主模型。
+    const hit = main && Object.entries(m.modelUsage).find(([k]) => norm(k) === main);
+    if (hit?.[1]?.contextWindow) return hit[1].contextWindow;
+    const ws = Object.values(m.modelUsage).map((mu) => mu?.contextWindow).filter(Boolean);
+    if (ws.length) return Math.max(...ws);
+  }
+  return 0; // 算不出来就不发,让手机端用自己的默认值
+}
+
 // ---------- 订阅限额:SDK 原生 /usage 控制接口 ----------
 // 不读取钥匙串，也不调用未公开 OAuth 接口。Claude Code 会把已经授权的订阅用量
 // 通过这个控制接口返回；API key 会明确返回 rate_limits_available:false。
@@ -2578,8 +2604,9 @@ wss.on("connection", (ws) => {
           else send(ws, { type: "history", sessionId: entry.id, messages: log });
         }
         // 重开先按日志实算的上下文体积回填进度条,别等下一轮 message_start(否则重启后占比掉到 1%)
+        // ctxWindow 一起给:手机端从裁过的历史里翻不到带 modelUsage 的 result(见 contextWindowOfLog)
         const tokens = contextSize(log);
-        if (tokens) send(ws, { type: "session_ctx", sessionId: entry.id, tokens });
+        if (tokens) send(ws, { type: "session_ctx", sessionId: entry.id, tokens, ctxWindow: contextWindowOfLog(log) || undefined });
         if (!sessions.has(entry.id)) {
           // 大会话完整恢复会吃掉可观的额度,先问一句(除非用户选过"不再询问")
           if (!m.choice && entry.sdkSessionId && tokens >= RESUME_ASK_TOKENS && !loadSettings().resumeAlwaysFull) {

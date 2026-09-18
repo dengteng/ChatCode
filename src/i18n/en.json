@@ -187,6 +187,7 @@
   "从最近关闭的会话继续": "Continue a recently closed session",
   "还没有关闭过的会话": "No closed sessions yet",
   "点一条即恢复原对话,接着上次继续": "Pick one to restore the conversation and continue",
+  "这条会话没能打开,列表里已经找不到它了": "Couldn't open that session — it's no longer in the list",
   "选择模型": "Choose model",
   "↑↓ 选择 · Tab/⏎ 补全": "↑↓ select · Tab/⏎ complete",
   "先选择项目目录": "Pick a project folder first",

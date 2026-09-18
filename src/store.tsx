@@ -871,8 +871,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       ws.onmessage = (ev) => {
         const m = JSON.parse(ev.data);
         switch (m.type) {
-          case "index":
-            dispatch({ type: "index", index: m.sessions, groups: m.groups, closed: m.closed });
+          case "index": {
+            const act: Action = { type: "index", index: m.sessions, groups: m.groups, closed: m.closed };
+            // 顺手同步进 ref,别只 dispatch:紧跟其后的 session_restored 要在新 index 里找刚恢复的那条,
+            // 而 stateRef 要等 re-render 才更新。两条消息挨着到时就会扑空 —— 条目已经搬回列表了,
+            // 却没人激活它,点「最近历史」看着像完全没反应。
+            stateRef.current = reducer(stateRef.current, act);
+            dispatch(act);
             // 重连后的第一份 index 兼作状态对表:断线期间那轮多半已经结束,turn_ended 却丢在断线里,
             // 界面就一直转圈。只在重连这一次做 —— 平时 index 可能比 user_message 先到,
             // 会把刚起的轮次错判成空闲,把待发队列提前放出去。
@@ -896,6 +901,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               for (const e of m.sessions) if (!e.casual && e.cwd) send({ type: "git_info", sessionId: e.id });
             }
             break;
+          }
           case "usage": dispatch({ type: "set_usage", usage: m.usage, kimiUsage: m.kimiUsage }); break;
           // 别端排在这个会话上的待发,只读显示。手机走 sidecar 真队列(msg_queue),别的前端走镜像(peer_pending),
           // 两条通路都指向「对端队列」这一栏 —— 本机自己的队列是前端 pending,不会经这两条回来,不重复。
@@ -1133,7 +1139,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setHomeModel(model) { dispatch({ type: "set_home_model", model }); },
     reopenSession(id) {
       const entry = stateRef.current.index.find((e) => e.id === id);
-      if (!entry) return;
+      // 找不到就别闷声退出:以前这里 return 掉,用户点了「最近历史」界面纹丝不动,
+      // 连是点丢了还是没点上都看不出来。说一声,至少知道该重试。
+      if (!entry) { toast(i18n.t("这条会话没能打开,列表里已经找不到它了"), "error"); return; }
       // 前端已有该会话 timeline 时别再要 history:否则每次重新选中已打开的会话都会把整段历史再 append 一遍 → 满屏重复消息
       const haveHistory = !!stateRef.current.sessions[id];
       if (!haveHistory) {
