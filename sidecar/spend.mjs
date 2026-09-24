@@ -31,8 +31,14 @@ export function priceTable(settings) {
 // 按 getHours() 算的话,同一笔请求在纽约的机器上会被判成完全相反的时段 —— 差价一倍,还查不出来。
 // 所以从 UTC 现推:本机时区设置错了也不影响(getUTCHours 不受它影响)。
 const PEAK_TZ_MIN = 8 * 60; // 北京 = UTC+8,无夏令时
-export function effPrice(p, now = Date.now()) {
-  const o = p?.offPeak;
+// promptTokens:本次请求输入侧的 token 合计(in + 缓存读 + 缓存写),只给 longContext 那档用。
+// 两档是独立维度,先按长度换档再判峰谷 —— 目前没有哪家两样都有,顺序无所谓,但定死一个免得日后各写各的。
+export function effPrice(p, now = Date.now(), promptTokens = 0) {
+  if (!p) return p;
+  // 长上下文档:整笔换价,不是"超出部分"。over 是含端点的下界(xAI 写的是 ">= 200k prompt tokens")。
+  const lc = p.longContext;
+  if (lc?.over && promptTokens >= lc.over) { const { over, ...rate } = lc; p = { ...p, ...rate }; }
+  const o = p.offPeak;
   if (!o?.peakHours?.length) return p;
   const d = new Date(now);
   const min = (d.getUTCHours() * 60 + d.getUTCMinutes() + PEAK_TZ_MIN) % 1440; // 北京时间的"当天第几分钟"
@@ -62,7 +68,8 @@ export function accumulate(spend, msg, table, fallbackModel = "", now = Date.now
     : [[fallbackModel, norm(msg?.usage)]];
   for (const [model, u] of parts) {
     spend.in += u.in; spend.out += u.out; spend.cacheRead += u.cacheRead; spend.cacheWrite += u.cacheWrite;
-    const p = effPrice(table.get(model), now);
+    // 长上下文档按**这一笔**的输入量判,不按会话累计 —— xAI 是按单次请求的 prompt 大小切价的。
+    const p = effPrice(table.get(model), now, u.in + u.cacheRead + u.cacheWrite);
     if (!p) {
       // 这批 token 算不出钱。标记出来,前端据此改说"含未计价部分",别让人把半截数字当全额。
       if (u.in || u.out || u.cacheRead || u.cacheWrite) spend.unpriced = true;

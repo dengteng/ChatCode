@@ -125,4 +125,24 @@ assert.ok(Math.abs(peakCost - 12) < 1e-9, `高峰 ${peakCost}`);
 assert.ok(Math.abs(offCost - 6) < 1e-9, `空闲 ${offCost}`);
 console.log("✓ 分时价接进花费累加");
 
+// 11. 长上下文分档(Grok 4.7):输入侧达到 over 就整笔换档
+const lp = { in: 2, out: 6, cacheRead: 0.5, currency: "$", longContext: { over: 200_000, in: 4, out: 12, cacheRead: 1 } };
+assert.strictEqual(effPrice(lp, t1, 199_999).in, 2, "差一个 token 没到线,还是低档");
+assert.strictEqual(effPrice(lp, t1, 200_000).in, 4, "正好到线就换档(over 含端点)");
+assert.strictEqual(effPrice(lp, t1, 200_000).out, 12, "换档连 out 一起换");
+assert.strictEqual(effPrice(lp, t1, 200_000).cacheRead, 1, "缓存读也有自己的高档价");
+assert.strictEqual(effPrice(lp, t1, 200_000).currency, "$", "longContext 不写 currency,从外层继承");
+assert.strictEqual(effPrice(lp, t1, 200_000).over, undefined, "over 是门槛不是价,别漏进计价字段");
+assert.strictEqual(effPrice(lp, t1).in, 2, "不传 token 数就按低档,别把老调用点顶成高价");
+assert.strictEqual(effPrice({ in: 1, out: 2 }, t1, 999_999).in, 1, "没有 longContext 的家原样返回");
+console.log("✓ 长上下文价按单次请求的输入量换档");
+
+// 12. 换档走的是"输入侧合计",缓存读写也算进门槛 —— 只看 in 的话长会话会一直按低档报
+const lt = new Map([["grok-4.7", lp]]);
+const justUnder = accumulate(emptySpend(), { modelUsage: { "grok-4.7": { inputTokens: 100_000, cacheReadInputTokens: 99_999 } } }, lt, "", t1).cost;
+const justOver = accumulate(emptySpend(), { modelUsage: { "grok-4.7": { inputTokens: 100_000, cacheReadInputTokens: 100_000 } } }, lt, "", t1).cost;
+assert.ok(Math.abs(justUnder - (100_000 * 2 + 99_999 * 0.5) / 1e6) < 1e-9, `低档 ${justUnder}`);
+assert.ok(Math.abs(justOver - (100_000 * 4 + 100_000 * 1) / 1e6) < 1e-9, `高档 ${justOver}`);
+console.log("✓ 门槛按 in+缓存读写 判,不是只看 in");
+
 console.log("all ok");

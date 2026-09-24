@@ -1221,6 +1221,7 @@ async function authStatus() {
 // 与 SDK 上报重复的会在下面按 key 去重,不会出现两份。
 const CLAUDE_MANUAL_MODELS = [
   { value: "claude-fable-5-1", model: "claude-fable-5-1", displayName: "Fable 5.1", description: "claude-fable-5-1 · 手动指定", provider: "claude", contextWindow: 1_000_000 },
+  { value: "claude-opus-5-5", model: "claude-opus-5-5", displayName: "Opus 5.5", description: "claude-opus-5-5 · 手动指定", provider: "claude", contextWindow: 1_000_000 },
   { value: "claude-opus-5", model: "claude-opus-5", displayName: "Opus 5", description: "claude-opus-5 · 手动指定", provider: "claude", contextWindow: 1_000_000 },
   { value: "claude-sonnet-5", model: "claude-sonnet-5", displayName: "Sonnet 5", description: "claude-sonnet-5 · 手动指定", provider: "claude" },
   { value: "claude-opus-4-8", model: "claude-opus-4-8", displayName: "Opus 4.8", description: "claude-opus-4-8 · 手动指定", provider: "claude" },

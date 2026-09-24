@@ -201,6 +201,25 @@
     ],
     "grok": [
       {
+        "model": "grok-4.7",
+        "displayName": "Grok 4.7",
+        "description": "grok-4.7 · 最强 · 看图",
+        "contextWindow": 500000,
+        "vision": true,
+        "price": {
+          "in": 2,
+          "out": 6,
+          "cacheRead": 0.5,
+          "currency": "$",
+          "longContext": {
+            "over": 200000,
+            "in": 4,
+            "out": 12,
+            "cacheRead": 1
+          }
+        }
+      },
+      {
         "model": "grok-code-fast-1",
         "displayName": "Grok Code Fast",
         "description": "grok-code-fast-1 · 编码",
@@ -209,7 +228,7 @@
       {
         "model": "grok-4",
         "displayName": "Grok 4",
-        "description": "grok-4 · 最强",
+        "description": "grok-4 · 通用",
         "contextWindow": 256000
       }
     ],

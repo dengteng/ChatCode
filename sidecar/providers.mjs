@@ -28,6 +28,10 @@
 //            没价只显示 token 数,绝不按猜的价格显示金额。用户可在设置的模型表里覆盖。
 //            分时定价的家再挂一个 price.offPeak = { in, out, cacheRead, peakHours: [[9,12],[14,18]] }:
 //            落在 peakHours 里按外层价,其余时段按 offPeak(见 spend.mjs 的 effPrice)。
+//            按**长上下文**分档的家(xAI)挂 price.longContext = { over, in, out, cacheRead }:
+//            单次请求的输入侧 token(in + 缓存读写)达到 over 就**整笔**换成这档,不是超出部分才换 ——
+//            xAI 的价目表就是按整笔切的。不做这档的话 Grok 4.7 在 200k 以上会按半价报账,
+//            而它有 500k 窗口,越界是常态不是边角料。
 //            **peakHours 一律按北京时间(UTC+8)判**,不看用户本机时区 —— 官方是拿北京时间划的窗口,
 //            按本机时区算等于给时差用户报错价(纽约的用户会在 21:00-24:00 被当成高峰)。
 // DeepSeek 的高峰时段(北京时间),三个模型共用。半开区间 [起, 止)。
@@ -144,8 +148,10 @@ export const PROVIDERS = {
     baseUrl: "https://api.x.ai/v1",
     smallFast: "grok-code-fast-1",
     models: [
+      // id 里是**点**不是连字符("grok-4.7",不是 grok-4-7)—— xAI 自己就这么发的,别顺手改成家族惯例。
+      { value: "grok/grok-4.7",         model: "grok-4.7",         displayName: "Grok 4.7",        description: "grok-4.7 · 最强 · 看图", provider: "grok", contextWindow: 500_000, vision: true, price: { in: 2, out: 6, cacheRead: 0.5, currency: "$", longContext: { over: 200_000, in: 4, out: 12, cacheRead: 1 } } },
       { value: "grok/grok-code-fast-1", model: "grok-code-fast-1", displayName: "Grok Code Fast", description: "grok-code-fast-1 · 编码", provider: "grok", contextWindow: 256_000 },
-      { value: "grok/grok-4",           model: "grok-4",           displayName: "Grok 4",          description: "grok-4 · 最强", provider: "grok", contextWindow: 256_000 },
+      { value: "grok/grok-4",           model: "grok-4",           displayName: "Grok 4",          description: "grok-4 · 通用", provider: "grok", contextWindow: 256_000 },
     ],
   },
   openai: {
