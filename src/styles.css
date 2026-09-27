@@ -2007,8 +2007,10 @@ button.footer-row:focus-visible { box-shadow: none; }
 /* 只有"消息正文"和"输入框"允许选中文本;侧栏、顶栏、状态栏、按钮这些一划就刷蓝一片,选了也没用。
    放在文件末尾:要压过前面按元素写的 user-select。抽屉里的正文也放开——那就是同一条消息的展开版,一样要能复制。 */
 .app { -webkit-user-select: none; user-select: none; }
+/* .feditor-preview:文件编辑器的 md 预览。只放开"选",不放开"改"——它不是 contenteditable,
+   划选复制不会顺带变成可编辑。独立窗口外面也包着 .app,不列进来整块预览一划都选不中。 */
 .line-user, .agent-turn-full, .agent-copy, .turn-drawer .md, .turn-drawer pre, .info-panel .md,
-.pending-text,
+.pending-text, .feditor-preview,
 .editor, input, textarea, [contenteditable="true"] { -webkit-user-select: text; user-select: text; }
 
 /* lucide 图标统一:随文字基线对齐、不被 flex 压扁;旋转态复用已有的 spin 关键帧 */

@@ -27,7 +27,7 @@
   node scripts/publish-pics.mjs 13-功能特性横版   # 只传这一期
   node scripts/publish-pics.mjs drop chatcode/12-   # 标删一批(前缀匹配)
   ```
-- 「上传」= 复制进本机 Obsidian 库 `~/Documents/Obsidian Vault/chatcode/<期目录>/<文件>`
+- 「上传」= 复制进本机 Obsidian 库 `~/Obsidian Vault/Obsidian Vault/chatcode/<期目录>/<文件>`
   （`scripts/obsidian-vault.mjs`，`OBSIDIAN_VAULT_DIR` 可覆盖），Fast Note Sync 插件同步到 NAS 和手机。
   Mac 上 Obsidian 得开着才会同步。2026-09-14 之前是经 public-services 的 `/api/vault` 传到 tt center，
   知识库搬到 Obsidian 后废弃，`vault.mjs` 和登录凭据都不要了。

@@ -63,7 +63,8 @@ assert.ok(!tagLines(`<!DOCTYPE html>\n<!-- <div> -->`).includes("data-cc-line"),
 // 行号必须在资源内联**之前**注入:内联会改变文本长度,之后再算偏移就对不上源码行了
 assert.ok(/return tagLines\(previewText\)\s*\n\s*\.replace\(LINK_RE/.test(SRC),
   "htmlDoc 必须先 tagLines 再内联资源,顺序反了行号会全错");
-assert.ok(/\}\) \+ SCROLL_RUNTIME;/.test(SRC), "htmlDoc 末尾要追加 SCROLL_RUNTIME,否则 iframe 收不到 postMessage");
+// 只认"追加了 SCROLL_RUNTIME",不管后面还跟不跟别的注入(如 SELECTABLE_STYLE)
+assert.ok(/\}\) \+ SCROLL_RUNTIME\b/.test(SRC), "htmlDoc 末尾要追加 SCROLL_RUNTIME,否则 iframe 收不到 postMessage");
 assert.ok(SRC.includes("<iframe ref={frameRef}"), "iframe 没接 ref,postMessage 发不出去");
 // 顺序由 md-preview-html.check.mjs 管(raw → sanitize → line),这儿只关心 line 还在不在
 assert.ok(/rehypePlugins=\{\[[^\]]*rehypeLine\]\}/.test(SRC), "md 预览要挂 rehypeLine,否则没有 data-cc-line 可找");

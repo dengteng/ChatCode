@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 
-export const VAULT = process.env.OBSIDIAN_VAULT_DIR || path.join(os.homedir(), 'Documents/Obsidian Vault')
+export const VAULT = process.env.OBSIDIAN_VAULT_DIR || path.join(os.homedir(), 'Obsidian Vault/Obsidian Vault')
 
 export const die = (msg) => { console.error(msg); process.exit(1) }
 

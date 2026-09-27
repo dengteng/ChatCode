@@ -71,6 +71,11 @@ addEventListener("message", function (e) {
 });
 </script>`;
 
+/** 注进 iframe 的"可选中"兜底。iframe 是独立文档,宿主的 user-select 管不到它,默认本就能选;
+ *  但被预览的页面自己常写 user-select:none(落地页防复制很常见),预览里就一个字都划不动。
+ *  这里是看稿/抄文案的地方,不是真站点,一律放开。只放开"选":sandbox 下页面本就改不了源文件。 */
+const SELECTABLE_STYLE = `<style>*{-webkit-user-select:text!important;user-select:text!important}</style>`;
+
 /** md:把 remark 的行号透到 DOM 上。react-markdown 原样透传 data-*,不用逐个组件包一层。 */
 const rehypeLine = () => (tree: any) => {
   const walk = (n: any) => {
@@ -215,7 +220,7 @@ export function FileEditor({ path, name, onClose, windowed }: { path: string; na
         const hit = got(tag, "src");
         if (!hit) return tag;
         return tag.replace(/(\bsrc\s*=\s*["'])[^"']*(["'])/i, `$1${dataUrl(hit.r, hit.data)}$2`);
-      }) + SCROLL_RUNTIME;
+      }) + SCROLL_RUNTIME + SELECTABLE_STYLE;
   }, [preview, isHtml, previewText, assets]);
 
   // md 预览里的图片:相对路径换成读回来的 base64。html 那边是改字符串(见 htmlDoc),md 走的是
