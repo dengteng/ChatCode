@@ -7,6 +7,7 @@ import { accumulate, emptySpend, priceTable, ledgerAdd, ledgerStats } from "./sp
 import { startProxy } from "./openai-proxy.mjs";
 import { capToolResults } from "./logcap.mjs";
 import { blobGet, isBlobRef, isInlineImg, externalizeImages, inlineImages } from "./blobs.mjs";
+import { createBgTracker } from "./bgtasks.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -1781,6 +1782,7 @@ function startSession(ws, { id, cwd, resume, compactFirst }) {
 
     userInterrupted: false, // 用户按了停止:本轮 result 标记为"用户终止"而非"出错"
     bgTasks: [],        // SDK 报的后台任务清单(见 background_tasks_changed);进程面板的权威来源
+    bgTrack: createBgTracker(), // 后台任务详情(标题/命令/输出路径),给手机的「后台任务」入口用,见 bgtasks.mjs
     ssh: null,          // SSH 连接 { target, port, status, cwd }
   };
   // 恢复上次的 SSH 连接信息(状态先置 disconnected,由用户点重连)
@@ -1911,6 +1913,8 @@ function spawnAgent(ws, sess, { id, resume }) {
   sess.q = q;
   sess.binReal = claudeBinReal(); // 见 deliverUserMessage:CLI 自更新后据此换进程
   sess.bgTasks = []; // 后台任务清单是 CLI 进程级的:换了进程就清零,等新进程自己再报
+  sess.bgTrack?.clear();
+  broadcast({ type: "bg_tasks", sessionId: id, tasks: [] });
 
   // 上报可用模型(/model 选择器用)。注意:init 消息要等第一条用户输入才发,不能挂在 init 上,
   // 否则新会话没发消息前列表一直空。supportedModels 是控制请求,空队列即可 resolve。
@@ -1940,7 +1944,13 @@ function spawnAgent(ws, sess, { id, resume }) {
         // agent 起的后台活(bash &、subagent…)由 SDK 报,整份替换(level 语义,不是增量事件)。
         // 这是「本会话跑起来的进程」的**权威**来源:它们正是本 sidecar 的子孙,
         // 按进程树剔自己人时会被一起剔光 —— 光靠 cwd/进程树只能猜,猜不出归属。
-        if (msg.type === "system" && msg.subtype === "background_tasks_changed") sess.bgTasks = msg.tasks ?? [];
+        const levelChanged = msg.type === "system" && msg.subtype === "background_tasks_changed";
+        if (levelChanged) sess.bgTasks = msg.tasks ?? [];
+        // 手机的「后台任务」入口:电平变了、或还在跑的任务补到了详情(命令/输出路径/进度),整份重发。
+        // 桌面前端不认 bg_tasks,它自己从时间线推(src/lib/timeline.ts liveBgTasks)。
+        const detailChanged = sess.bgTrack.observe(msg);
+        if (levelChanged || (detailChanged && sess.bgTasks.length))
+          broadcast({ type: "bg_tasks", sessionId: id, tasks: sess.bgTrack.list(sess.bgTasks) });
         // 用户主动打断也走 error 路径,与真实报错无法从 subtype 区分,靠自己记的标记
         if (msg.type === "result") {
           if (sess.userInterrupted) msg = { ...msg, aborted: true };
@@ -2477,7 +2487,18 @@ wss.on("connection", (ws) => {
         break;
       }
       case "stop_task": { // 停止 agent 起的后台任务(进程面板的「停止」按钮;这类没有 pid,杀不了)
-        sessions.get(m.sessionId)?.q?.stopTask(m.taskId).catch(() => {});
+        // 回执只有手机在看(桌面结果看下一份 background_tasks_changed);不回的话手机按了停止没任何反馈
+        const q = sessions.get(m.sessionId)?.q;
+        if (!q) { send(ws, { type: "stop_task_result", sessionId: m.sessionId, taskId: m.taskId, ok: false, error: "会话没在运行" }); break; }
+        q.stopTask(m.taskId)
+          .then(() => send(ws, { type: "stop_task_result", sessionId: m.sessionId, taskId: m.taskId, ok: true }))
+          .catch((e) => send(ws, { type: "stop_task_result", sessionId: m.sessionId, taskId: m.taskId, ok: false, error: e?.message || String(e) }));
+        break;
+      }
+      case "read_task_output": { // 手机看后台任务输出:桌面用 Tauri read_file 直读,手机只能请 sidecar 代读尾部
+        const s = sessions.get(m.sessionId);
+        const r = s ? s.bgTrack.tail(m.taskId) : { error: "会话没在运行" };
+        send(ws, { type: "task_output", sessionId: m.sessionId, taskId: m.taskId, ...r });
         break;
       }
       case "git_info": {
@@ -2644,6 +2665,8 @@ wss.on("connection", (ws) => {
         // 桌面自己就是这份快照的来源,补给它会把它自己排的又显示一遍(本地 pending + 收回来的镜像)。
         if (m.limit && peerPendingSnap.has(entry.id)) send(ws, { type: "peer_pending", sessionId: entry.id, items: peerPendingSnap.get(entry.id) });
         send(ws, { type: "perm_mode", sessionId: entry.id, mode: s?.permMode || entry.permMode || "default" });
+        // 后台任务电平只在变化时才发:任务起了之后才打开会话(或手机断线重连)的端,不补就一直不知道有任务在跑
+        send(ws, { type: "bg_tasks", sessionId: entry.id, tasks: s ? s.bgTrack.list(s.bgTasks) : [] });
         if (entry.spend) send(ws, { type: "spend", sessionId: entry.id, spend: entry.spend }); // 花费是落盘累计,重开要接上
         if (s?.ssh) send(ws, { type: "ssh_status", sessionId: entry.id, ssh: pubSsh(s.ssh) }); // 恢复 SSH 显示
         // 模型列表只在 spawnAgent 时推过一次;重开(尤其是换个客户端连上来)要补一份,
