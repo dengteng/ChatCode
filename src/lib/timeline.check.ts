@@ -4,7 +4,7 @@
 // 这些函数以前埋在 Chat.tsx 里,只能靠 scripts/*.check.mjs 拿正则扫源码 —— 那种断言锁的是
 // "代码长什么样",改个变量名就红,真算错了反倒不吭声。搬到 lib/ 就是为了换成下面这种真调用。
 import {
-  aggregateRound, failedEdits, groupTurns, latestTodos, nextSteps, pendingBgTasks, permWaitMs,
+  aggregateRound, failedEdits, groupTurns, latestTodos, liveBgTasks, nextSteps, pendingBgTasks, permWaitMs,
   turnCopyText, usedMemories, usedSkillsMcp, workFeed,
 } from "./timeline";
 import type { TimelineItem } from "../types";
@@ -100,6 +100,27 @@ const t = ((k: string, p?: any) => (p ? `${k}:${JSON.stringify(p)}` : k)) as any
     "子 agent 的启动标记要认");
   eq(pendingBgTasks([it({ kind: "tool", name: "Bash", isError: true, result: "Command running in background with ID: e1. Output is being written to: /tmp/e.log" })], t).length, 0,
     "报错的工具压根没跑起来");
+
+  // 前台命令跑超时被挪去后台:SDK 回的是另一种句式,漏认的话输入框按钮还在(打断)、气泡却是完成态
+  const moved = pendingBgTasks([it({
+    kind: "tool", name: "Bash", ts: 9, input: { description: "补完东芝详情" },
+    result: "Command did not complete within its 600s timeout and was moved to the background (ID: b9o9d8ck6). Output is being written to: /tmp/tasks/b9o9d8ck6.output",
+  })], t);
+  eq([moved.length, moved[0]?.id, moved[0]?.out], [1, "b9o9d8ck6", "/tmp/tasks/b9o9d8ck6.output"], "超时转后台的任务也要认,id 不能带上右括号");
+}
+
+// ---------- liveBgTasks:以 SDK 电平为准,整条时间线只负责补标题 ----------
+{
+  const old = it({ kind: "tool", name: "Bash", ts: 1, input: { description: "等 OCR 结束" },
+    result: "Command running in background with ID: old1. Output is being written to: /tmp/old1.log" });
+  const peek = it({ kind: "tool", name: "Read", input: { file_path: "/tmp/tasks/old1.output" }, result: "[3/49] …" });
+  const cur = it({ kind: "tool", name: "Bash", ts: 5, input: { description: "补完详情" },
+    result: "Command did not complete within its 600s timeout and was moved to the background (ID: new2). Output is being written to: /tmp/new2.log" });
+  const live = liveBgTasks([old, peek, cur], ["old1", "new2"], t);
+  eq(live.map((k) => k.id), ["old1", "new2"], "前几轮起的任务还在跑也要列出来,不能只看本轮");
+  eq(live[0].title, "等 OCR 结束", "中途读过一次输出不等于跑完 —— 电平说在跑就还在跑");
+  eq(liveBgTasks([old], ["zz9"], t).map((k) => [k.id, k.title]), [["zz9", "后台任务"]], "时间线里找不到启动记录的也要占一行,不能漏");
+  eq(liveBgTasks([old, cur], [], t).length, 0, "电平为空就是没有在跑的,时间线里发起过的一律不算");
 }
 
 // ---------- nextSteps:末尾那行「本轮建议」 ----------

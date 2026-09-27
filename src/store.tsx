@@ -1393,7 +1393,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   // bgWait 闩锁兜底。闩锁只由「后台任务续跑的 result」清,可后台任务退出后 SDK 不一定再起一轮 ——
   // 那条 result 永远不来,闩锁就把待发队列锁死:界面上 status 是 idle、后台任务条也没了(bgTasks 已被
-  // 空电平清空),用户看着完全空闲,发出去的每条消息却都进排队区,只能手点「不等了」才解得开。
+  // 空电平清空),用户看着完全空闲,发出去的每条消息却都进排队区,只能手点「打断」才解得开。
   // 空闲 + 无后台任务连续 20 秒就认定续跑不会来了,自己放闸(真有续跑时它的第一条 assistant 就把
   // status 打回 running,计时器随即被下面的 else 撤掉)。
   // 计时器按会话存在 ref 里,不用 effect 的 cleanup 重建:state.sessions 会被别的会话的流式刷新

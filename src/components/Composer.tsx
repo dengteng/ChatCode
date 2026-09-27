@@ -1443,8 +1443,8 @@ export function Composer({ session }: { session: Session }) {
           <div className="input-actions">
             {busy && (
               <button className="input-btn interrupt"
-                title={session.status === "running" ? t("打断 (⌘C)") : t("不等后台任务了,立刻放行待发消息")}
-                onMouseDown={(e) => { e.preventDefault(); interrupt(session.id); }}><span className="stop-dot" /> {session.status === "running" ? t("打断") : t("不等了")}</button>
+                title={session.status === "running" ? t("打断 agent,停止本轮回复") : t("不再等后台任务,立刻放行待发消息(后台进程不会被结束,可在进程面板停止)")}
+                onMouseDown={(e) => { e.preventDefault(); interrupt(session.id); }}><span className="stop-dot" /> {t("打断")}</button>
             )}
             {!isEmpty && (
               <button className="input-btn sched" ref={schedBtnRef} title={t("定时发送")}

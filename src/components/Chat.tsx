@@ -15,7 +15,7 @@ import { btnPress } from "../lib/utils";
 // 时间线派生的纯函数(回合分组、活流、结算、待办、记忆引用、后台任务、建议行)全在 lib/timeline.ts,
 // 有 lib/timeline.check.ts 直接跑真断言。这里只管把它们的结果画出来。
 import {
-  aggregateRound, failedEdits, groupTurns, latestTodos, nextSteps, pendingBgTasks, permWaitMs,
+  aggregateRound, failedEdits, groupTurns, latestTodos, liveBgTasks, nextSteps, permWaitMs,
   stripSummary, summarizeInput, turnCopyText, turnText, usedMemories, usedSkillsMcp, workFeed,
   type BgTask, type FeedLine, type MemRef, type TodoRow,
 } from "../lib/timeline";
@@ -525,6 +525,14 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
   // 那些时候 timeline 没变,下游按 [items] memo 的活(usedSkillsMcp / usedMemories)就全能跳过。
   // 每次重建数组的话它们的依赖永远是新引用,写了 memo 也不命中。
   const turns = useMemo(() => groupTurns(session.timeline), [session.timeline]);
+  // 最后一张卡的"后台等待"态跟输入框打断按钮用同一个判据(Composer 的 busy = running || bgWait),
+  // 两处各判各的就会出现输入框还在等、气泡却已是完成态。任务清单按 SDK 电平列,扫整条时间线补标题
+  // (前几轮起的任务也算在等)。只在真在等时扫,平时不碰 timeline。
+  const waitingBg = session.status !== "running" && (!!session.bgWait || (session.bgTasks?.length ?? 0) > 0);
+  const liveTasks = useMemo(
+    () => (waitingBg ? liveBgTasks(session.timeline, session.bgTasks ?? [], t) : NO_BG),
+    [waitingBg, session.timeline, session.bgTasks, t],
+  );
   // 授权回调:每张卡片都收这个 prop。留在下面那个 IIFE 里的话每次渲染都是新函数,
   // AgentTurnCard 的 memo 直接失效(props 不等)。
   const onPerm = useCallback<OnPermission>((rid, b, msg, remember) => respondPermission(session.id, rid, b, msg, remember), [session.id, respondPermission]);
@@ -982,11 +990,10 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
             }
             const isActive = running && gi === lastAgent;
             // 只有"最后一轮 + 会话已停"才可能悬着后台任务:一旦下一轮开始,它就不是最后一组了,提示自然消失。
-            // 还要 ∩ SDK 的 background_tasks_changed 电平(session.bgTasks):正则扫时间线只能看出"发起过",
-            // 任务跑完的自动完成通知被 sidecar 当输入回显丢了,不交集就会永远显示"运行中"。
-            const liveBg = new Set(session.bgTasks ?? []);
+            // 清单以 SDK 的 background_tasks_changed 电平(session.bgTasks)为准,见上面 liveTasks。
             // 空数组用同一个常量:每轮现造一个 [] 的话,几十张历史卡片的 memo 全被这一个 prop 顶掉。
-            const bgWait = !running && gi === lastAgent ? pendingBgTasks(g.agent, t).filter((t) => liveBg.has(t.id)) : NO_BG;
+            const lastIdle = !running && gi === lastAgent;
+            const bgWait = lastIdle ? liveTasks : NO_BG;
             const turnModel = groupModel(g.agent); // 该回合实际所用模型(会话中途切模型时逐条不同)
             return (
               <div key={gi} className="msg-row msg-row-agent" data-ts={g.agent[0]?.ts ?? anchor}>
@@ -999,7 +1006,7 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
                       每次上下文一变就把整排卡片顶掉重渲。 */}
                   {isActive
                     ? <ActiveAgentBubble items={g.agent} running showFull={false} cwd={session.termCwd || session.cwd} liveInput={session.contextTokens} anchorTs={anchor} turnStart={anchor || undefined} retry={session.apiRetry} onShowTurn={onShowTurn} onPermission={onPerm} agentLabel={t("{{name}} 的回复", { name: nameOf(turnModel) })} />
-                    : <AgentTurnCard items={g.agent} running={false} showFull cwd={session.termCwd || session.cwd} anchorTs={anchor} bgWait={bgWait} onShowTurn={onShowTurn} onPermission={onPerm} agentLabel={t("{{name}} 的回复", { name: nameOf(turnModel) })} />}
+                    : <AgentTurnCard items={g.agent} running={false} showFull cwd={session.termCwd || session.cwd} anchorTs={anchor} bgWait={bgWait} waiting={lastIdle && waitingBg} onShowTurn={onShowTurn} onPermission={onPerm} agentLabel={t("{{name}} 的回复", { name: nameOf(turnModel) })} />}
                   {/* 建议 chips(左)和复制/贴回按钮(右)同占一行 —— 分两行时按钮被 chips 顶得离气泡老远 */}
                   {!isActive && (
                     <div className="turn-foot">
@@ -1248,7 +1255,7 @@ const BAD_IMAGE = /image in the conversation could not be processed/i;
 // memo:一条长会话里这张卡片有几十份,而每次流式 chunk 都会重渲整个 <Chat>。
 // 历史轮的 props 全是稳定值(见调用处注释),浅比较一过就整棵子树跳过 —— 卡片里有 Markdown 整树渲染,
 // 这是聊天页最贵的一块。注意别再往它的 props 里塞每次新建的对象/数组/箭头函数,塞一个就全废。
-const AgentTurnCard = memo(function AgentTurnCard({ items, running, showFull, cwd, liveInput, anchorTs, bgWait, turnStart, retry, onShowTurn, onPermission, agentLabel }: { items: TimelineItem[]; running: boolean; showFull?: boolean; cwd: string; liveInput?: number; anchorTs: number; bgWait?: BgTask[]; turnStart?: number; retry?: ApiRetry | null; onShowTurn: (ts: number) => void; onPermission: OnPermission; agentLabel?: string }) {
+const AgentTurnCard = memo(function AgentTurnCard({ items, running, showFull, cwd, liveInput, anchorTs, bgWait, waiting, turnStart, retry, onShowTurn, onPermission, agentLabel }: { items: TimelineItem[]; running: boolean; showFull?: boolean; cwd: string; liveInput?: number; anchorTs: number; bgWait?: BgTask[]; waiting?: boolean; turnStart?: number; retry?: ApiRetry | null; onShowTurn: (ts: number) => void; onPermission: OnPermission; agentLabel?: string }) {
   const { t } = useTranslation();
   const { authAction } = useApi();
   // 详情按钮。放这儿而不是让调用方传 () => onShowTurn(anchor):那样每轮都是新函数,memo 白做。
@@ -1294,8 +1301,10 @@ const AgentTurnCard = memo(function AgentTurnCard({ items, running, showFull, cw
     return out;
   }, [items, showFull]);
   const hasBody = segments.length > 0;
+  // waiting:任务清单已空、正等续跑那一小会儿(bgWait 闩锁还没清)也保持等待态,
+  // 否则会闪一下完成态再跳回运行中。
   return (
-    <div className={`agent-turn-card bubble ${running ? "running" : ""} ${bgWait?.length ? "bg-wait" : ""}`}>
+    <div className={`agent-turn-card bubble ${running ? "running" : ""} ${bgWait?.length || waiting ? "bg-wait" : ""}`}>
       <div className="agent-turn-body">
         {running
           ? <WorkBody items={items} elapsed={elapsed} liveInput={liveInput} />

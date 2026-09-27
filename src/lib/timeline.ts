@@ -46,17 +46,19 @@ export function failedEdits(items: TimelineItem[]) {
 // 必须带真正的启动标记才算 —— 光看裸 "agentId:" 会误命中 agent 正文/报告里提到该词的工具结果
 // (分析类会话尤其常见),塞进一个永不被消费的假 id,提示就永远挂着。
 // shell 任务顺带给出输出文件路径(边跑边追加,是唯一能看到的真实进度);子 agent 只给 agentId。
-const BG_START = /running in background with ID:\s*([\w-]+)\.\s*Output is being written to:\s*(\S+?)\.?(?=\s|$)|Async agent launched[\s\S]*?agentId:\s*([\w-]+)/g;
+// shell 有两种启动写法:主动开后台回 "running in background with ID: x. Output …";
+// 前台命令跑超时被 SDK 挪去后台回 "moved to the background (ID: x). Output …"。
+// 后者只认前一种的话,长命令超时转后台那轮会被当成已结束 —— 输入框还在等、气泡却是完成态。
+const BG_START = /(?:running in background with ID:\s*|moved to the background \(ID:\s*)([\w-]+)\)?\.\s*Output is being written to:\s*(\S+?)\.?(?=\s|$)|Async agent launched[\s\S]*?agentId:\s*([\w-]+)/g;
 export type BgTask = { id: string; kind: "shell" | "agent"; title: string; body: string; out?: string; ts?: number };
-export function pendingBgTasks(items: TimelineItem[], t: T): BgTask[] {
+// 按顺序列出这些条目里启动过的后台任务(不判是否已了结)。
+type ToolItem = Extract<TimelineItem, { kind: "tool" }>;
+function bgStarts(items: TimelineItem[], t: T, onTool?: (it: ToolItem, found: BgTask[]) => void): BgTask[] {
   const found: BgTask[] = [];
-  const done = new Set<string>();
   for (const it of items) {
     if (it.kind !== "tool") continue;
     if (it.isError || it.result === undefined) continue; // 被拦下/报错的读取不算了结(它压根没跑)
-    // 本轮内又去读/停过它(Read tasks/<id>.output、TaskOutput、TaskStop…),说明已经了结,不算悬着
-    const inp = JSON.stringify(it.input ?? "");
-    for (const task of found) if (inp.includes(task.id)) done.add(task.id);
+    onTool?.(it, found);
     const res = typeof it.result === "string" ? it.result : JSON.stringify(it.result);
     const cmd = String(it.input?.command ?? "");
     // ts = 启动它的那次工具调用的时间,给 bar 上的"已跑 Xmin"当起点(后台任务本身不回时间)
@@ -64,7 +66,28 @@ export function pendingBgTasks(items: TimelineItem[], t: T): BgTask[] {
       ? { id: m[1], kind: "shell", title: String(it.input?.description || cmd.split("\n")[0] || t("后台命令")), body: cmd, out: m[2], ts: it.ts }
       : { id: m[3], kind: "agent", title: String(it.input?.description || it.input?.subagent_type || t("子 agent")), body: String(it.input?.prompt ?? ""), ts: it.ts });
   }
+  return found;
+}
+export function pendingBgTasks(items: TimelineItem[], t: T): BgTask[] {
+  const done = new Set<string>();
+  // 本轮内又去读/停过它(Read tasks/<id>.output、TaskOutput、TaskStop…),说明已经了结,不算悬着
+  const found = bgStarts(items, t, (it, sofar) => {
+    const inp = JSON.stringify(it.input ?? "");
+    for (const task of sofar) if (inp.includes(task.id)) done.add(task.id);
+  });
   return found.filter((task) => !done.has(task.id));
+}
+
+// 会话此刻真正在跑的后台任务,以 SDK 的电平(liveIds = session.bgTasks)为准,时间线只负责补标题/输出路径。
+// 和 pendingBgTasks 的区别:
+//   · 扫整条时间线,不只本轮 —— 前几轮起的任务还没跑完时,会话照样在等它(输入框的打断按钮还在);
+//   · 不用"读过就算了结"那条推断 —— 读一次输出多半只是看进度;电平说还在跑就是还在跑。
+// 时间线里找不到启动记录的 id(日志截断、格式没认出来)也照列一条占位,宁可标题朴素,不能漏掉。
+export function liveBgTasks(items: TimelineItem[], liveIds: string[], t: T): BgTask[] {
+  if (!liveIds.length) return [];
+  const byId = new Map<string, BgTask>();
+  for (const task of bgStarts(items, t)) byId.set(task.id, task); // 同一 id 以最后一次为准
+  return liveIds.map((id) => byId.get(id) ?? { id, kind: "shell" as const, title: t("后台任务"), body: id });
 }
 
 // 本轮用到的 skill / MCP。running = 工具还没回结果,界面上那枚标签要转圈。
