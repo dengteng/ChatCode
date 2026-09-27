@@ -1833,6 +1833,10 @@ function bumpSpend(id, msg) {
 }
 
 // 创建/重建 agent 的 SDK query。重建时旧循环因 generation 过期而不触发清理。
+// CLAUDE_BIN 当下指向的真实文件(native installer 的 ~/.local/bin/claude 是指向 versions/<版本> 的 symlink)。
+// 没设 CLAUDE_BIN(开发态走 node_modules 里的 CLI)返回 null,不参与换版本检测。
+const claudeBinReal = () => { try { return CLAUDE_BIN ? fs.realpathSync(CLAUDE_BIN) : null; } catch { return null; } };
+
 function spawnAgent(ws, sess, { id, resume }) {
   const queue = makeInputQueue();
   sess.queue = queue;
@@ -1905,6 +1909,7 @@ function spawnAgent(ws, sess, { id, resume }) {
     },
   });
   sess.q = q;
+  sess.binReal = claudeBinReal(); // 见 deliverUserMessage:CLI 自更新后据此换进程
   sess.bgTasks = []; // 后台任务清单是 CLI 进程级的:换了进程就清零,等新进程自己再报
 
   // 上报可用模型(/model 选择器用)。注意:init 消息要等第一条用户输入才发,不能挂在 init 上,
@@ -2116,6 +2121,11 @@ function deliverUserMessage(ws, m) {
       send(ws, { type: "system_note", sessionId: m.sessionId, text: hadHistory
         ? tr("📁 已将 agent 工作目录切到 {{target}}(在该目录重开上下文,之前的对话记忆不带过来)", { target })
         : tr("📁 已将 agent 工作目录设为 {{target}}", { target }) });
+    } else if (sess.binReal && claudeBinReal() !== sess.binReal) {
+      // CLI 自更新了:native installer 把 ~/.local/bin/claude 改指到新版本,但常驻的 query 进程
+      // 还跑着旧二进制 —— 新模型会被它 400 "version X or newer is required",同时新开的会话却能用。
+      // 原地 resume 重启换上新版本再发这条,上下文不丢。
+      await restartAgent(ws, sess, m.sessionId, true);
     }
     if (!isSlashCmd) sess.hadUserTurn = true; // 光发 /compact 这类命令不算"聊过":上下文里没有可保的内容
     // git 现状放在**用户文本之后**:它可能有几十行,搁最前面会把用户真正问的那句挤到很远;
@@ -2149,7 +2159,7 @@ async function restartAgentCwd(ws, sess, id, newCwd, keepRunning = false) {
 
 // 原地重启 agent(不换目录),用来让新装/启用的插件 · Skills · MCP 生效。
 // resume 回原 sdkSessionId 保住上下文;工作中的会话不该调这个(前端只对空闲会话触发)。
-async function restartAgent(ws, sess, id) {
+async function restartAgent(ws, sess, id, keepRunning = false) {
   const oldQ = sess.q;
   const oldQueue = sess.queue;
   const oldLoop = sess.loopDone;
@@ -2159,7 +2169,7 @@ async function restartAgent(ws, sess, id) {
   oldQueue?.end();
   await Promise.race([oldLoop, new Promise((r) => setTimeout(r, 5000))]);
   spawnAgent(ws, sess, { id, resume });
-  endTurn(id, sess);
+  if (!keepRunning) endTurn(id, sess);
 }
 
 // ---------- 本地预览快照 ----------

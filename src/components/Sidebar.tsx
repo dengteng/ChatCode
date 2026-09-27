@@ -144,8 +144,15 @@ export function Sidebar({ onSearch, onOpenSettings, update, onShowUpdate }:
     setEditId(null);
   };
 
-  // 连上服务后拉一次账号状态,底部实时显示已登录/未登录
-  useEffect(() => { if (state.connected) requestAuthStatus(); }, [state.connected]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 连上服务后拉一次账号状态,之后每次窗口回到前台再拉 —— 登录/登出是去系统终端跑 `claude` 完成的
+  // (设置页和聊天里的「去登录」都走这条),耗时不可预测,切回 ChatCode 就是"终端里已弄完"的唯一可靠信号。
+  // 挂在常驻的侧栏而不是设置页:原来只有设置页开着才监听,从聊天里去登录的回来后状态不刷新。
+  useEffect(() => {
+    if (!state.connected) return;
+    requestAuthStatus();
+    window.addEventListener("focus", requestAuthStatus);
+    return () => window.removeEventListener("focus", requestAuthStatus);
+  }, [state.connected]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 最近 10 个不重复项目目录(index[0] 最新),新建会话时可一键复用
   const recentDirs = [...new Set(state.index.map((e) => e.cwd).filter(Boolean))].slice(0, 10);

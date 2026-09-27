@@ -38,15 +38,8 @@ export function Settings({ onClose, initialTab, theme, onPickTheme, customBg, cu
   const { t } = useTranslation();
   const { state, requestAuthStatus, listSshHosts } = useStore();
   const [tab, setTab] = useState<Tab>((initialTab as Tab) || "account");
-  // 打开时拉一次真实状态;之后每次窗口回到前台再拉一次 ——
-  // 登录/登出是去系统终端跑 `claude login` 完成的,耗时不可预测(远超 auth_action 后那次 4s 补拉),
-  // 用户切回 ChatCode 的这一刻就是"终端里已经弄完了"的唯一可靠信号。
-  useEffect(() => {
-    const pull = () => requestAuthStatus();
-    pull(); listSshHosts();
-    window.addEventListener("focus", pull);
-    return () => window.removeEventListener("focus", pull);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // 打开时拉一次真实状态;窗口回到前台的补拉由常驻的侧栏负责(Sidebar.tsx),这里不再重复挂。
+  useEffect(() => { requestAuthStatus(); listSshHosts(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="settings-shade" onMouseDown={onClose}>
