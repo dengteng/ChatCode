@@ -1,15 +1,19 @@
 // 后台任务上报自检(端到端,要真起一轮 agent):
 //   mkdir -p /tmp/rt-e2e
-//   CHAT_CODE_TOKEN=t123 CHAT_CODE_PORT=8977 CHAT_CODE_DATA_DIR=/tmp/rt-check-data node sidecar/server.mjs &
-//   node sidecar/bgtask.e2e.mjs
+//   env -u CHAT_CODE_RELAY_URL -u CHAT_CODE_HOST_TOKEN CHAT_CODE_TOKEN=t123 CHAT_CODE_PORT=18977 \
+//     CHAT_CODE_DATA_DIR=/tmp/rt-check-data node sidecar/server.mjs &
+//   E2E_PORT=18977 E2E_TOKEN=t123 node sidecar/bgtask.e2e.mjs
+//
+// 端口和令牌不读 CHAT_CODE_PORT / CHAT_CODE_TOKEN,理由同 bgtask-mobile.e2e.mjs(读了会连上真 App)。
 //
 // 验的是:agent 自己起的后台活(Bash run_in_background)必须出现在「会话进程」列表里。
 // 它们是本 sidecar 的子孙,按 cwd/进程树认领时会连同 MCP 一起被剔光 —— 只能靠 SDK 报的
 // background_tasks_changed 认。这条链路断了不会报错,只会"列表里啥也没有",所以要端到端跑。
 import WebSocket from "ws";
 
-const PORT = process.env.CHAT_CODE_PORT || "8977";
-const TOKEN = process.env.CHAT_CODE_TOKEN || "t123";
+const PORT = process.env.E2E_PORT || "18977";
+const TOKEN = process.env.E2E_TOKEN || "t123";
+if (["8975", "8976"].includes(PORT)) { console.log(`✗ ${PORT} 是 ChatCode 本体的端口,自检只能连临时 sidecar`); process.exit(1); }
 const CWD = process.env.E2E_CWD || "/tmp/rt-e2e";
 
 const ws = new WebSocket(`ws://127.0.0.1:${PORT}?token=${TOKEN}`);

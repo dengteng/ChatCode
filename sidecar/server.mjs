@@ -87,6 +87,16 @@ function safeEnv(extra) {
   for (const [k, v] of Object.entries(extra || {})) if (v != null) out[k] = v;
   return out;
 }
+// 给 agent(claude CLI)的 env。它要拿用户的 provider key 干活,不能套 safeEnv 全挡;
+// 但 ChatCode 自己的变量它一个都用不上,必须剔掉 —— CLI 会把 env 原样传给 Bash 工具,之前 agent 进程里
+// 能直接读到 CHAT_CODE_PORT/TOKEN(自检脚本读了它们,把测试会话建进了真 app)、RELAY_URL/HOST_TOKEN
+// (测试 sidecar 冒充本机登上 relay),一条 `env` 还会把令牌带进聊天记录。
+const OWN_ENV = /^(CHAT_CODE_|DT_NOTIFY_)/;
+function agentEnv(extra) {
+  const out = {};
+  for (const [k, v] of Object.entries(process.env)) if (!OWN_ENV.test(k)) out[k] = v;
+  return { ...out, ...extra };
+}
 
 // ---------- SSH:ControlMaster 持久连接,每命令复用(仅密钥认证,无 TTY 不支持交互式密码) ----------
 const sshSock = (id) => path.join(SSH_DIR, `${id}.sock`);
@@ -1422,6 +1432,7 @@ function ensureUsageProbe() {
       options: {
         cwd: os.homedir(),
         ...(CLAUDE_BIN ? { pathToClaudeCodeExecutable: CLAUDE_BIN } : {}),
+        env: agentEnv(), // 探针不跑工具,但同一份 CLI,一样不给 ChatCode 自己的令牌
         stderr: () => {},
       },
     });
@@ -1885,7 +1896,7 @@ function spawnAgent(ws, sess, { id, resume }) {
       // 保留 Claude Code 默认系统提示,仅追加「每轮留一句小结」的约定,供 commit 汇总用(不额外多跑一次 LLM)
       systemPrompt: { type: "preset", preset: "claude_code", append: sysAppend },
       ...(CLAUDE_BIN ? { pathToClaudeCodeExecutable: CLAUDE_BIN } : {}), // 打包版必须显式给
-      ...(Object.keys(provEnv).length ? { env: { ...process.env, ...provEnv } } : {}),
+      env: agentEnv(provEnv), // 始终显式给:不给的话 SDK 用整份 process.env,ChatCode 自己的令牌就漏给 agent 了
       ...(resume ? { resume } : {}),
       ...(savedModel && savedModel !== "default" ? { model: modelArg(savedModel) } : {}),
       // 权限模式跟模型同理:进 options 才能"启动即生效"。启动后补 setPermissionMode 会在 CLI

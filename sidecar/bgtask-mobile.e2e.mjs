@@ -17,6 +17,7 @@ import WebSocket from "ws";
 
 const PORT = process.env.E2E_PORT || "18977";
 const TOKEN = process.env.E2E_TOKEN || "t123";
+if (["8975", "8976"].includes(PORT)) { console.log(`✗ ${PORT} 是 ChatCode 本体的端口,自检只能连临时 sidecar`); process.exit(1); }
 const CWD = process.env.E2E_CWD || "/tmp/rt-e2e";
 const url = `ws://127.0.0.1:${PORT}?token=${TOKEN}`;
 
