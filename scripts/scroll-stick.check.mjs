@@ -22,6 +22,13 @@ assert.ok(SRC.includes('markProg(); hit.scrollIntoView({ block: "center" });'), 
 // pokeRepaint 两帧都要复查 ok:只查第一帧的话,"第一帧还贴底、第二帧人已翻上去"会把人拽回底部
 assert.equal((SRC.match(/if \(!ok\(\)\) return;/g) || []).length, 2, "pokeRepaint 必须两帧各查一次 ok");
 
+// 连续钉底(live)时位置没挪就不补重绘那 1px:气泡封顶后流式每顿一下都会补一脚,就是工作中气泡的"微微颤"
+assert.ok(/const before = el\.scrollTop;\s*\n\s*markProg\(\); el\.scrollTop = el\.scrollHeight;/.test(SRC), "钉底前要先记下原位置");
+assert.ok(SRC.includes("if (live && Math.abs(el.scrollTop - before) < 1) return cancelPoke;"),
+  "live 钉底没挪动时必须跳过 pokeRepaint,否则工作中的气泡每次流式停顿都抖 1px");
+// 跳过的判定要在 cancelPoke() 之前:前面真挪过、已排着的那一脚不能被一次"没挪动"给取消掉(否则白屏)
+assert.ok(SRC.indexOf("return cancelPoke;\n    cancelPoke();") > 0, "没挪动的分支不能取消已排队的重绘");
+
 // 规则本体(照抄):返回新的 stick
 const decide = (stick, { scrollTop, lastTop, dist, prog }) => {
   if (prog) return stick;

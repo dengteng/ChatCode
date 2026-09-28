@@ -646,7 +646,13 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
   const pokeTimer = useRef(0);
   const cancelPoke = () => { clearTimeout(pokeTimer.current); pokeRaf.current(); pokeRaf.current = () => {}; };
   const pinBottom = (el: HTMLElement, live = false) => {
+    const before = el.scrollTop;
     markProg(); el.scrollTop = el.scrollHeight;
+    // 连续钉底时位置根本没挪(气泡已封顶、新内容只在活流里滚,scrollHeight 不变):没发生编程式跳转
+    // 就不会白屏,补那一脚纯属多余 —— 而且它就是画面上唯一的位移。光靠上面的 150ms 静默不够:
+    // 流式输出一顿一顿的,每顿超过 150ms 就抖一下,工作中的气泡看着就是一直在微微颤。
+    // 已排着的那一脚(前面真挪过)不取消,照常补。
+    if (live && Math.abs(el.scrollTop - before) < 1) return cancelPoke;
     cancelPoke();
     // ok 守卫:这一脚落在下一帧,期间用户已手动往上翻(stick=false)就别硬拽回底部
     const poke = () => { pokeRaf.current = pokeRepaint(el, () => el.scrollHeight, () => stick.current, markProg); };
