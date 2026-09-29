@@ -478,7 +478,9 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 .term-more:active:not(:disabled) { transform: translateX(-50%) scale(0.94); }
 @starting-style { .term-more { opacity: 0; } }
 /* 终端卡片右上角按钮组(引用 / 复制):悬停显形(与代码块 .code-copy 一致的观感) */
-.term-acts { position: absolute; top: 0; right: 0; display: flex; gap: 4px; }
+/* z-index 必须有:按钮组在 DOM 里排在正文前面,而正文里的 .term-out-wrap 也是定位元素,同层按 DOM 顺序
+ * 后画的盖在上面 —— 正文一长到右上角,字就压住了按钮图标。 */
+.term-acts { position: absolute; top: 0; right: 0; z-index: 1; display: flex; gap: 4px; }
 .term-copy { display: inline-flex; align-items: center; gap: 3px; padding: 2px 6px; font-size: 11px; line-height: 1.4; color: var(--muted); background: color-mix(in srgb, var(--panel) 88%, transparent); border: 1px solid var(--border); border-radius: 5px; cursor: pointer; opacity: 0; transition: opacity .12s ease, color .12s ease; }
 .term-card:hover .term-copy { opacity: 1; }
 .term-copy:hover { color: var(--text); border-color: var(--accent); }
@@ -496,8 +498,10 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 .term-bang { flex-shrink: 0; display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 4px; background: var(--accent); color: #fff; font-weight: 700; font-size: 11px; }
 .term-cmd-text { color: var(--accent); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; }
 /* padding-right 常驻给右上角按钮组留位:悬停才显形的按钮不能占流,否则整列会重排、文字抖动 */
-/* --acts-w 是右上角那组按钮占的宽,正文靠它让位。76 → 102:多了个"顺便问问"图标按钮(≈22px + 4px gap) */
-.line-term-out { position: relative; flex-direction: column; align-items: stretch; --acts-w: 102px; padding-right: var(--acts-w);
+/* --acts-w 是右上角那组按钮占的宽,正文靠它让位。76 → 102:多了个"顺便问问"图标按钮(≈22px + 4px gap)。
+ * 102 → 112:实测三个按钮 24 + 24 + 51(「复制」带字)+ 两个 4px 间隔 ≈ 107,102 不够,长行末尾会伸进按钮底下;
+ * 再留 5px 让字和按钮之间有缝。点完变「已复制」会再宽 11px,那一下靠上面的 z-index 盖住,不为它常驻让位。 */
+.line-term-out { position: relative; flex-direction: column; align-items: stretch; --acts-w: 112px; padding-right: var(--acts-w);
   background: var(--panel); border: 1px solid var(--border); margin: 5px 0 10px; }
 .line-term-out .term-out { margin-top: 0; }
 .line-term-out:hover .term-copy { opacity: 1; }
