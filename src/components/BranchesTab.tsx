@@ -597,7 +597,10 @@ function BranchSpine({ local, remote, remoteSha, remotes, pushSpecs, current, fo
               只有"全部 lane 都还能推"时才挂在主干上:推完其中一个远端后主干那颗还留着,读起来像"还要全推一次",
               可它实际只推剩下那条 —— 那种时候按钮该待在剩下那条分叉线上。 */}
           {b && (showPull || (showPush && pushLanes.length === lanes.length)) && (
-            <div className="brz-ops" style={{ left: cx, top: FORK_Y / 2 }}>
+            // 单远端且正对聚焦 chip 时,主干 + 下落段是一条直线,药丸放整条线中点;
+            // 只放主干中点(17px)会挤在线的最上头、贴着 pull 箭头。有分叉时只能待在主干上,往下让开箭头。
+            <div className="brz-ops" style={{ left: cx, top: lanes.length === 1 && Math.abs(tabX(0) - cx) < 1
+              ? FAN_H / 2 : FORK_Y / 2 + (anyPull ? 4 : 0) }}>
               {showPush && pushLanes.length === lanes.length && (
                 <button className="brz-push"
                   title={pushLanes.length > 1
