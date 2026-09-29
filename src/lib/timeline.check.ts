@@ -121,6 +121,10 @@ const t = ((k: string, p?: any) => (p ? `${k}:${JSON.stringify(p)}` : k)) as any
   eq(live[0].title, "等 OCR 结束", "中途读过一次输出不等于跑完 —— 电平说在跑就还在跑");
   eq(liveBgTasks([old], ["zz9"], t).map((k) => [k.id, k.title]), [["zz9", "后台任务"]], "时间线里找不到启动记录的也要占一行,不能漏");
   eq(liveBgTasks([old, cur], [], t).length, 0, "电平为空就是没有在跑的,时间线里发起过的一律不算");
+  // Workflow 的启动句式漏认时,弹窗只剩一条标题「后台任务」、正文是裸 id 的占位
+  const wf = it({ kind: "tool", name: "Workflow", ts: 7, input: { script: "…" },
+    result: "Workflow launched in background. Task ID: wwgpmhwtt\nSummary: 电视品牌技术目录：9 批 18 个品牌\nTranscript dir: /tmp/wf" });
+  eq(liveBgTasks([wf], ["wwgpmhwtt"], t).map((k) => [k.kind, k.title]), [["workflow", "电视品牌技术目录：9 批 18 个品牌"]], "Workflow 任务要认出来,标题取 Summary");
 }
 
 // ---------- nextSteps:末尾那行「本轮建议」 ----------

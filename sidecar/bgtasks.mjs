@@ -11,7 +11,7 @@
 import { openSync, readSync, fstatSync, closeSync } from "fs";
 
 // 与 src/lib/timeline.ts 的 BG_START 保持一致(那边的注释解释了三种启动写法)
-const BG_START = /(?:running in background with ID:\s*|moved to the background \(ID:\s*)([\w-]+)\)?\.\s*Output is being written to:\s*(\S+?)\.?(?=\s|$)|Async agent launched[\s\S]*?agentId:\s*([\w-]+)/g;
+const BG_START = /(?:running in background with ID:\s*|moved to the background \(ID:\s*)([\w-]+)\)?\.\s*Output is being written to:\s*(\S+?)\.?(?=\s|$)|Async agent launched[\s\S]*?agentId:\s*([\w-]+)|Workflow launched in background\. Task ID:\s*([\w-]+)(?:\s*\nSummary:\s*([^\n]+))?/g;
 const MAX_TOOL_INPUTS = 300; // 只为反查「哪次工具调用起的这个任务」,留最近这些就够
 
 const resultText = (c) =>
@@ -49,7 +49,8 @@ export function createBgTracker(now = () => Date.now()) {
           const cmd = String(input.command ?? "");
           changed = m[1]
             ? merge(m[1], { kind: "shell", title: String(input.description || cmd.split("\n")[0] || "后台命令"), body: cmd, out: m[2], startedAt: call?.ts })
-            : merge(m[3], { kind: "agent", title: String(input.description || input.subagent_type || "子 agent"), body: String(input.prompt ?? ""), startedAt: call?.ts });
+            : m[3] ? merge(m[3], { kind: "agent", title: String(input.description || input.subagent_type || "子 agent"), body: String(input.prompt ?? ""), startedAt: call?.ts })
+            : merge(m[4], { kind: "workflow", title: m[5]?.trim() || "工作流", startedAt: call?.ts });
         }
       }
     } else if (msg.type === "system" && msg.task_id) {

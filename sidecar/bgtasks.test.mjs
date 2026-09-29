@@ -29,6 +29,14 @@ const toolResult = (id, content, extra = {}) => ({ type: "user", message: { cont
   assert.equal(x.title, "sleep 999", "没 description 用命令首行");
 }
 
+// Workflow:标题取启动回执里的 Summary
+{
+  const t = createBgTracker();
+  t.observe(toolResult("tu9", "Workflow launched in background. Task ID: w1\nSummary: 电视品牌技术目录\nTranscript dir: /tmp/wf"));
+  const [x] = t.list([{ task_id: "w1", task_type: "local_workflow" }]);
+  assert.deepEqual([x.kind, x.title], ["workflow", "电视品牌技术目录"]);
+}
+
 // 子 agent:标题取 description,正文是 prompt;task_progress/notification 补摘要
 {
   const t = createBgTracker();

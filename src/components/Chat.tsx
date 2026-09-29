@@ -1423,7 +1423,7 @@ function BgTaskItem({ task }: { task: BgTask }) {
   const lines = out ? out.replace(/\s+$/, "").split("\n") : [];
   return <div className="bgt-item">
     <div className="bgt-item-head">
-      <span className={`bgt-badge ${task.kind}`}>{task.kind === "shell" ? t("命令") : t("子 agent")}</span>
+      <span className={`bgt-badge ${task.kind}`}>{task.kind === "shell" ? t("命令") : task.kind === "workflow" ? t("工作流") : t("子 agent")}</span>
       <b title={task.title}>{task.title}</b>
       {task.out && <span className="muted">{t("{{n}} 行输出", { n: lines.length })}</span>}
     </div>

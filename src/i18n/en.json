@@ -677,6 +677,7 @@
   " · 输出 {{n}} tokens": " · output {{n}} tokens",
   "后台命令": "Background command",
   "子 agent": "sub-agent",
+  "工作流": "workflow",
   "命令": "Command",
   "{{n}} 行输出": "{{n}} lines of output",
   "（还没有输出）": "(no output yet)",
