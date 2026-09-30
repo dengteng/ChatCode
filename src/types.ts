@@ -326,7 +326,7 @@ export interface ProviderState {
 }
 // 设置:账号登录状态(Claude + GitHub + 其他 LLM provider)
 export interface AuthStatus {
-  claude: { installed: boolean; loggedIn: boolean; method: string; version?: string }; // version = 实际在用的 claude CLI 版本
+  claude: { installed: boolean; loggedIn: boolean; method: string; version?: string; credAt?: number }; // version = 实际在用的 claude CLI 版本;credAt = 钥匙串里凭证最后写入时刻(ms),判"登录失效后重新登录过没有"
 
   github: { installed: boolean; loggedIn: boolean; account?: string; detail?: string };
   providers?: Record<string, ProviderState>;

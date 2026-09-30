@@ -1178,15 +1178,24 @@ async function claudeAuth() {
   const version = installed ? (await execOut(bin, ["--version"])).stdout.trim().split(/\s+/)[0] || "" : "";
   if (process.env.ANTHROPIC_API_KEY) return { installed, loggedIn: true, method: "API Key（环境变量）", version };
   if (!installed) return { installed, loggedIn: false, method: "", version };
-  const auth = await execOut(bin, ["auth", "status", "--json"]);
+  const [auth, credAt] = await Promise.all([execOut(bin, ["auth", "status", "--json"]), claudeCredAt()]);
   try {
     const st = JSON.parse(auth.stdout);
     const method = st.authMethod === "oauth_token" ? "Claude 订阅（OAuth）" : st.authMethod || "";
-    return { installed, loggedIn: !!st.loggedIn, method, version };
+    return { installed, loggedIn: !!st.loggedIn, method, version, credAt };
   } catch {
     // CLI 报错/非 JSON(网络挂、CLI 异常)按未登录处理,设置面板不至于卡死在旧状态
     return { installed, loggedIn: false, method: "", version };
   }
+}
+// Claude 凭证最后一次写入的时刻(ms,拿不到为 0)。聊天里「登录已失效」那条要靠它判断"之后重新登录过没有":
+// `auth status` 的 loggedIn 不顶用 —— 令牌在服务端过期时本地凭证还在,它照样报已登录。
+// 重新登录(或成功刷新令牌)都会重写这条钥匙串,mdat 随之更新。只读属性,不带 -w/-g,取不到密钥本身也不会弹授权框。
+async function claudeCredAt() {
+  if (process.platform !== "darwin") return 0;
+  const r = await execOut("security", ["find-generic-password", "-s", "Claude Code-credentials"]);
+  const m = r.stdout.match(/"mdat"<timedate>=\S+\s+"(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)(\d\d)Z/);
+  return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]) : 0;
 }
 // GitHub 登录态:gh auth status(全局,与工作目录无关)。
 async function githubAuth() {
@@ -1963,6 +1972,9 @@ function spawnAgent(ws, sess, { id, resume }) {
         if (levelChanged || (detailChanged && sess.bgTasks.length))
           broadcast({ type: "bg_tasks", sessionId: id, tasks: sess.bgTrack.list(sess.bgTasks) });
         // 用户主动打断也走 error 路径,与真实报错无法从 subtype 区分,靠自己记的标记
+        // 登录失效:记下来,下一条消息先重启 CLI(见 user_message)。常驻的 CLI 进程这时手里是过期令牌,
+        // 用户去终端重新登录后,新会话能用、这个会话却不一定肯重读钥匙串 —— 重启换进程最稳,resume 上下文不丢。
+        if (msg.type === "assistant" && msg.error === "authentication_failed") sess.authFailed = true;
         if (msg.type === "result") {
           if (sess.userInterrupted) msg = { ...msg, aborted: true };
           else { const title = loadIndex().find((e) => e.id === id)?.title || tr("会话"); pushOverlay(tr("任务完成"), tr("{{title}} 已完成", { title })); } // 用户主动中断不推
@@ -2146,6 +2158,10 @@ function deliverUserMessage(ws, m) {
       // CLI 自更新了:native installer 把 ~/.local/bin/claude 改指到新版本,但常驻的 query 进程
       // 还跑着旧二进制 —— 新模型会被它 400 "version X or newer is required",同时新开的会话却能用。
       // 原地 resume 重启换上新版本再发这条,上下文不丢。
+      await restartAgent(ws, sess, m.sessionId, true);
+    } else if (sess.authFailed) {
+      // 上一轮登录失效:换个 CLI 进程再发,让它重新读凭证(见 authentication_failed 那处)
+      sess.authFailed = false;
       await restartAgent(ws, sess, m.sessionId, true);
     }
     if (!isSlashCmd) sess.hadUserTurn = true; // 光发 /compact 这类命令不算"聊过":上下文里没有可保的内容

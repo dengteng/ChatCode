@@ -533,6 +533,11 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
     () => (waitingBg ? liveBgTasks(session.timeline, session.bgTasks ?? [], t) : NO_BG),
     [waitingBg, session.timeline, session.bgTasks, t],
   );
+  // 登录失效条的「重发」:只挂在最后一轮。走 ref 转一手,传给 memo 卡片的是永远不变的同一个函数 ——
+  // 直接传现造的箭头函数,最后那张卡每次渲染都会被顶掉重渲。
+  const claudeCredAt = state.auth?.claude?.credAt ?? 0;
+  const resendRef = useRef<() => void>(() => {});
+  const onResendLast = useCallback(() => resendRef.current(), []);
   // 授权回调:每张卡片都收这个 prop。留在下面那个 IIFE 里的话每次渲染都是新函数,
   // AgentTurnCard 的 memo 直接失效(props 不等)。
   const onPerm = useCallback<OnPermission>((rid, b, msg, remember) => respondPermission(session.id, rid, b, msg, remember), [session.id, respondPermission]);
@@ -1000,6 +1005,14 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
             // 空数组用同一个常量:每轮现造一个 [] 的话,几十张历史卡片的 memo 全被这一个 prop 顶掉。
             const lastIdle = !running && gi === lastAgent;
             const bgWait = lastIdle ? liveTasks : NO_BG;
+            if (lastIdle) {
+              let u = gi - 1;
+              while (u >= 0 && !("user" in groups[u])) u--;
+              const ug = u >= 0 ? (groups[u] as { user: any }).user : null;
+              resendRef.current = ug
+                ? () => sendOrQueue(ug.blocks, (ug.blocks as any[]).filter((b) => b.type === "text").map((b) => b.text).join("").trim())
+                : () => {};
+            }
             const turnModel = groupModel(g.agent); // 该回合实际所用模型(会话中途切模型时逐条不同)
             return (
               <div key={gi} className="msg-row msg-row-agent" data-ts={g.agent[0]?.ts ?? anchor}>
@@ -1012,7 +1025,7 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
                       每次上下文一变就把整排卡片顶掉重渲。 */}
                   {isActive
                     ? <ActiveAgentBubble items={g.agent} running showFull={false} cwd={session.termCwd || session.cwd} liveInput={session.contextTokens} anchorTs={anchor} turnStart={anchor || undefined} retry={session.apiRetry} onShowTurn={onShowTurn} onPermission={onPerm} agentLabel={t("{{name}} 的回复", { name: nameOf(turnModel) })} />
-                    : <AgentTurnCard items={g.agent} running={false} showFull cwd={session.termCwd || session.cwd} anchorTs={anchor} bgWait={bgWait} waiting={lastIdle && waitingBg} onShowTurn={onShowTurn} onPermission={onPerm} agentLabel={t("{{name}} 的回复", { name: nameOf(turnModel) })} />}
+                    : <AgentTurnCard items={g.agent} running={false} showFull cwd={session.termCwd || session.cwd} anchorTs={anchor} bgWait={bgWait} waiting={lastIdle && waitingBg} authCredAt={claudeCredAt} onResend={lastIdle ? onResendLast : undefined} onShowTurn={onShowTurn} onPermission={onPerm} agentLabel={t("{{name}} 的回复", { name: nameOf(turnModel) })} />}
                   {/* 建议 chips(左)和复制/贴回按钮(右)同占一行 —— 分两行时按钮被 chips 顶得离气泡老远 */}
                   {!isActive && (
                     <div className="turn-foot">
@@ -1261,7 +1274,7 @@ const BAD_IMAGE = /image in the conversation could not be processed/i;
 // memo:一条长会话里这张卡片有几十份,而每次流式 chunk 都会重渲整个 <Chat>。
 // 历史轮的 props 全是稳定值(见调用处注释),浅比较一过就整棵子树跳过 —— 卡片里有 Markdown 整树渲染,
 // 这是聊天页最贵的一块。注意别再往它的 props 里塞每次新建的对象/数组/箭头函数,塞一个就全废。
-const AgentTurnCard = memo(function AgentTurnCard({ items, running, showFull, cwd, liveInput, anchorTs, bgWait, waiting, turnStart, retry, onShowTurn, onPermission, agentLabel }: { items: TimelineItem[]; running: boolean; showFull?: boolean; cwd: string; liveInput?: number; anchorTs: number; bgWait?: BgTask[]; waiting?: boolean; turnStart?: number; retry?: ApiRetry | null; onShowTurn: (ts: number) => void; onPermission: OnPermission; agentLabel?: string }) {
+const AgentTurnCard = memo(function AgentTurnCard({ items, running, showFull, cwd, liveInput, anchorTs, bgWait, waiting, turnStart, retry, authCredAt, onResend, onShowTurn, onPermission, agentLabel }: { items: TimelineItem[]; running: boolean; showFull?: boolean; cwd: string; liveInput?: number; anchorTs: number; bgWait?: BgTask[]; waiting?: boolean; turnStart?: number; retry?: ApiRetry | null; authCredAt?: number; onResend?: () => void; onShowTurn: (ts: number) => void; onPermission: OnPermission; agentLabel?: string }) {
   const { t } = useTranslation();
   const { authAction } = useApi();
   // 详情按钮。放这儿而不是让调用方传 () => onShowTurn(anchor):那样每轮都是新函数,memo 白做。
@@ -1330,10 +1343,17 @@ const AgentTurnCard = memo(function AgentTurnCard({ items, running, showFull, cw
         <div className="bubble-warn">{t("⚠ 本轮 {{n}} 处文件编辑全部失败,改动可能未落地", { n: failedEdits(items).failed })}</div>
       )}
       {settle?.isError && items.some((it) => it.kind === "agent_text" && AUTH_FAIL.test(it.text)) && (
-        <div className="bubble-warn auth-fail">
-          <span>{t("Claude 登录已失效。重新授权后再发一次这条消息。")}</span>
-          <button className="primary" {...btnPress(() => authAction("claude", "login"))}>{t("去登录")}</button>
-        </div>
+        // 凭证在这轮失败之后被重写过 = 已重新登录(切回窗口时侧栏会刷新 auth_status,这条跟着变)。
+        // 只认凭证时刻、不认 loggedIn:令牌在服务端过期时本地凭证还在,loggedIn 一直是 true。
+        (authCredAt ?? 0) > (items[items.length - 1]?.ts ?? 0)
+          ? <div className="bubble-warn auth-fail ok">
+              <span>{onResend ? t("Claude 已重新登录,重发这条消息即可继续。") : t("Claude 已重新登录。")}</span>
+              {onResend && <button className="primary" {...btnPress(onResend)}>{t("重发")}</button>}
+            </div>
+          : <div className="bubble-warn auth-fail">
+              <span>{t("Claude 登录已失效。重新授权后再发一次这条消息。")}</span>
+              <button className="primary" {...btnPress(() => authAction("claude", "login"))}>{t("去登录")}</button>
+            </div>
       )}
       {/* 坏图:重试无用,必须先把它从历史里弄走。不写清楚的话用户只会一直重发同一条消息。 */}
       {items.some((it) => it.kind === "agent_text" && BAD_IMAGE.test(it.text)) && (
