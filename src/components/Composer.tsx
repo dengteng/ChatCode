@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Folder, File, CornerLeftUp, RotateCw, ChevronDown, X, Sparkles, Clock } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Session } from "../types";
-import { BUILTIN_COMMANDS, modelLabel, modelRow, modelProvider, providerBrand, contextWindowOf, canSendImage, sessionProvider, sessionModel } from "../types";
+import { BUILTIN_COMMANDS, modelLabel, modelRow, modelProvider, providerBrand, contextWindowOf, canSendImage, sessionProvider, sessionModel, shortModelName } from "../types";
 import { ModelLogo } from "./Avatar";
 import { useStore, fetchBlob, sessionBusy, PENDING_MAX } from "../store";
 import { UsageBar, rollReset, fmtReset } from "./UsageBar";
@@ -1238,6 +1238,16 @@ export function Composer({ session }: { session: Session }) {
   // "忙" = 正在跑,或上一轮挂着没退出的后台任务(轮次未了结)。判据必须和 submit 里入队那处一致 ——
   // 之前打断按钮只认 running,于是"挂着后台任务"这个态既发不出消息(入队)又打不断(按钮不渲染),
   // 后台任务如果永不退出(比如 agent 起了个常驻进程),待发队列就死在那儿,没有任何出口。
+  // 会话被「拒答回退」锁在了别的模型上:最近一次回退的 to 正是当前在用的模型。用户切回原模型后
+  // init 报的就不再是 to,标记自然消失。只在时间线变了时倒着扫一遍。
+  const fallbackTo = useMemo(() => {
+    for (let i = session.timeline.length - 1; i >= 0; i--) {
+      const it = session.timeline[i];
+      if (it.kind === "fallback") return it;
+    }
+    return null;
+  }, [session.timeline]);
+  const latched = !!fallbackTo && (session.info.model ?? "").replace(/\[.*$/, "") === fallbackTo.to;
   const busy = session.status === "running" || !!session.bgWait;
   const hasActions = busy || !isEmpty;
 
@@ -1467,6 +1477,9 @@ export function Composer({ session }: { session: Session }) {
         <button className="model-switch" ref={modelBtnRef} title={t("切换模型（同 /model）")}
           onMouseDown={(e) => { e.preventDefault(); openModelMenu(); }}>
           <strong>{modelLabel(session) || t("模型连接中…")}</strong>
+          {latched && fallbackTo && (
+            <span className="model-fallback-tag" title={t("{{from}} 拒答过本会话的请求,服务端改由 {{to}} 作答,之后整个会话沿用它。点这里可切回。", { from: shortModelName(fallbackTo.from), to: shortModelName(fallbackTo.to) })}>{t("已回退")}</span>
+          )}
           <ChevronDown size={12} />
         </button>
         <UsageBar session={session} auto={!!state.autoAllow[session.id]}

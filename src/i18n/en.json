@@ -816,5 +816,9 @@
   "模型列表拉取失败：{{err}}": "Couldn't fetch the model list: {{err}}",
   "网络不通": "network unreachable",
   "模型列表已更新（{{n}} 个）": "Model list updated ({{n}} models)",
-  "模型列表已是最新": "Model list is already up to date"
+  "模型列表已是最新": "Model list is already up to date",
+  "所选模型的安全过滤拦下了这条请求,服务端改由另一个模型作答。之后整个会话会沿用它,可在输入框下方的模型菜单切回。": "The selected model's safety filter blocked this request, so the server answered with another model. The session stays on it from now on; switch back from the model menu below the input box.",
+  "{{from}} 拒答了这条请求,已由 {{to}} 接手;本会话后续沿用 {{to}},可在下方模型菜单切回": "{{from}} declined this request and {{to}} took over; the session stays on {{to}} — switch back from the model menu below",
+  "{{from}} 拒答过本会话的请求,服务端改由 {{to}} 作答,之后整个会话沿用它。点这里可切回。": "{{from}} declined a request in this session, so the server switched to {{to}} and the session stays on it. Click to switch back.",
+  "已回退": "Fallback"
 }

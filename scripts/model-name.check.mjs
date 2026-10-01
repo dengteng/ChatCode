@@ -12,8 +12,11 @@ assert.ok(SRC.includes("export function modelName"), "types.ts 的 modelName 已
 assert.ok(SRC.includes('x.value !== "default"'), "必须排除 default 自身,否则会匹配到自己绕回英文原名");
 assert.ok(SRC.includes('replace(/\\s*[(（].*$/'), "必须剥掉被引用模型自己的括号补充,否则括号会套两层");
 assert.ok(SRC.includes('i18n.t("默认")'), "「默认」必须走 t(),否则不跟界面语言");
-assert.ok(SRC.includes("function modelVer"), "types.ts 的 modelVer 已漂移");
-assert.ok(SRC.includes("/^\\d{1,2}$/.test(s)"), "版本段必须限死 1~2 位,否则尾部日期戳会被当成版本号");
+// modelVer 已搬到 lib/modelname.ts(零依赖,node 自检能直接跑),types.ts 从那里引
+const VER_SRC = readFileSync("src/lib/modelname.ts", "utf8");
+assert.ok(SRC.includes('import { modelVer } from "./lib/modelname"'), "types.ts 要从 lib/modelname 引 modelVer");
+assert.ok(VER_SRC.includes("export function modelVer"), "lib/modelname.ts 的 modelVer 已漂移");
+assert.ok(VER_SRC.includes("/^\\d{1,2}$/.test(s)"), "版本段必须限死 1~2 位,否则尾部日期戳会被当成版本号");
 
 const t = (s) => (s === "默认" ? "Default" : s); // 模拟 en 界面
 const modelVer = (id) => {

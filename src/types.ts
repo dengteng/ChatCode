@@ -1,4 +1,6 @@
 import i18n from "./i18n";
+import { modelVer } from "./lib/modelname";
+export { shortModelName } from "./lib/modelname";
 
 // 前端统一事件模型 —— 有意对齐 ACP 的概念,以后接 Codex/Gemini 时在 sidecar 层加适配器即可
 export type ContentBlock =
@@ -15,6 +17,10 @@ export type TimelineItem =
   | { kind: "tool"; id: string; name: string; input: any; result?: any; isError?: boolean; ts: number; model?: string }
   | { kind: "permission"; requestId: string; toolName: string; input: any; suggestions?: PermissionSuggestion[]; blockedPath?: string; decision?: "allow" | "deny"; answer?: string; remembered?: string; ts: number; decidedTs?: number }
   | { kind: "system"; text: string; ts: number }
+  // 服务端「拒答回退」:所选模型的安全过滤拦下了这条请求,改由另一个模型作答(SDK 在 assistant 正文里给一个
+  // {type:"fallback",from,to} 块)。CLI 随后把整个会话锁在 to 上,直到用户手动切回 —— 不显示的话,
+  // 用户只看到底部模型名悄悄变了,以为是 App 擅自换模型。
+  | { kind: "fallback"; from: string; to: string; ts: number }
   | { kind: "terminal"; command: string; cwd: string; cwdChanged?: boolean; output: string; exitCode: number; pending?: boolean; ts: number } // ! 前缀的 shell 命令
   // /compact 压缩上下文。SDK 只给开始(system/status)与结束(system/compact_boundary),没有百分比,
   // 所以运行中是不定态动画;结束后用 pre/post token 数说明压掉了多少。
@@ -178,18 +184,8 @@ export function modelLabel(session: Session): string {
   return def ? modelRow(session.models, def).name : "";
 }
 
-// 模型 id → 版本号("claude-opus-5[1m]" → "5"、"claude-haiku-4-5-20251001" → "4.5")。
-// SDK 报的 displayName 只有家族名("Opus"/"Sonnet"),可同叫 Opus 的 4.8 和 5 是两个模型 ——
-// 用户想知道的正是"几代",光看家族名等于没说。
-// 切法:先扔掉 [1m] 这类后缀,按 - 切,跳过 "claude" 和家族名,吃连续的 1~2 位数字段。
-// 尾巴上的日期戳(20251001)就是靠"最多 2 位"停下的,不然会得到 "4.5.20251001"。
-// 非 claude 家族(deepseek-v4-pro 之类)第三段就不是纯数字,直接返回空 —— 不猜,原样用 displayName。
-function modelVer(id?: string): string {
-  const segs = (id ?? "").replace(/\[.*$/, "").split("-").slice(2);
-  const v: string[] = [];
-  for (const s of segs) { if (!/^\d{1,2}$/.test(s)) break; v.push(s); }
-  return v.join(".");
-}
+// modelVer / shortModelName 搬到了 lib/modelname.ts:这里一 import 就会拉起 i18n(要 localStorage),
+// 放在这儿的纯函数在 node 自检里跑不起来。
 
 // displayName 补上版本号。版本插在家族名之后、括号补充之前:"Opus (1M context)" → "Opus 5 (1M context)"。
 // 判重只看括号前那截:"(1M context)" 里的 1 是上下文窗口不是版本号,整串判数字会误判成"已带版本"。

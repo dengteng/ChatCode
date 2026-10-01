@@ -594,6 +594,8 @@ function handleSdkMessage(dispatch: (a: Action) => void, id: string, msg: any, l
           dispatch({ type: "patch", id, patch: { todos: block.input.todos } }); // d: 任务进度
         }
         dispatch({ type: "append", id, item: { kind: "tool", id: block.id, name: block.name, input: block.input, ts, model } });
+      } else if (block.type === "fallback" && block.from?.model && block.to?.model) {
+        dispatch({ type: "append", id, item: { kind: "fallback", from: block.from.model, to: block.to.model, ts } });
       }
     }
     if (live) dispatch({ type: "patch", id, patch: { status: "running" } });

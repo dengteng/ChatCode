@@ -7,7 +7,7 @@ import { rawHtml } from "../lib/mdhtml";
 import { invoke } from "@tauri-apps/api/core";
 import { openPath, openUrl, revealPath } from "../native";
 import type { ApiRetry, PermissionSuggestion, ResumeChoice, ResumePrompt, Session, TimelineItem } from "../types";
-import { modelDisplayName } from "../types";
+import { modelDisplayName, shortModelName } from "../types";
 import { useStore, useApi, fetchBlob, sessionBusy, PENDING_MAX, type RememberChoice } from "../store";
 import { applyEdgeGlow } from "../lib/edgeGlow";
 import { pushCmd } from "../lib/gitcmd";
@@ -1283,6 +1283,7 @@ const AgentTurnCard = memo(function AgentTurnCard({ items, running, showFull, cw
   const settle = useMemo(() => running ? null : aggregateRound(items, anchorTs || items[0]?.ts), [running, items, anchorTs]);
   // 待授权请求就地放在卡片内部,不另起一张卡。AskUserQuestion 改在输入框处强制作答,不塞进卡片。
   const pendingPerms = items.filter((it): it is Extract<TimelineItem, { kind: "permission" }> => it.kind === "permission" && !it.decision && it.toolName !== "AskUserQuestion");
+  const fallback = items.find((it): it is Extract<TimelineItem, { kind: "fallback" }> => it.kind === "fallback");
   const now = useNow(running);
   // 本轮起点=组内首个动作。但请求还没通时(API 在退避重发)组里一个 item 都没有,
   // 光靠 items[0] 会让"本轮耗时"死钉在 0s —— 退避几分钟界面上依然是 0s,看着像整个卡死了。
@@ -1329,6 +1330,12 @@ const AgentTurnCard = memo(function AgentTurnCard({ items, running, showFull, cw
           ? <WorkBody items={items} elapsed={elapsed} liveInput={liveInput} />
           : <><b>{agentLabel || t("回复")}</b>{hasBody ? null : <small>{workSummary(items, t)}</small>}</>}
       </div>
+      {fallback && (
+        <div className="bubble-note model-fallback" title={t("所选模型的安全过滤拦下了这条请求,服务端改由另一个模型作答。之后整个会话会沿用它,可在输入框下方的模型菜单切回。")}>
+          <TriangleAlert size={13} />
+          <span>{t("{{from}} 拒答了这条请求,已由 {{to}} 接手;本会话后续沿用 {{to}},可在下方模型菜单切回", { from: shortModelName(fallback.from), to: shortModelName(fallback.to) })}</span>
+        </div>
+      )}
       {hasBody && (
         <div className="agent-turn-full md agent-copy">
           {segments.map((s, i) => s.kind === "text"

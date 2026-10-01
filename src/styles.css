@@ -2620,3 +2620,9 @@ body.dragging-session, body.dragging-session * { cursor: grabbing !important; us
 .depgate-msg.run { color: var(--muted); font-family: Menlo, monospace; font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .depgate-msg.ok { color: var(--accent); }
 .depgate-msg.err { color: var(--amber); }
+
+/* 拒答回退:回复卡片里的说明条(琥珀色,提示而非报错)+ 底部模型名旁的「已回退」小标 */
+.bubble-note.model-fallback { display: flex; align-items: center; gap: 6px; margin: 6px 0 2px; padding: 5px 9px; border-radius: 6px; font-size: 12px; line-height: 1.4;
+  color: #b06d00; background: color-mix(in srgb, #d58b00 10%, transparent); border: 1px solid color-mix(in srgb, #d58b00 30%, transparent); }
+.bubble-note.model-fallback svg { flex: none; }
+.model-fallback-tag { margin-left: 4px; padding: 0 5px; border-radius: 4px; font-size: 10.5px; line-height: 16px; color: #b06d00; background: color-mix(in srgb, #d58b00 14%, transparent); }
