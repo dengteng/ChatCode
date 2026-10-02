@@ -1732,7 +1732,7 @@ function TermRows({ item, cwd }: { item: Extract<TimelineItem, { kind: "terminal
             </> : <>
               {hasOut && <TermOut text={item.output} cwd={cwd} />}
               {item.cwdChanged && <div className="term-cwd-line"><Folder size={13} /> {t("现在在 {{dir}}", { dir: shortCwd })}</div>}
-              {!hasOut && !item.cwdChanged && item.exitCode === 0 && <div className="term-cwd-line muted">{t("（无输出）")}</div>}
+              {!hasOut && !item.cwdChanged && <div className="term-cwd-line muted">{t("（无输出）")}</div>}
             </>}
           </div>
         </div>
@@ -1879,7 +1879,7 @@ function Item({ item, cwd, onPermission, onAgentClick, agentLabel }: { item: Tim
             </> : <>
               {hasOut && <TermOut text={item.output} cwd={cwd} />}
               {item.cwdChanged && <div className="term-cwd-line"><Folder size={13} /> {t("现在在 {{dir}}", { dir: shortCwd })}</div>}
-              {!hasOut && !item.cwdChanged && item.exitCode === 0 && <div className="term-cwd-line muted">{t("（无输出）")}</div>}
+              {!hasOut && !item.cwdChanged && <div className="term-cwd-line muted">{t("（无输出）")}</div>}
             </>}
           </div>
         </div>
