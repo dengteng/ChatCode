@@ -1239,12 +1239,14 @@ async function authStatus() {
 // 后端给账户开了就能直接用;没开则选中后 SDK 报错——和 CLI 里 `claude --model claude-opus-5` 同理。
 // SDK 的 supportedModels 没上报、或还没问到时的兜底表。首装第一次用(缓存也空)时,菜单至少有这几个。
 // 与 SDK 上报重复的会在下面按 key 去重,不会出现两份。
+// 手工表的档位:supportedModels 没上报时菜单照样能切 effort(haiku 不支持 effort,不写)
+const EFFORT_ALL = ["low", "medium", "high", "xhigh", "max"];
 const CLAUDE_MANUAL_MODELS = [
-  { value: "claude-fable-5-1", model: "claude-fable-5-1", displayName: "Fable 5.1", description: "claude-fable-5-1 · 手动指定", provider: "claude", contextWindow: 1_000_000 },
-  { value: "claude-opus-5-5", model: "claude-opus-5-5", displayName: "Opus 5.5", description: "claude-opus-5-5 · 手动指定", provider: "claude", contextWindow: 1_000_000 },
-  { value: "claude-opus-5", model: "claude-opus-5", displayName: "Opus 5", description: "claude-opus-5 · 手动指定", provider: "claude", contextWindow: 1_000_000 },
-  { value: "claude-sonnet-5", model: "claude-sonnet-5", displayName: "Sonnet 5", description: "claude-sonnet-5 · 手动指定", provider: "claude" },
-  { value: "claude-opus-4-8", model: "claude-opus-4-8", displayName: "Opus 4.8", description: "claude-opus-4-8 · 手动指定", provider: "claude" },
+  { value: "claude-fable-5-1", model: "claude-fable-5-1", displayName: "Fable 5.1", description: "claude-fable-5-1 · 手动指定", provider: "claude", contextWindow: 1_000_000, supportedEffortLevels: EFFORT_ALL },
+  { value: "claude-opus-5-5", model: "claude-opus-5-5", displayName: "Opus 5.5", description: "claude-opus-5-5 · 手动指定", provider: "claude", contextWindow: 1_000_000, supportedEffortLevels: EFFORT_ALL },
+  { value: "claude-opus-5", model: "claude-opus-5", displayName: "Opus 5", description: "claude-opus-5 · 手动指定", provider: "claude", contextWindow: 1_000_000, supportedEffortLevels: EFFORT_ALL },
+  { value: "claude-sonnet-5", model: "claude-sonnet-5", displayName: "Sonnet 5", description: "claude-sonnet-5 · 手动指定", provider: "claude", supportedEffortLevels: EFFORT_ALL },
+  { value: "claude-opus-4-8", model: "claude-opus-4-8", displayName: "Opus 4.8", description: "claude-opus-4-8 · 手动指定", provider: "claude", supportedEffortLevels: EFFORT_ALL },
   { value: "claude-haiku-4-5-20251001", model: "claude-haiku-4-5-20251001", displayName: "Haiku 4.5", description: "claude-haiku-4-5 · 手动指定", provider: "claude" },
 ];
 const modelKey = (m) => m?.value || m?.resolvedModel || m?.model;
@@ -1312,7 +1314,11 @@ async function reportModels(ws, sessionId, q) {
   const manual = CLAUDE_MANUAL_MODELS.filter((m) => !have.has(m.value) && !base.some((b) => modelKey(b) === m.model));
   // 广播而非单播:改 settings/key 或重开会话时,所有客户端(桌面/手机)的该会话列表都同步更新,
   // 不再只发给触发的那个连接 —— 否则别的端一直用旧快照(kimi 新增模型选了却显示旧窗口)。
-  broadcast({ type: "models", sessionId, models: dedupeModels([...merged, ...manual, ...extraModels(loadSettings())]).map((m) => ({ ...m, description: localizeModelDesc(m.description) })) });
+  broadcast({ type: "models", sessionId, models: dedupeModels([...merged, ...manual, ...extraModels(loadSettings())]).map((m) => ({
+    ...m, description: localizeModelDesc(m.description),
+    // OpenAI 走转译代理,effort 被翻成 reasoning_effort(只有三档);其他第三方不认 effort,不给档位
+    ...(m.provider === "openai" && !m.supportedEffortLevels ? { supportedEffortLevels: ["low", "medium", "high"] } : {}),
+  })) });
 }
 // AppleScript 字符串转义(仅 macOS)
 const asStr = (s) => `"${String(s).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
@@ -1791,6 +1797,7 @@ function startSession(ws, { id, cwd, resume, compactFirst }) {
     queue: null, sdkSessionId: resume ?? null, pendingPerms: new Map(), permissionQueue: [], activePermission: null,
     autoApprove: !!(loadIndex().find((e) => e.id === id)?.autoApprove), // 会话级自动同意,持久化在 index
     permMode: loadIndex().find((e) => e.id === id)?.permMode || "default", // SDK 权限模式,同样持久化
+    effort: loadIndex().find((e) => e.id === id)?.effort || null, // 用户选的 effort 档位,null = 自动(见 effortFor)
     termCwd: home,      // ! 终端当前目录
     agentCwd: home,     // agent(SDK query)当前工作目录
     pendingCwd: null,   // 终端 !cd 后待同步给 agent 的目录
@@ -1857,6 +1864,24 @@ function bumpSpend(id, msg) {
 // 创建/重建 agent 的 SDK query。重建时旧循环因 generation 过期而不触发清理。
 // CLAUDE_BIN 当下指向的真实文件(native installer 的 ~/.local/bin/claude 是指向 versions/<版本> 的 symlink)。
 // 没设 CLAUDE_BIN(开发态走 node_modules 里的 CLI)返回 null,不参与换版本检测。
+// effort 档位。sess.effort 是用户选的,null = 自动:交给 CLI 默认(现为 high)+ 模型 adaptive thinking 自己按难度调。
+// 自动档遇上 plan 模式提到 xhigh —— 规划不会是简单问题;模型不支持 xhigh 时 CLI 自己降档,降到哪由 syncEffort 报。
+const effortFor = (sess) => sess.effort || (sess.permMode === "plan" ? "xhigh" : null);
+// DeepSeek/GLM 这些 anthropic 兼容端点不认 effort,别给它们塞;OpenAI 由转译代理翻成 reasoning_effort
+const effortProvider = (model) => ["claude", "openai"].includes(providerOf(model));
+// 把档位推给 CLI(apply),再读回 CLI 实际要发的档位(applied.effort:降档之后的值)广播出去。
+// 读回这步不能省:界面上显示 max,CLI 实际按 high 发,用户永远不知道。
+async function syncEffort(sess, id, apply = true) {
+  const q = sess?.q;
+  if (!q) return;
+  try {
+    if (apply && effortProvider(loadIndex().find((e) => e.id === id)?.model)) await q.applyFlagSettings({ effortLevel: effortFor(sess) });
+    const s = await Promise.race([q.getSettings(), new Promise((r) => setTimeout(() => r(null), 3000))]);
+    if (s) sess.effortApplied = s.applied?.effort ?? null;
+  } catch {}
+  broadcast({ type: "effort", sessionId: id, effort: sess.effort ?? null, applied: sess.effortApplied ?? null });
+}
+
 const claudeBinReal = () => { try { return CLAUDE_BIN ? fs.realpathSync(CLAUDE_BIN) : null; } catch { return null; } };
 
 function spawnAgent(ws, sess, { id, resume }) {
@@ -1911,6 +1936,8 @@ function spawnAgent(ws, sess, { id, resume }) {
       // 权限模式跟模型同理:进 options 才能"启动即生效"。启动后补 setPermissionMode 会在 CLI
       // 就绪前被静默吞掉 —— 重开会话就悄悄退回逐条审批,用户以为档位还在。
       ...(idxEntry?.permMode && idxEntry.permMode !== "default" ? { permissionMode: idxEntry.permMode } : {}),
+      // effort 同理进 options 启动即生效('max' 也只能这么传或走 applyFlagSettings,不进设置文件)
+      ...(effortProvider(savedModel) && effortFor(sess) ? { effort: effortFor(sess) } : {}),
       stderr: (m) => { stderrBuf += m; if (stderrBuf.length > 8192) stderrBuf = stderrBuf.slice(-8192); },
       // 权限走前端确认:agent 请求 -> 前端弹卡片 -> 用户点允许/拒绝
       // blockedPath/decisionReason 也要带上:被拦是因为"命令没放行"还是"路径在项目外",
@@ -1939,6 +1966,7 @@ function spawnAgent(ws, sess, { id, resume }) {
   // 上报可用模型(/model 选择器用)。注意:init 消息要等第一条用户输入才发,不能挂在 init 上,
   // 否则新会话没发消息前列表一直空。supportedModels 是控制请求,空队列即可 resolve。
   reportModels(ws, id, q);
+  syncEffort(sess, id, false); // 只读回实际档位(options 已带上),不重复推
 
   sess.loopDone = (async () => {
     try {
@@ -1955,7 +1983,9 @@ function spawnAgent(ws, sess, { id, resume }) {
           // CLI 报的权限模式才是真的(我们传进去的它可能拒了/改了),按它对齐并广播,别让界面显示一个假档位。
           // 每次 init 都广播(不只在变化时):这是"CLI 真的以这个模式起来了"的唯一凭据。
           if (msg.permissionMode) {
+            const planFlip = (sess.permMode === "plan") !== (msg.permissionMode === "plan");
             sess.permMode = msg.permissionMode;
+            if (planFlip && !sess.effort) syncEffort(sess, id); // 自动档跟着 plan 模式升降
             broadcast({ type: "perm_mode", sessionId: id, mode: sess.permMode });
           }
           // Claude Code 初始化完成后，原生 /usage 才能读取订阅窗口。
@@ -2600,6 +2630,7 @@ wss.on("connection", (ws) => {
           sdkSessionId: null, createdAt: Date.now(),
           inheritFrom: m.inheritFrom ?? null, // 母会话条目 id(树形归属),与 resume(SDK 上下文)区分
           ...(m.model && m.model !== "default" ? { model: m.model } : {}), // 首页选的模型:spawnAgent 启动即按此(savedModel)
+          ...(["low", "medium", "high", "xhigh", "max"].includes(m.effort) ? { effort: m.effort } : {}), // 设置里的默认 effort
           ...(isCasual ? { casual: true } : {}),
         });
         saveIndex(idx);
@@ -2836,8 +2867,20 @@ wss.on("connection", (ws) => {
           broadcast({ type: "system_note", sessionId: m.sessionId, text: tr("🔀 已切换到 {{label}}(换 provider 会开启全新对话)", { label }) });
           restartAgentCwd(ws, sess, m.sessionId, sess.agentCwd);
         } else {
-          sess?.q?.setModel?.(m.model === "default" ? undefined : modelArg(m.model))?.catch?.(() => {});
+          // 换模型后 CLI 可能降档(haiku 不支持 effort),等它切完再读回实际档位
+          sess?.q?.setModel?.(m.model === "default" ? undefined : modelArg(m.model))?.then?.(() => syncEffort(sess, m.sessionId), () => {});
         }
+        break;
+      }
+      case "set_effort": {
+        // effort 档位:null = 自动。落 index 持久化(同 permMode),会话没起来也照存,下次 spawnAgent 带进 options
+        const level = ["low", "medium", "high", "xhigh", "max"].includes(m.effort) ? m.effort : null;
+        const idx = loadIndex();
+        const entry = idx.find((e) => e.id === m.sessionId);
+        if (entry) { if (level) entry.effort = level; else delete entry.effort; saveIndex(idx); }
+        const sess = sessions.get(m.sessionId);
+        if (sess) { sess.effort = level; syncEffort(sess, m.sessionId); }
+        else broadcast({ type: "effort", sessionId: m.sessionId, effort: level, applied: null });
         break;
       }
       case "set_provider_key": {
@@ -2897,12 +2940,15 @@ wss.on("connection", (ws) => {
         // 前端把它们打包成「权限档位」一个选择器,但写入仍各走各的正规入口(见 permissions.ts)。
         const mode = String(m.mode || "default");
         const sess = sessions.get(m.sessionId);
+        const wasPlan = sess?.permMode === "plan";
         if (sess) sess.permMode = mode;
         const idx = loadIndex();
         const entry = idx.find((e) => e.id === m.sessionId);
         if (entry) { entry.permMode = mode; saveIndex(idx); }
         // 会话没起来也要落盘 + 广播:下次 spawnAgent 会把它带进 options
-        sess?.q?.setPermissionMode(mode).catch(() => {});
+        sess?.q?.setPermissionMode(mode).then(() => {
+          if (!sess.effort && wasPlan !== (mode === "plan")) syncEffort(sess, m.sessionId); // 自动档跟着 plan 升降
+        }, () => {});
         broadcast({ type: "perm_mode", sessionId: m.sessionId, mode });
         break;
       }

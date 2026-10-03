@@ -2625,4 +2625,11 @@ body.dragging-session, body.dragging-session * { cursor: grabbing !important; us
 .bubble-note.model-fallback { display: flex; align-items: center; gap: 6px; margin: 6px 0 2px; padding: 5px 9px; border-radius: 6px; font-size: 12px; line-height: 1.4;
   color: #b06d00; background: color-mix(in srgb, #d58b00 10%, transparent); border: 1px solid color-mix(in srgb, #d58b00 30%, transparent); }
 .bubble-note.model-fallback svg { flex: none; }
+.model-effort-tag { margin-left: 5px; font-size: 11px; color: var(--muted); }
+.model-effort-tag.down { color: #b06d00; }
+.effort-row { display: flex; align-items: center; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--border); font-size: 11.5px; }
+.effort-row > .muted { margin-right: 4px; }
+.effort-opt { border: 1px solid var(--border); background: none; color: inherit; font: inherit; padding: 1px 8px; border-radius: 999px; cursor: pointer; }
+.effort-opt:hover { border-color: var(--accent); }
+.effort-opt.sel { background: var(--accent); border-color: var(--accent); color: #fff; }
 .model-fallback-tag { margin-left: 4px; padding: 0 5px; border-radius: 4px; font-size: 10.5px; line-height: 16px; color: #b06d00; background: color-mix(in srgb, #d58b00 14%, transparent); }

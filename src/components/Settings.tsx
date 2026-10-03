@@ -9,7 +9,7 @@ import remarkGfm from "remark-gfm";
 import { rawHtml, useMdImages } from "../lib/mdhtml";
 import { useStore, useApi, DOCK_BOUNCE_KEY, dockBounceOn, SOUND_KEY, soundOn, playDing, AUTO_RESUME_KEY, autoResumeOn } from "../store";
 import { toast } from "./Toast";
-import { THEMES, type SshHost, type ThemeId, type CustomArt } from "../types";
+import { THEMES, EFFORT_LEVELS, modelName, modelProvider, providerBrand, type EffortLevel, type SshHost, type ThemeId, type CustomArt } from "../types";
 import { loadExtensions, loadMarketplace, marketplaceNames, installPlugin, uninstallPlugin, enablePlugin, disablePlugin, addMarketplace, removeMarketplace, installSkillGit, setSkillOn, removeSkill, setMcpOn, removeMcp, loadExtNotes, saveExtNote, SEED_MARKETPLACES, type Exts, type MarketPlugin } from "../extensions";
 import { EXT_NOTE_ZH } from "../extNotesZh";
 import { openEditorWindow } from "../popout";
@@ -244,6 +244,35 @@ function NotifyTab() {
   );
 }
 
+// 新会话默认模型 + effort 档位。模型和首页输入框那个选择器是同一份(homeModel),这里改了首页跟着变。
+// 档位只列该模型支持的;不支持 effort 的模型(第三方、haiku)下拉置灰,存着的档位留着,换回支持的模型时照用。
+function DefaultModelRow() {
+  const { t } = useTranslation();
+  const { state, setHomeModel, setHomeEffort } = useStore();
+  const models = state.homeModels;
+  const cur = models.find((m) => m.value === state.homeModel);
+  const levels = cur?.supportedEffortLevels ?? [];
+  return (
+    <div className="provider-row setting-row">
+      <div className="provider-id"><div>
+        <b>{t("模型与 effort 档位")}</b>
+        <div className="muted">{t("只影响之后新建的会话;已开的会话在输入框下方的模型菜单里改")}</div>
+      </div></div>
+      <div className="provider-actions">
+        <select className="perm-picker on" value={state.homeModel} onChange={(e) => setHomeModel(e.target.value)}>
+          {!cur && <option value={state.homeModel}>{state.homeModel === "default" ? t("默认模型") : state.homeModel}</option>}
+          {models.map((m) => <option key={m.value} value={m.value}>{providerBrand(modelProvider(m))} - {modelName(models, m)}</option>)}
+        </select>
+        <select className="perm-picker on" disabled={!levels.length} title={levels.length ? undefined : t("这个模型不支持 effort")}
+          value={state.homeEffort ?? ""} onChange={(e) => setHomeEffort((e.target.value || null) as EffortLevel | null)}>
+          <option value="">{t("自动")}</option>
+          {EFFORT_LEVELS.filter((l) => levels.includes(l) || l === state.homeEffort).map((l) => <option key={l} value={l}>{l}</option>)}
+        </select>
+      </div>
+    </div>
+  );
+}
+
 const Dot = ({ ok }: { ok: boolean }) => <span className={`auth-dot ${ok ? "on" : "off"}`}>●</span>;
 
 // provider 显示元数据:徽标字母 + logo css class。顺序即渲染顺序。
@@ -261,7 +290,8 @@ const PROVIDER_META: { id: string; ini: string; cls: string }[] = [
 // 账号:Claude 登录 + 各第三方 LLM(key + baseUrl/模型可编辑)
 function AccountTab() {
   const { t } = useTranslation();
-  const { state, authAction, setCnEndpoint, refreshModelCatalog } = useStore();
+  const { state, authAction, setCnEndpoint, refreshModelCatalog, requestHomeModels } = useStore();
+  useEffect(() => { requestHomeModels(); }, []); // 默认模型下拉要列表;首页没打开过时 homeModels 是空的
   const c = state.auth?.claude;
   const provs = state.auth?.providers ?? {};
   const catalogAt = state.auth?.catalogAt ?? 0;
@@ -289,6 +319,9 @@ function AccountTab() {
       </div>
 
       {PROVIDER_META.filter((m) => provs[m.id]).map((m) => <ProviderRow key={m.id} meta={m} onEdit={(mode) => setEdit({ id: m.id, mode })} />)}
+
+      <h4>{t("新会话默认")}</h4>
+      <DefaultModelRow />
 
       {/* 下面三组(国内节点 / 模型列表 / 自动继续)统一成同一套排版:h4 分组名 + 一张 setting-row 卡片,
           卡片左边「设置名 + 一行 muted 元信息」,右边是控件列(开关或按钮)。三组各写各的样式时

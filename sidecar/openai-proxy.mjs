@@ -181,6 +181,9 @@ function estimateTokens(body) {
   return Math.max(1, Math.ceil(chars / 4));
 }
 
+// Anthropic effort → OpenAI reasoning_effort。OpenAI 只有 low/medium/high,xhigh/max 封顶到 high。
+export const toReasoningEffort = (e) => ({ low: "low", medium: "medium", high: "high", xhigh: "high", max: "high" })[e];
+
 // 起本地代理。getUpstream(providerId) → { baseUrl } | null。返回 { server, port }。
 export function startProxy({ port, getUpstream }) {
   const server = http.createServer((req, res) => {
@@ -207,6 +210,8 @@ export function startProxy({ port, getUpstream }) {
       const oaBody = anthropicToOpenAI(body);
       // OpenAI 新接口(gpt-5 系)只认 max_completion_tokens,不认 max_tokens;其余家(Grok/Gemini)仍用 max_tokens
       if (providerId === "openai" && oaBody.max_tokens != null) { oaBody.max_completion_tokens = oaBody.max_tokens; delete oaBody.max_tokens; }
+      // effort 档位:CLI 对任意模型都带 output_config.effort。只给 OpenAI 翻 —— Grok 4 收到 reasoning_effort 直接报错。
+      if (providerId === "openai") { const re = toReasoningEffort(body.output_config?.effort); if (re) oaBody.reasoning_effort = re; }
       const target = up.baseUrl.replace(/\/$/, "") + "/chat/completions";
       try {
         const upstream = await fetch(target, {
@@ -276,6 +281,7 @@ if (process.argv[1] && process.argv[1].endsWith("openai-proxy.mjs")) {
   assert(oa.messages[2].tool_calls[0].function.name === "get", "tool_call name");
   assert(oa.messages[3].role === "tool" && oa.messages[3].tool_call_id === "t1", "tool result");
   assert(oa.tools[0].type === "function", "tools mapped");
+  assert(toReasoningEffort("max") === "high" && toReasoningEffort("low") === "low" && toReasoningEffort(undefined) === undefined, "effort map");
   // 非流式响应翻译
   const an = openaiMessageToAnthropic({ choices: [{ message: { content: "ok", tool_calls: [{ id: "c1", function: { name: "f", arguments: '{"x":1}' } }] }, finish_reason: "tool_calls" }], usage: { prompt_tokens: 5, completion_tokens: 7 } }, "grok-4");
   assert(an.content[0].type === "text" && an.content[1].type === "tool_use", "content blocks");

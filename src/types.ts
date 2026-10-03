@@ -50,7 +50,11 @@ export interface SessionInfo {
 // "default" 解析成 claude-opus-4-8[1m](1M),而 "claude-fable-5[1m]" 反过来解析成不带 [1m] 的 claude-fable-5。
 // provider/model:非 Claude provider(DeepSeek 等)的模型才带,value 形如 "deepseek/deepseek-chat"。
 // vision: 该模型收不收图片。不写则按 provider 的声明来(见 canSendImage);设置里的模型表可手填覆盖。
-export interface ModelInfo { value: string; resolvedModel?: string; displayName: string; description?: string; provider?: string; model?: string; contextWindow?: number; vision?: boolean }
+export interface ModelInfo { value: string; resolvedModel?: string; displayName: string; description?: string; provider?: string; model?: string; contextWindow?: number; vision?: boolean; supportedEffortLevels?: EffortLevel[] }
+
+// effort 档位(SDK EffortLevel)。模型支持哪几档看 ModelInfo.supportedEffortLevels,没有 = 不支持 effort
+export const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
+export type EffortLevel = typeof EFFORT_LEVELS[number];
 
 // 会话当前选中的那条模型信息(models 列表还没到时可能查不到)
 export function sessionModel(session: Session): ModelInfo | undefined {
@@ -130,6 +134,8 @@ export interface Session {
   todos: Todo[];
   info: SessionInfo;
   models: ModelInfo[];       // /model 选择器,sidecar 单独上报(独立于 info,避免 init 覆盖)
+  effort?: EffortLevel | null;        // 用户选的 effort 档位,null/缺省 = 自动
+  effortApplied?: EffortLevel | null; // CLI 实际发出的档位(降档之后),null = 这个模型不发 effort
   costUsd: number;
   inputTokens: number;       // 含缓存:新读 + 缓存写入 + 缓存命中
   outputTokens: number;      // 含思考(thinking 计在 output,SDK 不单列推理 token)
@@ -361,11 +367,12 @@ export interface GitInfo {
 }
 
 // cmd 前缀命令。
-// - /model /clear:前端拦截(SDK 控制方法)。
+// - /model /effort /clear:前端拦截(SDK 控制方法)。
 // - /help /cost /export:纯前端命令 —— CLI 有,但 SDK init 不上报、当 prompt 发会被模型当字面文本处理,故在客户端实现(见 Composer runLocalCommand)。
 // - 其余:作为 prompt 发给 CLI 本地处理(均在 init 上报的 slash_commands 里)。
 export const BUILTIN_COMMANDS = [
   { cmd: "/model", desc: "切换模型" },
+  { cmd: "/effort", desc: "切换思考档位(auto / low … max)" },
   { cmd: "/clear", desc: "清空上下文,开始新会话" },
   { cmd: "/compact", desc: "压缩上下文,保留摘要" },
   { cmd: "/context", desc: "查看当前上下文占用" },

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Folder, File, CornerLeftUp, RotateCw, ChevronDown, X, Sparkles, Clock } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Session } from "../types";
-import { BUILTIN_COMMANDS, modelLabel, modelRow, modelProvider, providerBrand, contextWindowOf, canSendImage, sessionProvider, sessionModel, shortModelName } from "../types";
+import { BUILTIN_COMMANDS, EFFORT_LEVELS, type EffortLevel, modelLabel, modelRow, modelProvider, providerBrand, contextWindowOf, canSendImage, sessionProvider, sessionModel, shortModelName } from "../types";
 import { ModelLogo } from "./Avatar";
 import { useStore, fetchBlob, sessionBusy, PENDING_MAX } from "../store";
 import { UsageBar, rollReset, fmtReset } from "./UsageBar";
@@ -208,7 +208,7 @@ function scoreEntry(e: FileEntry, q: string): number {
 // a: 输入区是 contentEditable —— 图片以内联标签插在光标处,和文本混排,方向键可在其间移动
 export function Composer({ session }: { session: Session }) {
   const { t } = useTranslation();
-  const { state, sendMessage, respondPermission, interrupt, runTerminal, reopenSession, setModel, clearContext, requestModels, setPermissionPreset, dispatch, enqueuePending, cancelPending } = useStore();
+  const { state, sendMessage, respondPermission, interrupt, runTerminal, reopenSession, setModel, clearContext, requestModels, setPermissionPreset, dispatch, enqueuePending, cancelPending, setEffort } = useStore();
   const edRef = useRef<HTMLDivElement>(null);
   const imgData = useRef(new Map<string, Img>()); // chip id -> 图片数据
   const idc = useRef(0);
@@ -617,6 +617,26 @@ export function Composer({ session }: { session: Session }) {
     return cur ? [cur, ...session.models] : session.models;
   }, [session.models, session.info.model]);
 
+  // effort 档位。levels 空 = 当前模型不支持 effort(第三方/haiku),档位行和标签都不出。
+  // 标签显示 CLI 实际发的档位:自动档显示「自动 high」(plan 模式下会是 xhigh);
+  // 选了但被 CLI 降档(模型不支持该档)显示「max→high」,不让界面摆一个假档位。
+  const effortLevels = sessionModel(session)?.supportedEffortLevels ?? [];
+  const effortSel = session.effort ?? null, effortApplied = session.effortApplied ?? null;
+  const effortDown = !!effortSel && effortApplied !== effortSel;
+  const effortTag = !effortLevels.length && !effortSel ? null
+    : !effortSel ? t("自动") + (effortApplied ? " " + effortApplied : "")
+    : effortDown ? `${effortSel}→${effortApplied ?? t("不支持")}` : effortSel;
+  const effortTitle = !effortSel ? t("effort 自动:模型按难度自己决定想多少{{cur}}。点开模型菜单可手动指定档位", { cur: effortApplied ? t("(当前按 {{lv}} 发)", { lv: effortApplied }) : "" })
+    : effortDown ? (effortApplied ? t("当前模型不支持 {{from}},CLI 实际降到 {{to}}", { from: effortSel, to: effortApplied }) : t("当前模型不支持 effort,档位没有生效"))
+    : t("effort 档位:{{lv}}", { lv: effortSel });
+  // 档位行的选项:自动 + 模型支持的档。←→ 在菜单里切档(同官方 CLI)
+  const effortOpts: (EffortLevel | null)[] = effortLevels.length ? [null, ...EFFORT_LEVELS.filter((l) => effortLevels.includes(l))] : [];
+  function stepEffort(d: number) {
+    if (!effortOpts.length) return;
+    const i = effortOpts.indexOf(effortSel);
+    setEffort(session.id, effortOpts[Math.max(0, Math.min(effortOpts.length - 1, (i < 0 ? 0 : i) + d))]);
+  }
+
   function openModelMenu() {
     if (modelMenu) { setModelMenu(false); return; } // 再点一次收起
     // 每次打开都刷新:运行中会话的列表是启动快照,用户后来改 settings 新增/改窗口的模型不在其中
@@ -662,7 +682,7 @@ export function Composer({ session }: { session: Session }) {
     if (!BUILTIN_COMMANDS.some((b) => b.cmd === cmd)) { setEditorText(cmd + " "); return; }
     pushHistory(plainHist(cmd)); // 记入历史,↑ 可回溯
     clearEditor();
-    if (cmd === "/model") { openModelMenu(); return; }
+    if (cmd === "/model" || cmd === "/effort") { openModelMenu(); return; }
     if (cmd === "/clear") { clearContext(session.id); return; }
     if (runLocalCommand(cmd)) return;
     // agent 正在跑:必须排队,不能直接发。轮内追加的输入会被并进当前这一轮,而 Claude Code
@@ -832,6 +852,15 @@ export function Composer({ session }: { session: Session }) {
         if (!hit) { done(() => dispatch({ type: "append", id: session.id, item: { kind: "system", text: t("未知模型「{{name}}」。用 /model 打开菜单选择;第三方模型 id 形如 provider/model(如 kimi/k3),别用连字符。", { name: mm[1] }), ts: Date.now() } })); return; }
         done(() => setModel(session.id, hit.value)); return;
       }
+      // /effort 打开菜单(档位行在菜单顶部);/effort <档位|auto> 直接设
+      if (input === "/effort") { done(openModelMenu); return; }
+      const me = input.match(/^\/effort\s+(\S+)$/);
+      if (me) {
+        const lv = me[1].toLowerCase();
+        if (lv === "auto" || lv === "自动") { done(() => setEffort(session.id, null)); return; }
+        if (!(EFFORT_LEVELS as readonly string[]).includes(lv)) { done(() => dispatch({ type: "append", id: session.id, item: { kind: "system", text: t("未知档位「{{name}}」。可选:auto / {{list}}", { name: me[1], list: EFFORT_LEVELS.join(" / ") }), ts: Date.now() } })); return; }
+        done(() => setEffort(session.id, lv as EffortLevel)); return;
+      }
       if (input === "/clear") { done(() => clearContext(session.id)); return; }
       if (LOCAL_COMMANDS.has(input)) { done(() => runLocalCommand(input)); return; }
       compactCmd = input === "/compact";
@@ -941,6 +970,7 @@ export function Composer({ session }: { session: Session }) {
       if (e.key === "ArrowDown") { e.preventDefault(); setPalIdx((i) => (i + 1) % n); return; }
       if (e.key === "ArrowUp") { e.preventDefault(); setPalIdx((i) => (i - 1 + n) % n); return; }
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); setModel(session.id, menuModels[palIdx % n].value); setModelMenu(false); return; }
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); stepEffort(e.key === "ArrowLeft" ? -1 : 1); return; }
     }
 
     // 权限快捷键(完全空时)—— AskUserQuestion 交给问答卡自己处理,不在此拦截
@@ -1300,6 +1330,18 @@ export function Composer({ session }: { session: Session }) {
       )}
       {modelMenu && (
         <div className="palette" ref={modelMenuRef}>
+          {effortOpts.length > 0 && (
+            <div className="effort-row">
+              <span className="muted">effort</span>
+              {effortOpts.map((l) => (
+                <button key={l ?? "auto"} className={`effort-opt ${l === effortSel ? "sel" : ""}`}
+                  title={l === null ? t("自动:模型按难度自己决定想多少;plan 模式下提到 xhigh") : l === "max" ? t("最深思考,很费额度;只对当前会话有效") : undefined}
+                  onMouseDown={(e) => { e.preventDefault(); setEffort(session.id, l); }}>
+                  {l ?? t("自动")}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="palette-scroll">
             {/* 一条一行:logo + 厂商 + 模型名(含版本号)+ 括号补充。完整 description 留在 title 里。
                 第 0 行是当前模型的副本(见 menuModels),和原列表里那条指向同一个 value,选哪个都一样 */}
@@ -1323,7 +1365,7 @@ export function Composer({ session }: { session: Session }) {
             })}
             {menuModels.length === 0 && <div className="palette-item muted">{t("模型列表加载中…")}</div>}
           </div>
-          <div className="palette-hint">{t("点击选择 · esc 取消")}</div>
+          <div className="palette-hint">{effortOpts.length ? t("点击选择 · ←→ 切 effort · esc 取消") : t("点击选择 · esc 取消")}</div>
         </div>
       )}
       {mention && (
@@ -1480,6 +1522,7 @@ export function Composer({ session }: { session: Session }) {
           {latched && fallbackTo && (
             <span className="model-fallback-tag" title={t("{{from}} 拒答过本会话的请求,服务端改由 {{to}} 作答,之后整个会话沿用它。点这里可切回。", { from: shortModelName(fallbackTo.from), to: shortModelName(fallbackTo.to) })}>{t("已回退")}</span>
           )}
+          {effortTag && <span className={`model-effort-tag ${effortDown ? "down" : ""}`} title={effortTitle}>{effortTag}</span>}
           <ChevronDown size={12} />
         </button>
         <UsageBar session={session} auto={!!state.autoAllow[session.id]}

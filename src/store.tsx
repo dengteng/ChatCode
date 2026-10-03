@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useReducer, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
-import type { AccountUsage, AuthStatus, ClosedEntry, GitCommitDetail, GitDiffData, GitInfo, GitLogData, IndexEntry, LimitUsage, ModelInfo, PermissionSuggestion, ResumeChoice, SearchResult, Session, SessionGroup, SessionInfo, Spend, SshHost, TimelineItem, Wallet } from "./types";
+import type { AccountUsage, AuthStatus, ClosedEntry, EffortLevel, GitCommitDetail, GitDiffData, GitInfo, GitLogData, IndexEntry, LimitUsage, ModelInfo, PermissionSuggestion, ResumeChoice, SearchResult, Session, SessionGroup, SessionInfo, Spend, SshHost, TimelineItem, Wallet } from "./types";
 import { sessionProvider, modelName, modelLabel } from "./types";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { toast, dismissToast } from "./components/Toast";
@@ -84,11 +84,13 @@ interface State {
   justCreatedId: string | null; // 刚从首页新建的会话 id:侧栏该项播一次入场动效,其余项/首屏不播
   homeModels: ModelInfo[]; // 首页模型切换器的可选列表(无会话,走缓存的 Claude 列表 + 已配置 provider)
   homeModel: string;       // 首页选中的模型:新建会话即以此启动(持久化在 localStorage)
+  homeEffort: EffortLevel | null; // 新建会话的默认 effort 档位,null = 自动(设置 › 大模型里改,持久化在 localStorage)
 }
 // 待发队列上限。再多屏上就排成一列看不清自己排了啥,而且排得越久越可能已经不是当时想问的了。
 export const PENDING_MAX = 3;
 const HOME_MODELS_ID = "__home__"; // 首页 get_models 的哨兵 sessionId
 const HOME_MODEL_KEY = "cc-home-model";
+const HOME_EFFORT_KEY = "cc-home-effort";
 const emptyUsage: AccountUsage = { session: { usedPct: null, resetAt: null }, weekly: { usedPct: null, resetAt: null }, fetchedAt: null, stale: false };
 const initial: State = {
   connected: false, index: [], groups: [], closed: [], sessions: {}, activeId: null,
@@ -96,6 +98,7 @@ const initial: State = {
   search: [], git: {}, gitLog: {}, gitDiff: {}, gitCommitDetail: {}, gitFileDiff: {},
   auth: null, sshHosts: [], sshTests: {}, autoAllow: {}, permMode: {}, spend: {}, wallet: {}, justCreatedId: null,
   homeModels: [], homeModel: (() => { try { return localStorage.getItem(HOME_MODEL_KEY) || "default"; } catch { return "default"; } })(),
+  homeEffort: (() => { try { return (localStorage.getItem(HOME_EFFORT_KEY) || null) as EffortLevel | null; } catch { return null; } })(),
 };
 
 type Action =
@@ -147,7 +150,8 @@ type Action =
   | { type: "set_peer_queue"; id: string; items: { pid: string; text: string }[] } // 别端排在该会话的待发(只读镜像)
   | { type: "remove_session"; id: string }
   | { type: "home_models"; models: ModelInfo[] } // 首页模型列表到货
-  | { type: "set_home_model"; model: string };    // 首页选中模型
+  | { type: "set_home_model"; model: string }
+  | { type: "set_home_effort"; effort: EffortLevel | null };    // 首页选中模型
 
 function reducer(s: State, a: Action): State {
   const upd = (id: string, f: (sess: Session) => Session) =>
@@ -177,6 +181,7 @@ function reducer(s: State, a: Action): State {
     case "search_results": return { ...s, search: a.results };
     case "auth_status": return { ...s, auth: a.status };
     case "home_models": return { ...s, homeModels: a.models };
+    case "set_home_effort": { try { a.effort ? localStorage.setItem(HOME_EFFORT_KEY, a.effort) : localStorage.removeItem(HOME_EFFORT_KEY); } catch { /* 隐私模式 */ } return { ...s, homeEffort: a.effort }; }
     case "set_home_model": { try { localStorage.setItem(HOME_MODEL_KEY, a.model); } catch { /* 隐私模式 */ } return { ...s, homeModel: a.model }; }
     case "ssh_hosts": return { ...s, sshHosts: a.hosts };
     case "ssh_test": return { ...s, sshTests: { ...s.sshTests, [a.id]: { ok: a.ok, detail: a.detail } } };
@@ -730,6 +735,8 @@ interface Api {
   startSessionWithMessage: (cwd: string, blocks: any[]) => void;
   requestHomeModels: () => void;        // 首页拉取模型列表
   setHomeModel: (model: string) => void; // 首页选中模型(持久化,新会话以此启动)
+  setHomeEffort: (effort: EffortLevel | null) => void; // 新会话默认 effort,null = 自动
+  setEffort: (id: string, effort: EffortLevel | null) => void; // 会话 effort 档位,null = 自动
   reopenSession: (id: string) => void;
   restoreSession: (id: string) => void;
   restartSession: (id: string) => void;
@@ -960,6 +967,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             subject: m.subject, body: m.body, files: m.files || [], error: m.error } }); break;
           case "git_compare":
             dispatch({ type: "append", id: m.sessionId, item: { kind: "system", text: m.text, ts: Date.now() } }); break;
+          // effort:用户选的档位 + CLI 实际要发的档位(降档后)。切档/切模型/plan 升降/会话启动时都会来
+          case "effort": dispatch({ type: "patch", id: m.sessionId, patch: { effort: m.effort ?? null, effortApplied: m.applied ?? null } }); break;
           case "models":
             if (m.sessionId === HOME_MODELS_ID) dispatch({ type: "home_models", models: m.models });
             else dispatch({ type: "patch", id: m.sessionId, patch: { models: m.models } });
@@ -1123,7 +1132,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     dispatch,
     createSession(cwd, resume, title, inheritFrom, casual, model) {
       // resume = 要接续的 SDK 会话(恢复上下文);inheritFrom = 母会话条目 id(仅用于列表树形归属)
-      const fire = () => send({ type: "create_session", cwd, resume, title, inheritFrom, casual, model });
+      const fire = () => send({ type: "create_session", cwd, resume, title, inheritFrom, casual, model, effort: stateRef.current.homeEffort ?? undefined });
       // 「开启子会话」(带 resume/inheritFrom)和闲聊(无目录)本就该新开,不拦;只拦"同目录再来一条平级新会话"
       const dup = cwd && !resume && !inheritFrom && !casual
         ? stateRef.current.index.filter((e) => e.cwd === cwd && !e.casual)
@@ -1139,6 +1148,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     },
     requestHomeModels() { send({ type: "get_models", sessionId: HOME_MODELS_ID }); },
     setHomeModel(model) { dispatch({ type: "set_home_model", model }); },
+    setHomeEffort(effort) { dispatch({ type: "set_home_effort", effort }); },
+    setEffort(id, effort) {
+      dispatch({ type: "patch", id, patch: { effort } }); // 乐观更新;sidecar 读回 CLI 实际档位后广播 effort 对齐
+      send({ type: "set_effort", sessionId: id, effort });
+    },
     reopenSession(id) {
       const entry = stateRef.current.index.find((e) => e.id === id);
       // 找不到就别闷声退出:以前这里 return 掉,用户点了「最近历史」界面纹丝不动,

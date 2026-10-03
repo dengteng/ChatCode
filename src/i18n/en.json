@@ -820,5 +820,21 @@
   "所选模型的安全过滤拦下了这条请求,服务端改由另一个模型作答。之后整个会话会沿用它,可在输入框下方的模型菜单切回。": "The selected model's safety filter blocked this request, so the server answered with another model. The session stays on it from now on; switch back from the model menu below the input box.",
   "{{from}} 拒答了这条请求,已由 {{to}} 接手;本会话后续沿用 {{to}},可在下方模型菜单切回": "{{from}} declined this request and {{to}} took over; the session stays on {{to}} — switch back from the model menu below",
   "{{from}} 拒答过本会话的请求,服务端改由 {{to}} 作答,之后整个会话沿用它。点这里可切回。": "{{from}} declined a request in this session, so the server switched to {{to}} and the session stays on it. Click to switch back.",
-  "已回退": "Fallback"
+  "已回退": "Fallback",
+  "自动": "auto",
+  "不支持": "unsupported",
+  "effort 自动:模型按难度自己决定想多少{{cur}}。点开模型菜单可手动指定档位": "Effort auto: the model decides how much to think based on difficulty{{cur}}. Open the model menu to pick a level",
+  "(当前按 {{lv}} 发)": " (currently sent as {{lv}})",
+  "当前模型不支持 {{from}},CLI 实际降到 {{to}}": "This model doesn’t support {{from}}; the CLI downgraded it to {{to}}",
+  "当前模型不支持 effort,档位没有生效": "This model doesn’t support effort; the level has no effect",
+  "effort 档位:{{lv}}": "Effort level: {{lv}}",
+  "未知档位「{{name}}」。可选:auto / {{list}}": "Unknown level “{{name}}”. Options: auto / {{list}}",
+  "自动:模型按难度自己决定想多少;plan 模式下提到 xhigh": "Auto: the model decides how much to think; raised to xhigh in plan mode",
+  "最深思考,很费额度;只对当前会话有效": "Deepest thinking, uses a lot of quota; applies to this session only",
+  "点击选择 · ←→ 切 effort · esc 取消": "Click to select · ←→ change effort · esc to cancel",
+  "模型与 effort 档位": "Model and effort level",
+  "只影响之后新建的会话;已开的会话在输入框下方的模型菜单里改": "Only affects new sessions; change open sessions from the model menu below the input box",
+  "这个模型不支持 effort": "This model doesn’t support effort",
+  "新会话默认": "New session defaults",
+  "切换思考档位(auto / low … max)": "Change thinking level (auto / low … max)"
 }
