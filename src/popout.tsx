@@ -19,10 +19,12 @@ function watchWindow(w: WebviewWindow) {
   w.once("tauri://created", () => { w.setFocus().catch(() => {}); }); // 确保新窗口到前台,别开在主窗口后面
 }
 
-export function openEditorWindow(path: string, name: string) {
+// remote:服务器上的文件(经该会话的 SSH 连接读写),path 是服务器上的路径
+export function openEditorWindow(path: string, name: string, remote?: { sid: string; host: string }) {
+  const r = remote ? `&sid=${encodeURIComponent(remote.sid)}&host=${encodeURIComponent(remote.host)}` : "";
   watchWindow(new WebviewWindow(label("editor"), {
-    url: `index.html#/editor?path=${encodeURIComponent(path)}&name=${encodeURIComponent(name)}`,
-    title: name, width: 1100, height: 760, minWidth: 420, minHeight: 260, focus: true,
+    url: `index.html#/editor?path=${encodeURIComponent(path)}&name=${encodeURIComponent(name)}${r}`,
+    title: remote ? `[${i18n.t("服务器")}] ${remote.host}:${path}` : name, width: 1100, height: 760, minWidth: 420, minHeight: 260, focus: true,
   }));
 }
 
@@ -90,7 +92,8 @@ export function Popout({ kind, params }: { kind: "editor" | "image"; params: URL
   return (
     <div className="app popout" data-theme={theme}>
       {kind === "editor"
-        ? <FileEditor windowed path={params.get("path") || ""} name={params.get("name") || ""} onClose={close} />
+        ? <FileEditor windowed path={params.get("path") || ""} name={params.get("name") || ""} onClose={close}
+            remote={params.get("sid") ? { sid: params.get("sid")!, host: params.get("host") || "" } : undefined} />
         : <ImageView srcKey={params.get("k") || ""} />}
     </div>
   );

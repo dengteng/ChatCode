@@ -154,6 +154,33 @@ function sshDial(ws, sess, id, target, port) {
       exitCode: err ? 1 : 0 });
   }));
 }
+// 在线编辑远端文件:复用会话的 master 连接,不新开认证。read 回 {path 绝对路径, content};write 先写 .cc-new 再覆盖,上传中断不会截断原文件
+const SSH_EDIT_MAX = 2 << 20;
+// stat:路径在不在(给 hover 菜单判断"这是不是服务器上的文件");write 带 expect = 读时的 cksum,对不上说明被别人改过,
+// 除非 force;backup=true 时先 cp -p 一份 .cc-bak(每个编辑窗口第一次保存才备份,改坏了能找回原样)。
+function sshFile(sid, op, p, opts, cb) {
+  const ssh = sessions.get(sid)?.ssh;
+  if (ssh?.status !== "connected") return cb(tr("SSH 未连接,先在会话里重连"));
+  const cd = ssh.cwd ? `cd ${shQuote(ssh.cwd)} 2>/dev/null; ` : "";
+  const resolve = cd + `p=${shQuote(p)}; case "$p" in "~") p=$HOME;; "~/"*) p=$HOME/\${p#"~/"};; esac; d=$(dirname -- "$p"); b=$(basename -- "$p"); abs="$(cd "$d" 2>/dev/null && pwd -P)/$b"; `;
+  const script = op === "stat" ? resolve + `[ -f "$abs" ] && printf '%s' "$abs"; exit 0`
+    : op === "read" ? resolve +
+      `[ -f "$abs" ] || { echo NOTFILE:"$abs" >&2; exit 2; }; [ "$(wc -c < "$abs")" -le ${SSH_EDIT_MAX} ] || { echo TOOBIG >&2; exit 3; }; printf '%s\\0%s\\0' "$abs" "$(cksum < "$abs")"; cat -- "$abs"`
+    : `abs=${shQuote(p)}; ` +
+      (opts.force || !opts.expect ? "" : `[ "$(cksum < "$abs")" = ${shQuote(opts.expect)} ] || { echo CHANGED >&2; exit 4; }; `) +
+      (opts.backup ? `cp -p "$abs" "$abs.cc-bak" || exit 5; ` : "") +
+      `cat > "$abs.cc-new" && cat "$abs.cc-new" > "$abs" && rm -f "$abs.cc-new" && cksum < "$abs"`;
+  const cp = execFile("ssh", sshCtl(sid, ssh, [ssh.target, script]), { timeout: 30000, maxBuffer: SSH_EDIT_MAX * 3, env: safeEnv(), encoding: "buffer" }, (err, so, se) => {
+    const msg = String(se || "").trim();
+    if (err) return cb(msg.startsWith("NOTFILE:") ? tr("不是文件: {{path}}", { path: msg.slice(8) }) : msg === "TOOBIG" ? tr("文件超过 2MB,不在线编辑") : msg === "CHANGED" ? "CHANGED" : msg || err.message);
+    if (op === "stat") return cb(null, { exists: so.length > 0, path: so.toString() });
+    if (op === "write") return cb(null, { sum: so.toString().trim() });
+    const a = so.indexOf(0), b = so.indexOf(0, a + 1);
+    cb(null, { path: so.subarray(0, a).toString(), sum: so.subarray(a + 1, b).toString(), content: so.subarray(b + 1).toString("utf8") });
+  });
+  cp.stdin.on("error", () => {}); // 对端先断时写 stdin 会 EPIPE,错误已由上面的回调报告
+  cp.stdin.end(op === "write" ? Buffer.from(opts.content, "utf8") : undefined);
+}
 // 在远端跑一条命令(复用 master),追踪远端 cwd
 function sshRun(ws, sess, id, command) {
   const cwd = sess.ssh.cwd || "";
@@ -1146,6 +1173,9 @@ const EN_DICT = {
   "用法: !ssh [-p 端口] user@host": "Usage: !ssh [-p port] user@host",
   "✅ 已切回本地目录,后续 ! 命令在本地执行": "✅ Switched back to local directory, subsequent ! commands run locally",
   "退出远程连接": "Exit remote connection",
+  "SSH 未连接,先在会话里重连": "SSH not connected, reconnect in the session first",
+  "不是文件: {{path}}": "Not a file: {{path}}",
+  "文件超过 2MB,不在线编辑": "File is over 2MB, not editable online",
   "📁 已将 agent 工作目录切到 {{target}}(在该目录重开上下文,之前的对话记忆不带过来)": "📁 Switched agent working directory to {{target}} (context restarts there, previous memory is not carried over)",
   "📁 已将 agent 工作目录设为 {{target}}": "📁 Set agent working directory to {{target}}",
   // ---- 会话错误 ----
@@ -1373,6 +1403,15 @@ function authCommand(provider, action) {
 
 const loadSshHosts = () => loadSettings().sshHosts ?? [];
 function saveSshHosts(hosts) { saveSettings({ ...loadSettings(), sshHosts: hosts }); }
+// 告诉 agent 该用哪些服务器:用户在 ChatCode 里配过就只认这份列表(含用户名/端口/密钥路径,不含密钥内容);
+// 一台都没配才允许它去翻 ~/.ssh/known_hosts —— 那里只有主机指纹,没有用户名也没有先后,拿来"猜最近连的"不可靠。
+function sshInstruction() {
+  const hosts = loadSshHosts();
+  if (!hosts.length) return "【服务器】用户在 ChatCode 里没有配置 SSH 连接。需要连远程服务器却没给目标时,可参考 ~/.ssh/known_hosts 里的主机(它只记主机指纹,不含用户名,用户名要问用户)。";
+  const rows = hosts.map((h) => `- ${h.label || h.host}: ${h.username ? h.username + "@" : ""}${h.host}${h.port ? ` -p ${h.port}` : ""}${h.keyPath ? ` -i ${h.keyPath}` : ""}`);
+  return "【服务器】用户在 ChatCode 里配置了这些 SSH 连接。需要连服务器却没指定目标时,只从这份列表里选(多台就问用户选哪台),不要去读 ~/.ssh/known_hosts 猜:\n" + rows.join("\n") +
+    "\n回复里提到服务器上的文件时,一律写成 `用户@主机:路径`(如 `deployer@1.2.3.4:~/app/.env`),和本机文件区分开 —— 界面据此提供在线编辑。";
+}
 
 const inputTokensOf = (u) =>
   (u?.input_tokens ?? 0) + (u?.cache_read_input_tokens ?? 0) + (u?.cache_creation_input_tokens ?? 0);
@@ -1946,7 +1985,7 @@ function spawnAgent(ws, sess, { id, resume }) {
   }
   const savedModel = idxEntry?.model;
   // 闲聊会话额外追加"别暴露临时工作目录"的约定
-  const sysAppend = [COMMIT_SUMMARY_INSTRUCTION, NEXT_STEPS_INSTRUCTION, ...(idxEntry?.casual ? [CASUAL_INSTRUCTION] : [])].join("\n\n");
+  const sysAppend = [COMMIT_SUMMARY_INSTRUCTION, NEXT_STEPS_INSTRUCTION, sshInstruction(), ...(idxEntry?.casual ? [CASUAL_INSTRUCTION] : [])].join("\n\n");
   // 非 Claude provider(如 DeepSeek):注入 ANTHROPIC_BASE_URL/AUTH_TOKEN/MODEL,复用 Claude Code CLI 走它的兼容 API。
   // env 会整体替换 process.env(SDK 不自动合并),必须自己摊平。model 传去掉前缀的真实 id。
   const provEnv = envForModel(savedModel, loadSettings());
@@ -3124,6 +3163,15 @@ wss.on("connection", (ws) => {
           // 交互完成需要时间;延迟刷新一次状态,前端也可自行再拉
           setTimeout(() => authStatus().then((status) => send(ws, { type: "auth_status", status })), 4000);
         });
+        break;
+      }
+      case "ssh_file_stat":
+      case "ssh_file_read":
+      case "ssh_file_write": { // 编辑窗口 / hover 菜单各自开短连接来调,reqId 原样带回
+        const op = m.type.slice(9), w = op === "write";
+        if (w && !String(m.path).startsWith("/")) { send(ws, { type: m.type, reqId: m.reqId, ok: false, error: "path must be absolute" }); break; }
+        sshFile(m.sessionId, op, String(m.path), { content: String(m.content ?? ""), expect: m.expect, backup: !!m.backup, force: !!m.force }, (error, r) =>
+          send(ws, { type: m.type, reqId: m.reqId, ok: !error, error: error || undefined, ...r }));
         break;
       }
       case "ssh_hosts": {

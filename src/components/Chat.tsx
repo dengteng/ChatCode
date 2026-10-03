@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, isValidElement, type ComponentProps, type ReactNode } from "react";
+import { createContext, useContext, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, isValidElement, type ComponentProps, type ReactNode } from "react";
 import { GitFork, GitBranch, ChevronRight, ChevronDown, Folder, Server, Puzzle, Plug, ArrowDown, Wrench, Check, Copy, X, CircleHelp, Lock, Image as ImageIcon, MessageSquare, Ban, Pin, Pencil, TriangleAlert, Loader2, Brain, RotateCcw, CornerDownRight, Paperclip, MessageCircleQuestion } from "lucide-react";
 import { createPortal } from "react-dom";
 import Markdown from "react-markdown";
@@ -26,6 +26,7 @@ import { CommitDialog } from "./CommitDialog";
 import { GitMapDialog } from "./GitMapDialog";
 import { openImageWindow, openEditorWindow } from "../popout";
 import { isEditable } from "./FileEditor";
+import { remoteCall } from "../lib/remote";
 import { homeDir } from "@tauri-apps/api/path";
 import { UserAvatar, ModelAvatar, ComputerAvatar, brandName, getUserName } from "./Avatar";
 import { toast, dismissToast } from "./Toast";
@@ -105,28 +106,75 @@ async function absPath(raw: string, cwd: string): Promise<string> {
   });
 }
 
-// 路径/URL 令牌:hover 弹操作菜单。文件=复制路径+打开+打开目录,在线链接=复制链接+打开。点令牌本身直接打开。
-// 打开:内置编辑器支持的文件格式直接在 ChatCode 内置编辑器打开;其余交系统默认程序;在线链接用浏览器开。
+// ---------- 本机文件 vs 服务器文件 ----------
+// 会话连着服务器时,同一个路径可能指本机也可能指服务器,打开错了代价不同(改服务器更危险)。判定优先级:
+// ① 写成 `用户@主机:路径` 的 → 服务器(主机对不上当前连接就只给复制);② 出现位置定死的(PathMode)→ 照办;
+// ③ 其余(AI 正文等)hover 时两边各探一次存在性:只本机有/只服务器有/都有(上下两组菜单)/都没有(只给复制)。
+// 没连服务器的会话一律本机,不探测。
+export const SshCtx = createContext<{ sid: string; host: string } | null>(null);
+const PathMode = createContext<"auto" | "local" | "remote">("auto");
+type Where = "local" | "remote" | "both" | "none";
+const probeCache = new Map<string, { v: Where; t: number }>(); // 30s 内同一路径不重复探(远端一次要走一趟 ssh)
+async function localExists(raw: string, cwd: string): Promise<boolean> {
+  const abs = await absPath(raw, cwd);
+  const dir = abs.replace(/\/[^/]*$/, "") || "/", base = abs.split("/").pop();
+  const list = await invoke<[string, boolean, number][]>("read_dir_meta", { path: dir }).catch(() => []);
+  return list.some(([n]) => n === base);
+}
+async function probeWhere(raw: string, cwd: string, ssh: { sid: string }): Promise<Where> {
+  const key = `${ssh.sid}|${cwd}|${raw}`, hit = probeCache.get(key);
+  if (hit && Date.now() - hit.t < 30000) return hit.v;
+  const [l, r] = await Promise.all([
+    localExists(raw, cwd),
+    remoteCall<{ exists: boolean }>({ type: "ssh_file_stat", sessionId: ssh.sid, path: raw }).then((x) => x.exists).catch(() => false),
+  ]);
+  const v: Where = l && r ? "both" : l ? "local" : r ? "remote" : "none";
+  probeCache.set(key, { v, t: Date.now() });
+  return v;
+}
+const hostOf = (s: string) => s.split("@").pop();
+
+// 路径/URL 令牌:hover 弹操作菜单。在线链接=复制链接+打开;本机文件=复制路径+打开+打开目录;服务器文件=复制路径+在线编辑。
+// 点令牌本身:在线链接/本机文件直接打开(内置编辑器支持的格式在 ChatCode 内打开,其余交系统程序),服务器文件开在线编辑;
+// 两边都有/都没有就不动作,等用户在菜单里选。
 // 菜单用 portal 挂到 body + fixed 定位 —— 否则在 <pre>/overflow 容器里会被裁掉,弹不出来。
-function PathToken({ raw, cwd, isUrl }: { raw: string; cwd: string; isUrl: boolean }) {
+function PathToken({ raw, cwd, isUrl, prefix }: { raw: string; cwd: string; isUrl: boolean; prefix?: string }) {
   const { t } = useTranslation();
+  const ssh = useContext(SshCtx);
+  const mode = useContext(PathMode);
   // menu 存"进入时的光标 x + 菜单顶 y";pos 是量出主按钮宽度后算好的最终 left/top
   const [menu, setMenu] = useState<{ cx: number; y: number } | null>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState("");
+  const [probed, setProbed] = useState<Where | null>(null);
   const closeT = useRef<number>();
   const menuRef = useRef<HTMLSpanElement>(null);
   const primaryRef = useRef<HTMLButtonElement>(null); // 最常用的按钮,要落在光标正下方
   const href = webHref(raw, isUrl);   // 非 null = 在线链接
   const isWeb = href !== null;
+  const fixed: Where | "probe" = prefix !== undefined ? (ssh && hostOf(prefix) === hostOf(ssh.host) ? "remote" : "none")
+    : !ssh ? "local" : mode !== "auto" ? mode : "probe";
+  const where: Where | null = fixed === "probe" ? probed : fixed;
+  const resolve = async (): Promise<Where> => {
+    if (fixed !== "probe") return fixed;
+    if (probed) return probed;
+    const v = await probeWhere(raw, cwd, ssh!);
+    setProbed(v);
+    return v;
+  };
   const editable = !isWeb && isEditable(raw); // 内置编辑器支持的文件 → 在 ChatCode 内打开,不交系统程序
-  const open = async () => {
-    if (isWeb) { openUrl(href); return; }
+  const openLocal = async () => {
     if (editable) { openEditorWindow(await absPath(raw, cwd), raw.split("/").pop() || raw); return; }
     openPath(raw, cwd);
   };
+  const openRemote = () => { if (ssh) openEditorWindow(raw, raw.split("/").pop() || raw, ssh); };
+  const open = async () => {
+    if (isWeb) { openUrl(href); return; }
+    const w = await resolve();
+    if (w === "local") openLocal(); else if (w === "remote") openRemote();
+  };
   const reveal = () => revealPath(raw, cwd);
-  const copy = async () => { await copyText(raw); setCopied(true); window.setTimeout(() => setCopied(false), 1200); };
+  const copy = async (text: string, k: string) => { await copyText(text); setCopied(k); window.setTimeout(() => setCopied(""), 1200); };
   // 锚到"进入时的光标处"而不是 token 左下角:长路径左对齐时,鼠标悬在路径中/右段,菜单却弹在最左边,
   // 斜着移过去中途会掉出 token 又没进到桥区域 → 一超时就关,很难点中。只在 mouseEnter 取一次坐标(不跟随
   // mousemove),所以不会漂移。
@@ -137,10 +185,11 @@ function PathToken({ raw, cwd, isUrl }: { raw: string; cwd: string; isUrl: boole
     const r = e.currentTarget.getBoundingClientRect();
     setPos(null); // 先隐藏,量完主按钮位置再显示,避免跳一下
     setMenu({ cx: e.clientX, y: r.bottom });
+    if (!isWeb) resolve();
   };
   const hide = () => { closeT.current = window.setTimeout(() => setMenu(null), 700); }; // 慢点关,给鼠标从 token 移到气泡的时间
-  // 菜单渲染后:量出"主按钮"中心相对菜单左缘的偏移,反推菜单 left,让主按钮中心正对光标 —— 本地路径主按钮
-  // 是"打开目录"、在线 URL 是"打开",都是各自最常用的那个。再做左右边界钳制防出屏。useLayoutEffect 在绘制前跑,无闪跳。
+  // 菜单渲染后:量出"主按钮"中心相对菜单左缘的偏移,反推菜单 left,让主按钮中心正对光标。
+  // 再做左右边界钳制防出屏。useLayoutEffect 在绘制前跑,无闪跳。探测结果回来菜单内容变了,重算一次。
   useLayoutEffect(() => {
     if (!menu || !menuRef.current || !primaryRef.current) return;
     const mRect = menuRef.current.getBoundingClientRect();
@@ -148,21 +197,46 @@ function PathToken({ raw, cwd, isUrl }: { raw: string; cwd: string; isUrl: boole
     const btnCenter = bRect.left - mRect.left + bRect.width / 2;
     const left = Math.max(8, Math.min(menu.cx - btnCenter, window.innerWidth - mRect.width - 8));
     setPos({ left, top: menu.y });
-  }, [menu]);
+  }, [menu, where]);
+  const press = (f: () => void) => ({ onMouseDown: (e: React.MouseEvent) => { e.preventDefault(); f(); } });
+  const remotePath = ssh ? `${ssh.host}:${raw}` : raw;
+  const localBtns = <>
+    <button {...press(() => copy(raw, "l"))}>{copied === "l" ? t("已复制") : t("复制路径")}</button>
+    <button {...press(openLocal)}>{t("打开")}</button>
+    <button ref={primaryRef} {...press(reveal)}>{t("打开目录")}</button>
+  </>;
+  const remoteBtns = (primary: boolean) => <>
+    <button {...press(() => copy(remotePath, "r"))}>{copied === "r" ? t("已复制") : t("复制路径")}</button>
+    <button ref={primary ? primaryRef : undefined} {...press(openRemote)}>{t("在线编辑")}</button>
+  </>;
+  let body: ReactNode;
+  if (isWeb) body = <>
+    <button {...press(() => copy(raw, "w"))}>{copied === "w" ? t("已复制") : t("复制链接")}</button>
+    <button ref={primaryRef} {...press(open)}>{t("打开")}</button>
+  </>;
+  else if (where === "local") body = localBtns;
+  else if (where === "remote") body = remoteBtns(true);
+  else if (where === "both") body = <>
+    <span className="path-group"><span className="path-group-label">{t("本地文件操作：")}</span>{localBtns}</span>
+    <span className="path-group"><span className="path-group-label">{t("服务器文件操作：")}</span>{remoteBtns(false)}</span>
+  </>;
+  else body = <>
+    <button ref={primaryRef} {...press(() => copy(raw, "l"))}>{copied === "l" ? t("已复制") : t("复制路径")}</button>
+    {where === null && <span className="path-probing muted">{t("检测中…")}</span>}
+  </>;
   return (
     <span className="path-token" onMouseEnter={show} onMouseLeave={hide}
       // 拖选文本后 mouseup 也会触发 click —— 有选区时别打开(否则想复制路径却把文件打开了)。
       // 这处故意留 onClick、不走 btnPress:选区要到 mouseup 才定得下来,mousedown 时判不出用户是在划选还是在点。
       onClick={(e) => { e.stopPropagation(); if (window.getSelection()?.isCollapsed !== false) open(); }}>
-      <span className="path-token-label">{raw}</span>
+      {fixed === "remote" && <Server size={11} className="path-remote-icon" />}
+      <span className="path-token-label">{prefix !== undefined ? `${prefix}:${raw}` : raw}</span>
       {menu && createPortal(
-        <span ref={menuRef} className="path-actions"
+        <span ref={menuRef} className={`path-actions ${where === "both" ? "stacked" : ""}`}
           style={{ left: pos ? pos.left : menu.cx, top: menu.y, paddingTop: 10, visibility: pos ? "visible" : "hidden" }} // padding 当桥,盖住 token 与气泡间的空隙,鼠标不掉出去
           onMouseEnter={() => window.clearTimeout(closeT.current)} onMouseLeave={hide}
           onClick={(e) => e.stopPropagation()}>
-          <button onMouseDown={(e) => { e.preventDefault(); copy(); }}>{copied ? t("已复制") : isWeb ? t("复制链接") : t("复制路径")}</button>
-          <button ref={isWeb ? primaryRef : undefined} onMouseDown={(e) => { e.preventDefault(); open(); }}>{t("打开")}</button>
-          {!isWeb && <button ref={primaryRef} onMouseDown={(e) => { e.preventDefault(); reveal(); }}>{t("打开目录")}</button>}
+          {body}
         </span>, document.body)}
     </span>
   );
@@ -170,7 +244,8 @@ function PathToken({ raw, cwd, isUrl }: { raw: string; cwd: string; isUrl: boole
 
 // 终端输出块:内容超出限高(scrollbar 已藏)时,气泡底部中间浮出一个下箭头提示"还有更多",
 // 点它平滑下滚一屏;滚到底箭头消失。用 ResizeObserver + onScroll 判断是否还没到底。
-function TermOut({ text, cwd, live }: { text: string; cwd: string; live?: boolean }) {
+// plain:服务器上 ! 命令的输出不做路径令牌 —— 那里的路径都在服务器上,本机的打开/打开目录全是错的
+function TermOut({ text, cwd, live, plain }: { text: string; cwd: string; live?: boolean; plain?: boolean }) {
   const { t } = useTranslation();
   const ref = useRef<HTMLPreElement>(null);
   const [more, setMore] = useState(false);
@@ -192,15 +267,30 @@ function TermOut({ text, cwd, live }: { text: string; cwd: string; live?: boolea
   }, [text]);
   return (
     <div className="term-out-wrap">
-      <pre className="term-out" ref={ref} onScroll={onScroll}><Linkify text={text} cwd={cwd} /></pre>
+      <pre className="term-out" ref={ref} onScroll={onScroll}>{plain ? text : <Linkify text={text} cwd={cwd} />}</pre>
       {more && <button className="term-more" title={t("还有更多，点击向下滚动")}
         {...btnPress(() => ref.current?.scrollBy({ top: ref.current.clientHeight - 30, behavior: "smooth" }))}><ChevronDown size={16} /></button>}
     </div>
   );
 }
 
+// `用户@主机:路径`(scp 写法,路径以 ~ 或 / 开头)= 服务器上的文件。要求带 @,免得把 "note:/x"、"C:/x" 之类认进来;
+// git@github.com:owner/repo 的路径不以 ~ 或 / 开头,也不会误中。
+const REMOTE_PATH_RE = /([\w.\-]+@[\w.\-]+):((?:~|\/)[^\s<>"'`()，。]*)/g;
 // 把纯文本里的路径/URL 替换成可 hover 的 PathToken,其余原样输出
 function Linkify({ text, cwd }: { text: string; cwd: string }) {
+  if (!text.includes("@")) return <LinkifyPlain text={text} cwd={cwd} />;
+  const out: ReactNode[] = [];
+  let last = 0;
+  for (const m of text.matchAll(REMOTE_PATH_RE)) {
+    if (m.index! > last) out.push(<LinkifyPlain key={`t${last}`} text={text.slice(last, m.index)} cwd={cwd} />);
+    out.push(<PathToken key={m.index} raw={m[2]} prefix={m[1]} cwd={cwd} isUrl={false} />);
+    last = m.index! + m[0].length;
+  }
+  if (last < text.length) out.push(<LinkifyPlain key={`t${last}`} text={text.slice(last)} cwd={cwd} />);
+  return <>{out}</>;
+}
+function LinkifyPlain({ text, cwd }: { text: string; cwd: string }) {
   const out: ReactNode[] = [];
   let last = 0; let m: RegExpExecArray | null;
   const re = new RegExp(LINK_RE);
@@ -786,12 +876,14 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
   // SSH 模式 = 这个会话配了远端(连上/连接中/失败都算)。此时目录栏显示远端路径,中间不显示 git 分支 —— 分支读的是本地仓库,和远端无关。
   const sshOn = !!session.ssh;
   const sshState = session.ssh?.status;
+  const sshCtx = useMemo(() => (sshState === "connected" ? { sid: session.id, host: session.ssh!.host } : null), [session.id, sshState, session.ssh?.host]);
   const sshStateLabel = sshState === "connected" ? t("已连接") : sshState === "connecting" ? t("连接中…") : sshState === "error" ? t("连接失败") : t("未连接");
   // 远端命令跑过之后 termCwd 会变成 "user@host:/path";还没跑过时它仍是本地路径,别拿来当远端目录显示
   const sshLabel = session.ssh?.host ?? "";
   const sshPath = session.termCwd?.startsWith(`${sshLabel}:`) ? session.termCwd : `${sshLabel}:~`;
 
   return (
+    <SshCtx.Provider value={sshCtx}>
     <div className={`chat ${bareTop ? "bare-top" : ""}`}>
       {/* data-tauri-drag-region:按住顶栏空白处即可拖动整个窗口(Tauri v2 内置手势,只对带该属性的
           元素本身生效)。所以标题/继承标签/任务进度这些"纯展示"元素都挂上,而"项目详情"是可点按钮 —— 不挂,
@@ -1148,6 +1240,7 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
       })()}
       {showSshConfig && <SshConfig current={session.ssh} onClose={() => setShowSshConfig(false)} onSave={(config) => { configureSsh(session.id, config); setShowSshConfig(false); }} />}
     </div>
+    </SshCtx.Provider>
   );
 }
 
@@ -1771,10 +1864,10 @@ function TermRows({ item, cwd }: { item: Extract<TimelineItem, { kind: "terminal
           <div className="line line-term-out bubble">
             <BubbleActs text={item.command + (hasOut ? "\n" + item.output : "")} />
             {item.pending ? <>
-              {hasOut && <TermOut text={item.output} cwd={cwd} live />}
+              {hasOut && <TermOut text={item.output} cwd={cwd} live plain={ssh} />}
               <TermRunning since={item.ts} />
             </> : <>
-              {hasOut && <TermOut text={item.output} cwd={cwd} />}
+              {hasOut && <TermOut text={item.output} cwd={cwd} plain={ssh} />}
               {item.cwdChanged && <div className="term-cwd-line"><Folder size={13} /> {t("现在在 {{dir}}", { dir: shortCwd })}</div>}
               {!hasOut && !item.cwdChanged && <div className="term-cwd-line muted">{t("（无输出）")}</div>}
             </>}
@@ -1911,6 +2004,7 @@ function Item({ item, cwd, onPermission, onAgentClick, agentLabel }: { item: Tim
       );
     case "terminal": {
       const shortCwd = (item.cwd || cwd).replace(/^\/Users\/[^/]+/, "~"); // 同 TermRows:cwd 可能缺失
+      const ssh = !(item.cwd || cwd).startsWith("/");
       const hasOut = item.output.trim().length > 0;
       return (
         <div className="line line-term">
@@ -1920,10 +2014,10 @@ function Item({ item, cwd, onPermission, onAgentClick, agentLabel }: { item: Tim
             <BubbleActs text={item.command + (hasOut ? "\n" + item.output : "")} />
             <div className="term-cmd" title={item.cwd}>{item.command}{item.exitCode !== 0 && <span className="term-ec"> <X size={11} />{item.exitCode}</span>}</div>
             {item.pending ? <>
-              {hasOut && <TermOut text={item.output} cwd={cwd} live />}
+              {hasOut && <TermOut text={item.output} cwd={cwd} live plain={ssh} />}
               <TermRunning since={item.ts} />
             </> : <>
-              {hasOut && <TermOut text={item.output} cwd={cwd} />}
+              {hasOut && <TermOut text={item.output} cwd={cwd} plain={ssh} />}
               {item.cwdChanged && <div className="term-cwd-line"><Folder size={13} /> {t("现在在 {{dir}}", { dir: shortCwd })}</div>}
               {!hasOut && !item.cwdChanged && <div className="term-cwd-line muted">{t("（无输出）")}</div>}
             </>}
@@ -2125,7 +2219,9 @@ export function PermissionCard({ item, cwd, onPermission }: {
     return (
       <div className="perm-card">
         <div>{t("agent 请求执行 {{tool}}", { tool: item.toolName })}</div>
-        <pre><Linkify text={summarizeInput(item.toolName, item.input) || JSON.stringify(item.input)} cwd={cwd} /></pre>
+        <PathMode.Provider value={item.toolName === "Bash" && /^\s*ssh\s/.test(String(item.input?.command ?? "")) ? "remote" : "local"}>
+          <pre><Linkify text={summarizeInput(item.toolName, item.input) || JSON.stringify(item.input)} cwd={cwd} /></pre>
+        </PathMode.Provider>
         <div className="perm-decided">
           {item.answer ? <><MessageSquare size={13} /> {t("你回复了:{{answer}}", { answer: item.answer })}</> : item.decision === "allow" ? <><Check size={13} /> {t("你允许了此操作")}</> : <><Ban size={13} /> {t("你拒绝了此操作")}</>}
         </div>

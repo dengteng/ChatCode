@@ -16,6 +16,7 @@ import { json } from "@codemirror/lang-json";
 import { javascript } from "@codemirror/lang-javascript";
 import { useTranslation } from "react-i18next";
 import { Eye, EyeOff } from "lucide-react";
+import { remoteCall } from "../lib/remote";
 
 // app 内可编辑的文本类型;md 额外支持实时渲染预览。CodeMirror 6 对无对应语言包的类型也能纯文本编辑,
 // 所以这里放开到常见代码/文本文件,统一走同一套编辑体验。
@@ -122,7 +123,7 @@ export const clampFrac = (f: number, size: number) => {
 
 // 文件编辑器:左编辑(CodeMirror 6 语法高亮 + 行号)右预览(md)/纯编辑(其他)。⌘S 保存,点"关闭"按钮退出。
 // windowed = 它自己就是一个独立的原生窗口(见 popout.tsx):铺满窗口、不要遮罩、不用自己实现拖动(交给系统标题栏)。
-export function FileEditor({ path, name, onClose, windowed }: { path: string; name: string; onClose: () => void; windowed?: boolean }) {
+export function FileEditor({ path, name, onClose, windowed, remote }: { path: string; name: string; onClose: () => void; windowed?: boolean; remote?: { sid: string; host: string } }) {
   const { t } = useTranslation();
   const [text, setText] = useState<string | null>(null);
   const [saved, setSaved] = useState("");   // 上次保存内容,判断 dirty
@@ -130,7 +131,14 @@ export function FileEditor({ path, name, onClose, windowed }: { path: string; na
   const [status, setStatus] = useState(""); // "已保存"/"保存中…"
   const isMd = ext(name) === "md";
   const isHtml = ext(name) === "html" || ext(name) === "htm";
-  const canPreview = isMd || isHtml;   // 这类文件有没有预览可看:md 渲染 / html iframe 实时预览
+  // 这类文件有没有预览可看:md 渲染 / html iframe 实时预览。服务器文件没有本地同目录资源可内联,不开预览
+  const canPreview = !remote && (isMd || isHtml);
+  // 服务器文件:realPath = 解析出的绝对路径(~ 和相对路径展开);sum = 读到时的 cksum,保存时据此发现"别人改过";
+  // backedUp = 本窗口已备份过 .cc-bak(只在第一次保存时备份原样);conflict = 保存撞上服务器端已变化,等用户选
+  const [realPath, setRealPath] = useState(path);
+  const sum = useRef("");
+  const backedUp = useRef(false);
+  const [conflict, setConflict] = useState(false);
   // 用户手动开关。记进 localStorage:关掉的人多半是想专心写源码,每开一个文件再关一次很烦(同 vert)。
   // 默认开 —— 只有显式存过 "0" 才算关。
   const [previewOn, setPreviewOn] = useState(() => localStorage.getItem("ChatCode-feditor-preview") !== "0");
@@ -279,25 +287,36 @@ export function FileEditor({ path, name, onClose, windowed }: { path: string; na
     window.addEventListener("mousemove", move); window.addEventListener("mouseup", up);
   };
 
+  const load = (alive = () => true) =>
+    (remote
+      ? remoteCall<{ path: string; sum: string; content: string }>({ type: "ssh_file_read", sessionId: remote.sid, path }).then((r) => { if (alive()) { setRealPath(r.path); sum.current = r.sum; } return r.content; })
+      : invoke<string>("read_file", { path }))
+      .then((c) => { if (alive()) { setText(c); setSaved(c); setErr(""); setConflict(false); } })
+      .catch((e) => alive() && setErr(String(e?.message ?? e)));
   useEffect(() => {
     let alive = true;
-    invoke<string>("read_file", { path })
-      .then((c) => { if (alive) { setText(c); setSaved(c); } })
-      .catch((e) => alive && setErr(String(e)));
+    load(() => alive);
     return () => { alive = false; };
   }, [path]);
 
   const dirty = text !== null && text !== saved;
   // save 要读到最新的 text/dirty,但 CodeMirror 的 ⌘S 快捷键扩展只在挂载时绑定一次 —— 用 ref 转发最新闭包
   const saveRef = useRef<() => void>(() => {});
-  const save = async () => {
+  const save = async (force = false) => {
     if (text === null || !dirty) return;
     setStatus(t("保存中…"));
     try {
-      await invoke("write_file", { path, content: text });
-      setSaved(text); setStatus(t("已保存")); setErr("");
-      window.setTimeout(() => setStatus(""), 1600);
-    } catch (e) { setErr(String(e)); setStatus(""); }
+      if (remote) {
+        const r = await remoteCall<{ sum: string }>({ type: "ssh_file_write", sessionId: remote.sid, path: realPath, content: text, expect: sum.current, backup: !backedUp.current, force });
+        sum.current = r.sum; backedUp.current = true;
+      } else await invoke("write_file", { path, content: text });
+      setSaved(text); setStatus(remote ? t("已保存，原文件备份为 {{name}}", { name: realPath.split("/").pop() + ".cc-bak" }) : t("已保存")); setErr(""); setConflict(false);
+      window.setTimeout(() => setStatus(""), remote ? 4000 : 1600);
+    } catch (e: any) {
+      const msg = String(e?.message ?? e);
+      if (msg === "CHANGED") setConflict(true); else setErr(msg);
+      setStatus("");
+    }
   };
   saveRef.current = save;
 
@@ -417,10 +436,11 @@ export function FileEditor({ path, name, onClose, windowed }: { path: string; na
   };
 
   const panel = (
-      <div className={`feditor ${windowed ? "windowed" : ""}`} style={windowed ? undefined : { left: pos.x, top: pos.y }} onKeyDown={onKey}>
+      <div className={`feditor ${windowed ? "windowed" : ""} ${remote ? "remote" : ""}`} style={windowed ? undefined : { left: pos.x, top: pos.y }} onKeyDown={onKey}>
         <div className="feditor-head" onMouseDown={windowed ? undefined : onDragHead}>
+          {remote && <span className="feditor-badge">{t("服务器")}</span>}
           <span className="feditor-name">{name}{dirty ? " ●" : ""}</span>
-          <span className="feditor-path" title={path}>{path}</span>
+          <span className="feditor-path" title={remote ? `${remote.host}:${realPath}` : path}>{remote ? `${remote.host}:${realPath}` : path}</span>
           <div className="feditor-actions">
             {status && <span className="muted">{status}</span>}
             {/* 预览开关。只在有预览可看的类型上出现(md/html);关掉后整个右栏连同拖动条一起消失,
@@ -451,6 +471,10 @@ export function FileEditor({ path, name, onClose, windowed }: { path: string; na
           </div>
         </div>
         {err && <div className="feditor-err">{err}</div>}
+        {conflict && <div className="feditor-err">{t("你打开之后，服务器上的这个文件被改过了。")}
+          <button className="hi" onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); save(true); } }}>{t("覆盖保存")}</button>
+          <button className="ghost" onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); load(); } }}>{t("放弃我的修改，重新加载")}</button>
+        </div>}
         {text === null && !err ? (
           <div className="feditor-body"><div className="muted" style={{ padding: 16 }}>{t("加载中…")}</div></div>
         ) : text !== null && (

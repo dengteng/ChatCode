@@ -1244,6 +1244,13 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 .path-actions { display: flex; position: fixed; z-index: 30; padding: 4px; gap: 3px; white-space: nowrap; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
 .path-actions button { font: 11px -apple-system, system-ui, sans-serif; padding: 3px 9px; border: none; background: transparent; color: var(--text); border-radius: 4px; cursor: pointer; }
 .path-actions button:hover { background: var(--accent); color: #fff; }
+.path-actions.stacked { flex-direction: column; gap: 2px; }
+.path-group { display: flex; align-items: center; gap: 3px; }
+.path-group-label { width: 92px; font: 11px -apple-system, system-ui, sans-serif; color: var(--muted, #888); padding-left: 4px; }
+.path-group + .path-group { border-top: 1px solid var(--border); padding-top: 2px; }
+.path-group:last-child .path-group-label { color: #ea7814; }
+.path-probing { font-size: 11px; padding: 3px 6px; }
+.path-remote-icon { color: #ea7814; margin-right: 2px; vertical-align: -1px; }
 
 /* 一个 agent 回合的所有动作包进一个气泡 */
 /* 头像挪到气泡外左上角,和气泡顶部对齐 */
@@ -1718,6 +1725,10 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 .feditor-actions button.feditor-layout { padding: 4px 8px; display: flex; align-items: center; color: var(--muted); }
 .feditor-actions button.feditor-layout:hover { color: var(--text); }
 .feditor-err { padding: 6px 14px; color: #e5484d; font: 11px Menlo, monospace; border-bottom: 1px solid var(--border); }
+.feditor-err button { margin-left: 10px; }
+/* 服务器文件:头部换成橙色,和本机文件一眼区分开(改服务器的代价更大) */
+.feditor.remote .feditor-head { background: rgba(234, 120, 20, .22); border-bottom-color: rgba(234, 120, 20, .6); }
+.feditor-badge { padding: 1px 7px; border-radius: 4px; background: #ea7814; color: #fff; font-size: 11px; font-weight: 600; }
 .feditor-body { flex: 1; display: flex; min-height: 0; }
 /* 代码编辑区:react-simple-code-editor + Prism 语法高亮 */
 .feditor-input-wrap { flex: 1; min-width: 0; overflow: hidden; background: var(--bg); display: flex; }
