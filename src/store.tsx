@@ -49,7 +49,7 @@ export interface RememberChoice { updates: PermissionSuggestion[]; label: string
 
 // 开发时 sidecar 由 npm run dev 起在 8975;打包后由 Rust 起在 8976。
 // 端口分开,装好的 app 和正在跑的 tauri dev 才能并存,不会 EADDRINUSE。
-export const SIDECAR_PORT = import.meta.env.DEV ? 8975 : 8976;
+export const SIDECAR_PORT = import.meta.env?.DEV ? 8975 : 8976; // ?.: node 里跑 scripts/store-replay.check.ts 时没有 import.meta.env
 const WS_DOWN = "ws-down"; // 断连常驻 toast 的 key,重连时按它收掉
 const CATALOG_TOAST = "catalog-refresh"; // 手动刷模型清单的进度 toast:回包到了按它收掉换成结果
 
@@ -114,6 +114,8 @@ type Action =
   | { type: "revive"; id: string }   // 断连的会话重新起来了(只解除 closed,不碰运行中的状态)
   | { type: "sdk_init"; id: string; info: SessionInfo; keepModel: boolean } // 回放历史 init 时保留已选模型(旧 init 记的是当时的模型)
   | { type: "append"; id: string; item: TimelineItem }
+  | { type: "batch"; id: string; actions: Action[] } // 历史回放:一次吃下整份,见 reducer 里的 batch
+  | { type: "prepend_history"; id: string; items: TimelineItem[]; more: Session["histMore"] } // 往上翻要回来的更早一段
   | { type: "tool_result"; id: string; toolUseId: string; result: any; isError?: boolean }
   | { type: "decide_permission"; id: string; requestId: string; decision: "allow" | "deny"; answer?: string; remembered?: string }
   | { type: "add_usage"; id: string; costUsd: number; inputTokens: number; outputTokens: number; cacheWrite: number; cacheRead: number }
@@ -152,6 +154,45 @@ type Action =
   | { type: "home_models"; models: ModelInfo[] } // 首页模型列表到货
   | { type: "set_home_model"; model: string }
   | { type: "set_home_effort"; effort: EffortLevel | null };    // 首页选中模型
+
+// 历史回放的批处理。逐条 dispatch 时每条 append 拷一遍整份 timeline、每个 tool_result 再 map 一遍,
+// 是 O(n²):8 千条 timeline + 6 千个工具结果的会话,重开时主线程卡死 4~6 秒,输入框点不动。
+// 这里 timeline 只拷一次,append / tool_result 原地改(中间态不外泄,只有最后那份进 React);
+// 其余 action 照走普通 reducer —— 它若换了 timeline,新数组也是刚造的、归我们独占,接着原地改即可。
+function replayBatch(s: State, id: string, actions: Action[]): State {
+  if (!s.sessions[id]) return s;
+  let st = s;
+  let tl = [...s.sessions[id].timeline];
+  const toolAt = new Map<string, number>();
+  const reindex = () => { toolAt.clear(); tl.forEach((t, i) => { if (t.kind === "tool") toolAt.set(t.id, i); }); };
+  reindex();
+  const commit = () => { st = { ...st, sessions: { ...st.sessions, [id]: { ...st.sessions[id], timeline: tl } } }; };
+  for (const x of actions) {
+    if (x.type === "append" && x.id === id) {
+      if (x.item.kind === "tool") {
+        // 同 markLastAgentProgress,原地版
+        for (let i = tl.length - 1; i >= 0; i--) {
+          const t = tl[i];
+          if (t.kind === "agent_text") { tl[i] = { ...t, phase: "progress" }; break; }
+          if (t.kind === "user" || t.kind === "result") break;
+        }
+        toolAt.set(x.item.id, tl.length);
+      }
+      tl.push(x.item);
+    } else if (x.type === "tool_result" && x.id === id) {
+      const i = toolAt.get(x.toolUseId);
+      if (i !== undefined) { const t = tl[i] as Extract<TimelineItem, { kind: "tool" }>; tl[i] = { ...t, result: x.result, isError: x.isError }; }
+    } else {
+      commit();
+      st = reducer(st, x);
+      const next = st.sessions[id]?.timeline;
+      // attach_tokens / compact_settle 这类只就地替换条目(拷了新数组但位置不变),索引照用;长度变了才重建
+      if (next && next !== tl) { const moved = next.length !== tl.length; tl = next; if (moved) reindex(); }
+    }
+  }
+  commit();
+  return st;
+}
 
 function reducer(s: State, a: Action): State {
   const upd = (id: string, f: (sess: Session) => Session) =>
@@ -300,6 +341,8 @@ function reducer(s: State, a: Action): State {
         const keep = a.keepModel || !!x.info.model?.includes("/");
         return { ...x, info: { ...a.info, model: keep && x.info.model ? x.info.model : a.info.model } };
       });
+    case "batch": return replayBatch(s, a.id, a.actions);
+    case "prepend_history": return upd(a.id, (x) => ({ ...x, timeline: [...a.items, ...x.timeline], histMore: a.more }));
     case "append":
       return upd(a.id, (x) => {
         // 一段文字后若紧接工具调用,它是执行中的说明，不是最终交付。
@@ -468,6 +511,7 @@ function emptySession(id: string, title: string, cwd: string, inheritFrom?: stri
 // 搜索结果(按日志时间)点进来就定位不到,只能落到最后一条。按会话各自单调:全局单调会把旧日志的
 // 早时间全顶成"现在+1",等于没用。
 const tsSeq = new Map<string, number>();
+const olderInflight = new Set<string>(); // 正在要更早历史的会话,防重复请求
 function nextTs(id: string, at?: string) {
   const raw = at ? +new Date(at) : Date.now();
   const prev = tsSeq.get(id) ?? 0;
@@ -751,6 +795,7 @@ interface Api {
   interrupt: (id: string) => void;
   setModel: (id: string, model: string, label?: string) => void; // label:模型表还没到时(刚配好 key)由调用方给出显示名
   requestModels: (id: string) => void;
+  loadOlderHistory: (id: string, untilTs?: number) => void; // 历史分页:向 sidecar 要更早一段;untilTs = 至少取到这一刻(搜索跳转)
   clearContext: (id: string) => void;
   runTerminal: (id: string, command: string) => void;
   sshReconnect: (id: string) => void;
@@ -869,6 +914,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         console.warn(`[ws] 断开 code=${ev.code} reason=${ev.reason || "(空)"} wasClean=${ev.wasClean}`);
         dispatch({ type: "connected", v: false });
         prefetched.current = false;
+        olderInflight.clear(); // 要更早历史的请求跟着断线丢了,不清的话往上翻永远停在"加载中"
         // 断连当下就把转圈停掉:那轮的 turn_ended 会丢在断线里,不停就一直转到天荒地老,
         // 而用户要等到手动发下一条才知道断了。真相以重连后的第一份 index 为准 ——
         // 那边会把「其实还在跑」的会话恢复回 running(见下面 resync 的两个方向)。
@@ -1042,9 +1088,30 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             break;
           }
           case "history":
-            for (const msg of m.messages) handleSdkMessage(dispatch, m.sessionId, msg, false, stateRef);
+          {
+            // 先收齐再一次 dispatch,别逐条进 React(逐条是 O(n²),大会话重开卡死几秒,见 replayBatch)
+            const acts: Action[] = [];
+            // 分页:没发过来的那段用量由 sidecar 合计好(base),先记上当底数,token 总数才是整个会话的
+            if (m.base) acts.push({ type: "add_usage", id: m.sessionId, ...m.base });
+            for (const msg of m.messages) handleSdkMessage((x) => acts.push(x), m.sessionId, msg, false, stateRef);
+            acts.push({ type: "patch", id: m.sessionId, patch: { histMore: m.more ?? null } });
+            dispatch({ type: "batch", id: m.sessionId, actions: acts });
+          }
             dispatch({ type: "patch", id: m.sessionId, patch: { loadingHistory: false } }); // 回放完毕,撤下"加载中"
             break;
+          case "history_older": {
+            // 更早的一段:在临时会话里回放,只取它的 timeline 拼到前面。用量/上下文/模型这些
+            // 状态类 action 一概不要 —— 用量已在 base 里算过,其余以最新那段为准。
+            // 临时 id 的时间戳游标单独起算:共用本会话的游标会把这些旧消息的时间全顶成"现在"
+            olderInflight.delete(m.sessionId);
+            const tmp = `${m.sessionId}#older`;
+            tsSeq.delete(tmp);
+            const acts: Action[] = [];
+            for (const msg of m.messages) handleSdkMessage((x) => acts.push(x), tmp, msg, false);
+            const st = replayBatch({ ...initial, sessions: { [tmp]: emptySession(tmp, "", "") } }, tmp, acts);
+            dispatch({ type: "prepend_history", id: m.sessionId, items: st.sessions[tmp].timeline, more: m.more ?? null });
+            break;
+          }
           case "blob": { // 历史图片的按需取数回包(见 fetchBlob)
             const id = `${m.key}:${m.full ? "full" : "thumb"}`;
             const w = blobWaiters.get(id);
@@ -1163,13 +1230,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (!haveHistory) {
         const sess = emptySession(id, entry.title, entry.cwd, entry.inheritFrom, entry.casual);
         if (entry.model) sess.info.model = entry.model; // 显示上次选的模型,不等 init
+        if (entry.effort) sess.effort = entry.effort;
         // 有过历史(index 存了 lastUser)才标"加载中";全新空会话 timeline 本就该空,不显示 spinner
         if (entry.lastUser) sess.loadingHistory = true;
         dispatch({ type: "open", session: sess });
       } else {
         dispatch({ type: "activate", id });
       }
-      send({ type: "reopen_session", sessionId: id, haveHistory });
+      send({ type: "reopen_session", sessionId: id, haveHistory, paged: true }); // paged:只要最近几十轮,更早的 loadOlderHistory 按需要
+      // 模型列表平时由 CLI 起来后上报。老会话要先选恢复方式(resume_prompt)才起 CLI,这期间列表是空的,
+      // 底部模型名只能显示存着的原始值(opus[1m]),档位也出不来。先要一份缓存列表,不用等 CLI。
+      if (!haveHistory) send({ type: "get_models", sessionId: id });
     },
     // 首页「最近历史」点一条:sidecar 把条目搬回 index 后回 session_restored,那时再 reopen
     // (要等新 index 到了,reopenSession 才在 state.index 里找得到这条)
@@ -1269,6 +1340,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (sess && ["claude", "kimi"].includes(sessionProvider({ ...sess, info: { ...sess.info, model } }))) send({ type: "usage_refresh" });
     },
     requestModels(id) { send({ type: "get_models", sessionId: id }); },
+    loadOlderHistory(id, untilTs) {
+      const more = stateRef.current.sessions[id]?.histMore;
+      if (!more || olderInflight.has(id)) return; // 一次只要一段:滚动/跳转会连着触发
+      olderInflight.add(id);
+      send({ type: "history_older", sessionId: id, before: more.before, untilTs });
+    },
     clearContext(id) {
       saveCtx(id, { t: 0 }); // 上下文清空,缓存也归零,重开别回填旧值
       dispatch({ type: "clear_timeline", id }); // 清空可见对话,匹配 CLI /clear
@@ -1465,3 +1542,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 }
 
 export { emptySession };
+
+// 给 scripts/store-replay.check.ts 用:回放批处理要和逐条 reducer 结果一致
+export const __test = { reducer, emptySession, handleSdkMessage, initial };

@@ -660,6 +660,10 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 .tool-result { border-top: 1px dashed var(--border); padding-top: 6px; }
 
 .perm-card { flex: 1; background: color-mix(in srgb, var(--amber) 10%, var(--panel)); border: 1px solid color-mix(in srgb, var(--amber) 45%, var(--border)); border-radius: 10px; padding: 10px 14px; }
+.plan-card .plan-head { font-weight: 600; }
+.plan-card .plan-body { margin: 8px 0; padding: 8px 12px; max-height: 420px; overflow: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; font-size: 13px; }
+.plan-card .plan-note { width: 100%; box-sizing: border-box; margin: 2px 0 8px; padding: 6px 8px; font: inherit; font-size: 12.5px; color: inherit; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; resize: vertical; }
+.plan-card .plan-note:focus { outline: none; border-color: var(--amber); }
 .perm-card pre { margin: 6px 0; color: color-mix(in srgb, var(--amber) 55%, var(--text)); white-space: pre-wrap; word-break: break-all; }
 .perm-card:focus { outline: none; border-color: var(--amber); box-shadow: 0 0 0 1px rgba(245,166,35,.3); }
 .perm-actions { display: flex; gap: 8px; }

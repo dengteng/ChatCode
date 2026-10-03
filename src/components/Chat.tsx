@@ -17,7 +17,7 @@ import { btnPress } from "../lib/utils";
 import {
   aggregateRound, failedEdits, groupTurns, latestTodos, liveBgTasks, nextSteps, permWaitMs,
   stripSummary, summarizeInput, turnCopyText, turnText, usedMemories, usedSkillsMcp, workFeed,
-  type BgTask, type FeedLine, type MemRef, type TodoRow,
+  type BgTask, type FeedLine, type MemRef, type TodoRow, type Turn,
 } from "../lib/timeline";
 import { defaultRuleContent, destinationLabel, suggestionLabel } from "../permissions";
 import { Composer } from "./Composer";
@@ -504,7 +504,7 @@ const scrollMem = new Map<string, ScrollPos>();
 
 export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { session: Session; onToggleInfo: (tab?: "project" | "branches" | "files") => void; onShowTurn: (anchor: number) => void; onOpenSettings: () => void }) {
   const { t } = useTranslation();
-  const { state, respondPermission, sshReconnect, sshClose, configureSsh, chooseResume, requestGitInfo, runTerminal, listSshHosts, sendMessage, enqueuePending } = useStore();
+  const { state, respondPermission, sshReconnect, sshClose, configureSsh, chooseResume, requestGitInfo, runTerminal, listSshHosts, sendMessage, enqueuePending, loadOlderHistory } = useStore();
   const bottomRef = useRef<HTMLDivElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   const stick = useRef(true); // 是否跟随底部:运行中往上翻历史时不该被新消息拽回去
@@ -550,8 +550,15 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
   // 放 useEffect 里会先按 30 条渲染一帧、再撑开重排,恢复位置就落在一个中间态的 scrollHeight 上。
   const lastId = useRef(session.id);
   const pendingRestore = useRef<ScrollPos | null>(null);
+  // 本地回合翻完了、要等 sidecar 送更早一段:到货后再撑开窗口(见下面 [turns.length] 那个 effect)
+  const [olderWant, setOlderWant] = useState(false);
+  // 窗口下沿。平时 null = 贴着最新一轮;搜索跳到很早的消息时停在目标附近,只渲染那一截,
+  // 否则得把目标到最新之间几百轮一次全渲染出来(实测 590 轮前的消息要卡 8 秒)。底部给「回到最新」
+  const [viewEnd, setViewEnd] = useState<number | null>(null);
   if (lastId.current !== session.id) {
     lastId.current = session.id;
+    setOlderWant(false);
+    setViewEnd(null);
     const saved = scrollMem.get(session.id);
     setHistCap(saved?.cap ?? HIST_STEP);
     pendingRestore.current = saved ?? null;
@@ -568,6 +575,16 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
       pokeRepaint(el, () => target, undefined, markProg);
     }
   }, [histCap]);
+  // 更早一段到货:timeline 前面多了几十轮,但窗口还是那么大,画面没动。这时量好位置再撑开窗口,
+  // 插到顶上的内容由上面那个 [histCap] effect 原地补回滚动位置 —— 点按钮时就量的话,
+  // 等待期间用户滚过就补错了。
+  useLayoutEffect(() => {
+    if (!olderWant) return;
+    setOlderWant(false);
+    const el = timelineRef.current;
+    if (el) histRestore.current = { h: el.scrollHeight, top: el.scrollTop };
+    setHistCap((c) => c + HIST_STEP);
+  }, [turns.length]);
   // 搜索面板点结果:切到会话后要滚到那条消息。ts 由搜索结果给(ISO → 毫秒),命中的可能是
   // 工具调用这种没有独立行的条目,所以取"不晚于它的最后一行"——落到所在回合的卡片上。
   const [focusTs, setFocusTs] = useState<number | null>(null);
@@ -585,7 +602,18 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
     for (const r of rows) { if (+(r.dataset.ts ?? 0) <= focusTs) hit = r; else break; }
     if (!hit) {                                                 // 目标比渲染窗口最早那行还早:往前多翻一页再试
       // 上界用 timeline 长度(回合数一定不超过它),翻到头还没找到就停在第一行,不空转
-      if (histCap < session.timeline.length) { histRestore.current = null; setHistCap((c) => c + HIST_STEP); return; }
+      // 目标已在本地 timeline 里:直接算出它在第几组,窗口一步撑到那儿(多留 2 组上文)。
+      // 一页页 +30 地撑,每撑一次整页重渲染一遍,跳到几百轮前要十几秒
+      const firstTs = (g: Turn) => ("user" in g ? g.user : "solo" in g ? g.solo : g.agent[0])?.ts ?? 0;
+      let gi = -1;
+      for (let i = 0; i < turns.length; i++) { if (firstTs(turns[i]) <= focusTs) gi = i; else break; }
+      // 比本地最早一组还早:先让 sidecar 一次送到那一刻为止(untilTs),别先把本地几百组全渲染一遍。
+      // 到货后 timeline 变长,这个 effect 会再跑
+      if (gi < 0 && session.histMore) { loadOlderHistory(session.id, focusTs); return; }
+      const need = Math.min(turns.length, gi < 0 ? turns.length : turns.length - gi + 2);
+      // 离最新太远:窗口整个挪过去,只渲染目标前 2 组 + 后 HIST_STEP 组
+      if (gi >= 0 && need > HIST_STEP * 2) { histRestore.current = null; setViewEnd(gi + HIST_STEP); setHistCap(HIST_STEP + 2); return; }
+      if (histCap < need) { histRestore.current = null; setHistCap(need); return; }
       hit = rows[0];
     }
     stick.current = false;                                      // 别让"跟随底部"把视图又拽回去
@@ -597,7 +625,7 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
     hit.classList.add("msg-focus");
     setTimeout(() => hit?.classList.remove("msg-focus"), 2200);
     setFocusTs(null);
-  }, [focusTs, session.timeline.length, histCap]);
+  }, [focusTs, session.timeline.length, histCap, turns.length, session.histMore, viewEnd]);
   // 命令跑完(terminal_result)会自动刷新 git_info:push 成功则 ahead 归 0、按钮消失;失败则复位可再点。
   // commit 同理(成功后工作区干净、按钮消失),所以两个菊花共用这一处停表,不各自计时。
   useEffect(() => { setPushing(false); setCommitting(false); }, [state.git[session.id]]);
@@ -637,9 +665,15 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
   const jumpBottom = () => {
     const el = timelineRef.current;
     stick.current = true;
+    // 窗口停在中间(搜索跳转)时,「最新」不在 DOM 里:先挪回去,渲染完由下面的 effect 钉底
+    if (viewEnd != null) { setViewEnd(null); setHistCap(HIST_STEP); setShowJump(false); return; }
     if (el) pinBottom(el);
     setShowJump(false);
   };
+  useLayoutEffect(() => {
+    const el = timelineRef.current;
+    if (viewEnd == null && stick.current && el) pinBottom(el);
+  }, [viewEnd]);
   // 所有「编程式钉到底部」都走这儿:钉完必须补重绘那一脚,少一处那一处就白屏。
   // 同一时刻只留一个待执行的 poke —— ResizeObserver 在流式回复时每帧都会叫好几次,
   // 不去重就攒出一堆 rAF 做同一件事。
@@ -955,8 +989,9 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
           const nameOf = (model?: string) => modelDisplayName(session, model) ?? brandName(model);
           const agentLabel = t("{{name}} 的回复", { name: nameOf(session.info.model) }); // user/solo 行的兜底(agent 组内按回合模型另算)
           // 窗口化:只渲染最近 histCap 个回合。anchor 回溯用完整 groups(被裁掉的也要能查到)。
-          const start = Math.max(0, groups.length - histCap);
-          const rows = groups.slice(start).map((g, si) => {
+          const end = viewEnd == null ? groups.length : Math.min(viewEnd, groups.length);
+          const start = Math.max(0, end - histCap);
+          const rows = groups.slice(start, end).map((g, si) => {
             const gi = start + si;
             // anchor = 最近的前置用户消息 ts。只看紧邻上一组会漏:中间夹了 term(git)组时退回 0,多张卡全指向会话开头那轮
             let anchor = 0, anchorText = "";
@@ -1071,12 +1106,21 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
           });
           return <>
             {/* onMouseDown:mousedown 会 blur 掉聚焦的输入框、触发重排,click(mouseup)落在移动后的位置就丢了 */}
-            {start > 0 && <button className="load-earlier" onMouseDown={pick(() => {
-              const el = timelineRef.current;
-              if (el) histRestore.current = { h: el.scrollHeight, top: el.scrollTop };
-              setHistCap((c) => c + HIST_STEP);
-            })}>{t("加载更早消息（还有 {{n}} 轮）", { n: start })}</button>}
+            {(start > 0 || !!session.histMore) && <button className="load-earlier" onMouseDown={pick(() => {
+              // 本地还有没渲染的回合就先展开本地的;不够一页了顺手向 sidecar 预取下一段,下次点就不用等
+              if (start > 0) {
+                const el = timelineRef.current;
+                if (el) histRestore.current = { h: el.scrollHeight, top: el.scrollTop };
+                setHistCap((c) => c + HIST_STEP);
+                if (start <= HIST_STEP && session.histMore) loadOlderHistory(session.id);
+              } else {
+                // 不禁用按钮:请求丢在断线里时(olderInflight 断线即清)还能再点一次重发
+                setOlderWant(true);
+                loadOlderHistory(session.id);
+              }
+            })}>{start === 0 && olderWant ? t("正在加载更早消息…") : t("加载更早消息（还有 {{n}} 轮）", { n: start + (session.histMore?.rounds ?? 0) })}</button>}
             {rows}
+            {end < groups.length && <button className="load-earlier" onMouseDown={pick(jumpBottom)}>{t("回到最新消息（后面还有 {{n}} 轮）", { n: groups.length - end })}</button>}
           </>;
         })()}
         {/* 用量/耗时跟随对话流,落在整段消息的右下角(不再单独占一条压在输入框上方的色带) */}
@@ -1860,7 +1904,9 @@ function Item({ item, cwd, onPermission, onAgentClick, agentLabel }: { item: Tim
       return (
         <div className="line line-perm">
           <span className="gutter gutter-perm"><Lock size={14} /></span>
-          <PermissionCard item={item} cwd={cwd} onPermission={onPermission} />
+          {item.toolName === "ExitPlanMode" && typeof item.input?.plan === "string"
+            ? <PlanCard item={item} cwd={cwd} onPermission={onPermission} />
+            : <PermissionCard item={item} cwd={cwd} onPermission={onPermission} />}
         </div>
       );
     case "terminal": {
@@ -1981,6 +2027,72 @@ function ImgTag({ src, blob, label }: { src?: string; blob?: { key: string; medi
           style={{ left: pv.left, top: pv.top, transform: `translateX(-50%)${pv.below ? "" : " translateY(-100%)"}` }} />,
         document.body)}
     </span>
+  );
+}
+
+// plan 模式的方案批准卡(ExitPlanMode)。通用权限卡把方案当 JSON 塞进 <pre>,整份 markdown 挤成一行 \n,没法读。
+// 这里渲染成 markdown,并且批准时**显式**带上 setMode:SDK 给不给切模式的 suggestion 不一定,
+// 不带的话批准完档位还挂在「只读规划」,agent 一动手就被拦。setMode 走 respondPermission 的 remember 通道,
+// store 那边会顺手 dispatch + 发 set_perm_mode,界面档位和 sidecar 落盘一起对齐。
+// 「继续改方案」= deny + 意见:SDK 把意见作为拒绝理由交给 agent,它留在 plan 模式里改。
+const PLAN_ACTIONS = [
+  { mode: "acceptEdits", label: "批准，自动接受编辑", decided: "已批准方案，切到「自动接受编辑」" },
+  { mode: "default", label: "批准，逐条审批", decided: "已批准方案，切到「逐条审批」" },
+] as const;
+function PlanCard({ item, cwd, onPermission }: {
+  item: Extract<TimelineItem, { kind: "permission" }>;
+  cwd: string;
+  onPermission: OnPermission;
+}) {
+  const { t } = useTranslation();
+  const md = useMemo(() => makeMdComponents(cwd), [cwd]);
+  const [choice, setChoice] = useState(0);
+  const [note, setNote] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (!item.decision) ref.current?.focus(); }, [item.decision]);
+  const plan = <div className="plan-body md"><Markdown remarkPlugins={[remarkGfm]} rehypePlugins={rawHtml} components={md}>{item.input.plan}</Markdown></div>;
+  if (item.decision) {
+    return (
+      <div className="perm-card plan-card">
+        <div className="plan-head">{t("方案")}</div>
+        {plan}
+        <div className="perm-decided">
+          {item.decision === "allow" ? <><Check size={13} /> {item.remembered || t("你批准了方案")}</>
+            : <><MessageSquare size={13} /> {item.answer ? t("要求继续改:{{answer}}", { answer: item.answer }) : t("你拒绝了方案")}</>}
+        </div>
+      </div>
+    );
+  }
+  const approve = (i: number) => {
+    const a = PLAN_ACTIONS[i];
+    onPermission(item.requestId, "allow", undefined, { updates: [{ type: "setMode", mode: a.mode, destination: "session" }], label: t(a.decided) });
+  };
+  // 意见为空也能点:等于"不行,再想想",agent 会自己追问
+  const revise = () => onPermission(item.requestId, "deny", note.trim() || t("用户没有批准这份方案,请继续完善后再提交。"));
+  const n = PLAN_ACTIONS.length + 1;
+  const act = (c: number) => (c < PLAN_ACTIONS.length ? approve(c) : revise());
+  function onKey(e: React.KeyboardEvent) {
+    if (e.key === "ArrowUp" || e.key === "ArrowLeft") { e.preventDefault(); setChoice((c) => (c + n - 1) % n); }
+    else if (e.key === "ArrowDown" || e.key === "ArrowRight") { e.preventDefault(); setChoice((c) => (c + 1) % n); }
+    else if (e.key === "Enter") { e.preventDefault(); act(choice); }
+  }
+  return (
+    <div className="perm-card plan-card" tabIndex={0} ref={ref} onKeyDown={onKey}>
+      <div className="plan-head">{t("agent 做好了方案,等你批准后开始动手")}</div>
+      {plan}
+      <textarea className="plan-note" rows={2} value={note} placeholder={t("想改哪里写在这,点「继续改方案」发给 agent(可留空)")}
+        onChange={(e) => setNote(e.target.value)}
+        onFocus={() => setChoice(n - 1)}
+        onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); revise(); } }} />
+      <div className="perm-actions vertical">
+        {PLAN_ACTIONS.map((a, i) => (
+          <button key={a.mode} className={`${i === 0 ? "primary" : "ghost"} ${choice === i ? "hi" : ""}`} {...btnPress(() => approve(i))}>
+            {t(a.label)}{i === 0 ? " (⏎)" : ""}
+          </button>
+        ))}
+        <button className={`ghost deny ${choice === n - 1 ? "hi" : ""}`} {...btnPress(revise)}>{t("继续改方案")}</button>
+      </div>
+    </div>
   );
 }
 

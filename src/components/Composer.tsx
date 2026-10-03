@@ -10,6 +10,7 @@ import { openImageWindow } from "../popout";
 import { onEdgeGlow } from "../lib/edgeGlow";
 import { unwrapSoftBreaks, htmlHasBlocks } from "../lib/unwrap";
 import { toast } from "./Toast";
+import i18n from "../i18n";
 import { extNote, skillDescs } from "../extensions";
 import { useTranslation } from "react-i18next";
 
@@ -141,6 +142,8 @@ const textHtml = (text: string) =>
 // /export:把可见时间线整理成 Markdown(用户/Agent 对话 + 终端 + 系统提示;跳过工具细节与执行说明)
 function timelineToMarkdown(session: Session): string {
   const out: string[] = [`# ${session.title}`, ""];
+  // 历史分页:更早的还在 sidecar 没拿过来,导出只含已加载的部分,得说清楚
+  if (session.histMore) out.push(i18n.t("> 只含已加载的最近部分,更早还有 {{n}} 轮未加载(在对话顶部点「加载更早消息」后再导出可包含)", { n: session.histMore.rounds }), "");
   for (const it of session.timeline) {
     if (it.kind === "user") {
       const text = it.blocks.map((b) => (b.type === "text" ? b.text : b.type === "image" ? "[图片]" : "")).filter(Boolean).join("\n");
@@ -975,7 +978,11 @@ export function Composer({ session }: { session: Session }) {
 
     // 权限快捷键(完全空时)—— AskUserQuestion 交给问答卡自己处理,不在此拦截
     if (isEmpty && pendingPerm?.kind === "permission" && pendingPerm.toolName !== "AskUserQuestion") {
-      if (e.key === "Enter") { e.preventDefault(); respondPermission(session.id, pendingPerm.requestId, "allow"); return; }
+      // 方案批准卡同它的默认按钮:批准 + 切到自动接受编辑(不带 setMode 档位会挂在只读规划,见 Chat.tsx PlanCard)
+      const planOk = pendingPerm.toolName === "ExitPlanMode"
+        ? { updates: [{ type: "setMode" as const, mode: "acceptEdits", destination: "session" as const }], label: t("已批准方案，切到「自动接受编辑」") }
+        : undefined;
+      if (e.key === "Enter") { e.preventDefault(); respondPermission(session.id, pendingPerm.requestId, "allow", undefined, planOk); return; }
       // esc 不再等于拒绝:误按一下就把整轮改动废掉,代价太大。拒绝只能点按钮。
     }
     // 命令面板导航

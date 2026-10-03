@@ -29,7 +29,14 @@ fs.writeFileSync(path.join(DATA, "sessions", `${SID}.jsonl`),
    ...round(path.join(repoB, "b.ts"), "改了B项目"),
    ...round(path.join(repoA, "c.ts"), "又改了A项目"),
    // 强调只包标签、冒号露在外面 —— 弱模型很爱这么写,少认这一种整条汇总就空掉
-   ...roundRaw(path.join(repoA, "d.ts"), "**本轮小结**：粗体标签也要认")]
+   ...roundRaw(path.join(repoA, "d.ts"), "**本轮小结**：粗体标签也要认"),
+   // 只用 Bash 改文件(python/sed -i)的轮次:拿不到路径,但小结照收
+   user("干活"),
+   { type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", name: "Bash", input: { command: "python3 - <<'EOF'\nopen('x','w')\nEOF" } }] } },
+   { type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "好了\n\n本轮小结：Bash 改的也要认" }] } },
+   // 没调任何工具的纯问答轮,即便写了小结也不收
+   user("问问"),
+   { type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "答\n\n本轮小结：纯问答不该进" }] } }]
     .map((m) => JSON.stringify(m)).join("\n") + "\n");
 
 // 清掉握手令牌和 relay:继承外面的 env 会让本地连接被 verifyClient 拒掉,还会顺手连上真 relay
@@ -44,7 +51,7 @@ const onMsg = (raw) => {
   if (m.type !== "commit_suggest") return;
   try {
     // 本仓库三轮都在、顺序不变;B 项目那轮被剔掉
-    assert.strictEqual(m.message, "- 改了A项目\n- 又改了A项目\n- 粗体标签也要认");
+    assert.strictEqual(m.message, "- 改了A项目\n- 又改了A项目\n- 粗体标签也要认\n- Bash 改的也要认");
     console.log("PASS:", JSON.stringify(m.message));
     done(0);
   } catch (e) { console.error("FAIL:", e.message, "\n实际文案:", JSON.stringify(m.message)); done(1); }

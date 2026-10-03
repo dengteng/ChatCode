@@ -148,6 +148,7 @@ export interface Session {
   inheritFrom?: string | null;
   casual?: boolean;          // 闲聊会话:无工作目录/git,隐藏目录栏与项目详情
   loadingHistory?: boolean;  // 重开会话:等 sidecar 回放历史期间为 true,timeline 空时显示"加载中"而非白屏
+  histMore?: { before: number; rounds: number } | null; // 历史分页:sidecar 那边还有更早的 rounds 轮没发,before = 日志下标游标(见 sidecar/histpage.mjs)
   pending?: PendingMsg[];    // 待发队列:agent 忙时排队,完成后自动发下一条(最多 3 条)
   peerQueue?: { pid: string; text: string }[]; // 别的端(手机 / 另一台电脑)排在这个会话上的待发,只读显示
   bgTasks?: string[];        // SDK background_tasks_changed 电平(REPLACE):当前在跑的后台任务 id 集,空=无
@@ -292,7 +293,7 @@ export function contextWindowOf(session: Session): number {
 
 export interface IndexEntry {
   id: string; title: string; cwd: string; sdkSessionId: string | null;
-  createdAt: number; inheritFrom?: string | null; model?: string;
+  createdAt: number; inheritFrom?: string | null; model?: string; effort?: EffortLevel;
   groupId?: string | null; // 所属分组(仅顶级会话携带;子会话跟随母会话)
   casual?: boolean;
   lastUser?: string;        // 最新一条用户消息文本(列表副标题;重启后内存无 timeline 时用它)

@@ -836,5 +836,20 @@
   "只影响之后新建的会话;已开的会话在输入框下方的模型菜单里改": "Only affects new sessions; change open sessions from the model menu below the input box",
   "这个模型不支持 effort": "This model doesn’t support effort",
   "新会话默认": "New session defaults",
-  "切换思考档位(auto / low … max)": "Change thinking level (auto / low … max)"
+  "切换思考档位(auto / low … max)": "Change thinking level (auto / low … max)",
+  "方案": "Plan",
+  "你批准了方案": "You approved the plan",
+  "要求继续改:{{answer}}": "Asked to revise: {{answer}}",
+  "你拒绝了方案": "You rejected the plan",
+  "用户没有批准这份方案,请继续完善后再提交。": "The user did not approve this plan. Please keep refining it before submitting again.",
+  "agent 做好了方案,等你批准后开始动手": "The agent has a plan and will start once you approve it",
+  "想改哪里写在这,点「继续改方案」发给 agent(可留空)": "Write what to change here, then click “Keep revising” to send it to the agent (optional)",
+  "批准，自动接受编辑": "Approve, auto-accept edits",
+  "批准，逐条审批": "Approve, review each step",
+  "继续改方案": "Keep revising",
+  "已批准方案，切到「自动接受编辑」": "Plan approved; switched to “Auto-accept edits”",
+  "已批准方案，切到「逐条审批」": "Plan approved; switched to “Review each step”",
+  "正在加载更早消息…": "Loading earlier messages…",
+  "> 只含已加载的最近部分,更早还有 {{n}} 轮未加载(在对话顶部点「加载更早消息」后再导出可包含)": "> Only the loaded recent part is included; {{n}} earlier rounds are not loaded yet (click “Load earlier messages” at the top of the conversation, then export again to include them)",
+  "回到最新消息（后面还有 {{n}} 轮）": "Back to latest ({{n}} newer rounds)"
 }

@@ -8,6 +8,7 @@ import { startProxy } from "./openai-proxy.mjs";
 import { capToolResults } from "./logcap.mjs";
 import { blobGet, isBlobRef, isInlineImg, externalizeImages, inlineImages } from "./blobs.mjs";
 import { createBgTracker } from "./bgtasks.mjs";
+import { HIST_ROUNDS, historyChunk, usageBase } from "./histpage.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -276,6 +277,10 @@ function collectRoundSummaries(id) {
       }
       // agent 中途自己 commit 了:之前汇总的小结都已在这次提交里,清空不再汇进弹窗
       if (b?.type === "tool_use" && b.name === "Bash" && GIT_COMMIT_RE.test(String(b.input?.command ?? ""))) { out.length = 0; roundCommitted = true; }
+      // 用 Bash 改文件(sed -i / python 脚本 / 重定向)也是改文件,只是拿不到路径。只认 Edit 类工具的话,
+      // 这种轮次的小结整条被丢,弹窗退回"拿用户原话凑"。哪些 Bash 只读不写分不清,
+      // ponytail: 一律算改过,靠小结约定把关(纯提问/诊断轮本就不该写小结);files 不加 = 不按仓库过滤
+      else if (b?.type === "tool_use" && b.name === "Bash") roundChanged = true;
     }
     if (!roundChanged || roundCommitted) continue; // 本轮还没动过文件 / 已提交过 → 这条里的小结先不收
     const text = msg.message.content.filter((b) => b.type === "text").map((b) => b.text).join("\n");
@@ -2534,6 +2539,14 @@ wss.on("connection", (ws) => {
     try { m = JSON.parse(raw); } catch { return; }
 
     switch (m.type) {
+      case "history_older": {
+        // 桌面往上翻 / 搜索跳到没加载的旧消息:从 before 往前再要一段(untilTs = 至少取到那一刻)
+        const log = readLog(m.sessionId).filter((msg) => !isCaptionEcho(msg));
+        const ch = historyChunk(log, Number(m.before) || 0, HIST_ROUNDS, Number(m.untilTs) || undefined);
+        send(ws, { type: "history_older", sessionId: m.sessionId, messages: ch.messages,
+          more: ch.more ? { before: ch.before, rounds: ch.more } : null });
+        break;
+      }
       case "search_messages": {
         send(ws, { type: "search_results", results: findMessages(m.query, m.sessionId, m.kind) });
         break;
@@ -2691,7 +2704,14 @@ wss.on("connection", (ws) => {
         // 手机那份要转缩略图(异步),桌面同步走原路。history 晚一点到不影响后面的 session_ctx 等包。
         if (!m.choice && !m.haveHistory) {
           if (m.limit) buildMobileHistory(log, m.limit).then((messages) => send(ws, { type: "history", sessionId: entry.id, messages }));
-          else send(ws, { type: "history", sessionId: entry.id, messages: log });
+          else if (m.paged) {
+            // 桌面:只发最近几十轮,更早的按需 history_older 要(见 histpage.mjs)。
+            // base = 没发的那段的用量合计,前端拿它当底数,右下角 token 总数不随分页变小
+            const ch = historyChunk(log, log.length);
+            send(ws, { type: "history", sessionId: entry.id, messages: ch.messages,
+              more: ch.more ? { before: ch.before, rounds: ch.more } : null, base: ch.before ? usageBase(log, ch.before) : null });
+          }
+          else send(ws, { type: "history", sessionId: entry.id, messages: log }); // 老前端(没带 paged)照旧给全量
         }
         // 重开先按日志实算的上下文体积回填进度条,别等下一轮 message_start(否则重启后占比掉到 1%)
         // ctxWindow 一起给:手机端从裁过的历史里翻不到带 modelUsage 的 result(见 contextWindowOfLog)
