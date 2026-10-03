@@ -900,10 +900,33 @@ async function buildCommitMessage(cwd, id, force) {
   const pending = all.slice(from)
     .filter((e) => !e.files.length || e.files.some((f) => underRoot(f, cwd, root)))
     .map((e) => e.text);
-  if (pending.length) return pending.length === 1 ? pending[0] : pending.map((s) => `- ${s}`).join("\n");
+  const join = (a) => (a.length === 1 ? a[0] : a.map((s) => `- ${s}`).join("\n"));
+  if (pending.length) return join(pending);
+  // 本会话没动过这些文件(改动是别的会话 / 手动改的):看其他会话的小结,谁的改动文件落在当前未提交文件里就取谁的。
+  // 不用水位 —— 「文件仍是脏的」本身就说明那轮改动还没进仓库。只在本会话无小结时才扫,避免白读大日志。
+  const dirty = await dirtyFiles(root);
+  if (dirty.length) {
+    const hit = (f) => { const rel = path.relative(root, realpath(path.resolve(cwd, f))); return dirty.some((d) => rel === d || (d.endsWith("/") && rel.startsWith(d))); };
+    const minM = Math.min(...dirty.map((d) => { try { return fs.statSync(path.join(root, d)).mtimeMs; } catch { return Infinity; } }));
+    const others = [];
+    for (const e of loadIndex()) {
+      if (e.id === id) continue;
+      try { if (fs.statSync(path.join(SESS_DIR, `${e.id}.jsonl`)).mtimeMs < minM) continue; } catch { continue; } // 日志比最老的脏文件还旧 = 不可能改过它们
+      for (const s of collectRoundSummaries(e.id)) if (s.files.some(hit) && !others.includes(s.text)) others.push(s.text);
+    }
+    if (others.length) return join(others);
+  }
   // 兜底:旧会话没留小结 / 本轮无产出 —— 用最近几条用户任务凑一条,仍然不调 AI
   const tasks = recentUserTasksFromLog(id).slice(-5);
-  return tasks.length ? tasks.join("；") : "";
+  if (tasks.length) return tasks.join("；");
+  // 连用户任务都没有(全新会话接手别人的改动):退到文件清单,至少不是空框
+  const names = dirty.map((d) => path.basename(d.replace(/\/$/, "")));
+  return names.length ? `修改 ${names.slice(0, 3).join("、")}${names.length > 3 ? ` 等 ${names.length} 个文件` : ""}` : "";
+}
+// 未提交文件(相对仓库根;未跟踪目录带尾 /)
+async function dirtyFiles(root) {
+  const r = await execOut("git", ["--no-optional-locks", "status", "--porcelain"], root, null, 2500);
+  return r.ok ? r.stdout.split("\n").filter((l) => l.length > 3).map((l) => l.slice(3).replace(/^"|"$/g, "").replace(/.* -> /, "")) : [];
 }
 
 // 纯交互式 shell:cwd 命中只是因为用户在这个目录开了个终端,不是"会话跑起来的进程",
