@@ -28,12 +28,20 @@ fs.writeFileSync(path.join(DATA, "sessions", `${SID}.jsonl`),
   [...round(path.join(repoA, "a.ts"), "改了A项目"),
    ...round(path.join(repoB, "b.ts"), "改了B项目"),
    ...round(path.join(repoA, "c.ts"), "又改了A项目"),
+   // agent 顺手去 B 仓库提交:不能把 A 仓库还没提交的小结清掉
+   user("干活"),
+   { type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", name: "Bash", input: { command: `cd ${repoB} && git add -A && git commit -qm x` } }] } },
+   { type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "好了\n\n本轮小结：B仓库提交不清A" }] } },
    // 强调只包标签、冒号露在外面 —— 弱模型很爱这么写,少认这一种整条汇总就空掉
    ...roundRaw(path.join(repoA, "d.ts"), "**本轮小结**：粗体标签也要认"),
    // 只用 Bash 改文件(python/sed -i)的轮次:拿不到路径,但小结照收
    user("干活"),
    { type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", name: "Bash", input: { command: "python3 - <<'EOF'\nopen('x','w')\nEOF" } }] } },
    { type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "好了\n\n本轮小结：Bash 改的也要认" }] } },
+   // heredoc 正文里出现 "git commit" 字样(写补丁脚本/测试数据):不是真提交,不能清掉前面的小结
+   user("干活"),
+   { type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", name: "Bash", input: { command: "cat > /tmp/p.py <<'EOF'\nsub('cd x && git commit -qm y')\nEOF\npython3 /tmp/p.py" } }] } },
+   { type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "好了\n\n本轮小结：heredoc 里的字样不算提交" }] } },
    // 没调任何工具的纯问答轮,即便写了小结也不收
    user("问问"),
    { type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "答\n\n本轮小结：纯问答不该进" }] } }]
@@ -51,7 +59,7 @@ const onMsg = (raw) => {
   if (m.type !== "commit_suggest") return;
   try {
     // 本仓库三轮都在、顺序不变;B 项目那轮被剔掉
-    assert.strictEqual(m.message, "- 改了A项目\n- 又改了A项目\n- 粗体标签也要认\n- Bash 改的也要认");
+    assert.strictEqual(m.message, "- 改了A项目\n- 又改了A项目\n- B仓库提交不清A\n- 粗体标签也要认\n- Bash 改的也要认\n- heredoc 里的字样不算提交");
     console.log("PASS:", JSON.stringify(m.message));
     done(0);
   } catch (e) { console.error("FAIL:", e.message, "\n实际文案:", JSON.stringify(m.message)); done(1); }

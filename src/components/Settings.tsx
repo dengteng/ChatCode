@@ -51,7 +51,7 @@ export function Settings({ onClose, initialTab, theme, onPickTheme, customBg, cu
         <div className="settings-body">
           <nav className="settings-nav">
             {/* 这个 tab 装的是 个人资料 + 账号/登录/同步(SHOW_ACCOUNT 关掉时就只剩头像昵称,名字随之改回「个人资料」) */}
-            {([["profile", "个人资料"],["account", "大模型"], ["github", "GitHub连接"], ["ssh", "SSH连接"], ["extensions", "插件/MCP/Skills"], ["appearance", "语言与主题"], ["notify", "通知提醒"], ["about", "关于"]] as [Tab, string][]).map(([k, label]) => (
+            {([["profile", "个人资料"],["account", "大模型"], ["github", "GitHub连接"], ["ssh", "SSH连接"], ["extensions", "Plugin/MCP/Skills"], ["appearance", "语言与主题"], ["notify", "通知提醒"], ["about", "关于"]] as [Tab, string][]).map(([k, label]) => (
               <button key={k} type="button" className={tab === k ? "sel" : ""} {...btnPress(() => setTab(k))}>{t(label)}</button>
             ))}
           </nav>
@@ -641,7 +641,7 @@ function ExtGroup({ items, empty, onToggle, onDelete, naTag, naHint }: {
             <div className="ext-main">
               {/* 标签一律排在名字右侧,不再一前一后参差不齐 */}
               <span className="ext-nameline">
-                <span className="ext-name">{it.name}</span>
+                <span className="ext-name">{it.name.replace(/^claude\.ai /, "")}</span>
                 {it.project && <span className="ext-tag proj" title={t("项目级 skill,来自 {{project}}", { project: it.project })}>{shortProject(it.project)}</span>}
                 {/* 市场名:同名插件靠它区分(superpowers@superpowers vs superpowers@superpowers-dev) */}
                 {it.mkt && <span className="ext-tag na" title={t("来自市场 {{mkt}}", { mkt: it.mkt })}>{it.mkt}</span>}
@@ -953,8 +953,14 @@ const isCloudMcp = (n: string) => n.startsWith("claude.ai");
 function ExtensionsTab() {
   const { t } = useTranslation();
   const { state, restartSession } = useStore();
-  const loadedMcp = useMemo(() => [...new Map(Object.values(state.sessions)
-    .flatMap((s) => s.info.mcp_servers ?? []).map((sv) => [sv.name, sv] as const)).values()], [state.sessions]);
+  // 云端连接器只认**最近一次启动**的那份快照:老会话的快照是它启动那一刻的,用户之后在 claude.ai 卸掉的连接器
+  // 还挂在上面(红点、删不掉)。本地 MCP 有磁盘配置兜底(下面 mcpNames 的过滤),照旧取各会话并集拿实时状态。
+  const loadedMcp = useMemo(() => {
+    const ss = Object.values(state.sessions).filter((s) => s.info.mcp_servers);
+    const newest = ss.reduce<typeof ss[number] | null>((a, s) => (!a || (s.info.initAt ?? 0) > (a.info.initAt ?? 0) ? s : a), null);
+    return [...new Map(ss.flatMap((s) => (s.info.mcp_servers ?? []).filter((sv) => s === newest || !isCloudMcp(sv.name)))
+      .map((sv) => [sv.name, sv] as const)).values()];
+  }, [state.sessions]);
   const loadedSkills = useMemo(() => [...new Set(Object.values(state.sessions).flatMap((s) => s.info.skills ?? []))], [state.sessions]);
   // 项目级 skill 在各自 cwd 下,只扫一个的话别的项目的 skill 会变成"扫不到 = 没有按钮"的一行
   const cwds = useMemo(() => {
@@ -989,7 +995,7 @@ function ExtensionsTab() {
       .sort((a, b) => (+!!exts?.skillPath[a] - +!!exts?.skillPath[b]) || a.localeCompare(b)),
     [loadedSkills, exts, gone]);
   const [sub, setSub] = useState<"skills" | "plugins" | "mcp" | "market">("skills");
-  const TABS: [typeof sub, string][] = [["skills", "Skills"], ["plugins", "插件"], ["mcp", "MCP"], ["market", "市场"]];
+  const TABS: [typeof sub, string][] = [["skills", "Skills"], ["plugins", "Plugin"], ["mcp", "MCP"], ["market", "市场"]];
 
   // 改完刷新列表,并重启空闲会话让新配置生效(和市场页同一套:工作中的会话不打断)
   const after = async (msg: string) => {

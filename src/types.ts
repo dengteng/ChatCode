@@ -42,6 +42,7 @@ export interface SessionInfo {
   model?: string;
   tools?: string[];
   mcp_servers?: { name: string; status: string }[];
+  initAt?: number; // 这份快照是哪个时刻的 CLI 启动时上报的(回放历史用日志时间,不是回放时间)
   slash_commands?: string[];
   skills?: string[];
 }

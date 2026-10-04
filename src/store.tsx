@@ -553,7 +553,7 @@ function handleSdkMessage(dispatch: (a: Action) => void, id: string, msg: any, l
   }
   if (msg.type === "system" && msg.subtype === "init") {
     dispatch({ type: "sdk_init", id, keepModel: !live, info: {
-      model: msg.model, tools: msg.tools, mcp_servers: msg.mcp_servers,
+      model: msg.model, tools: msg.tools, mcp_servers: msg.mcp_servers, initAt: (msg.timestamp && Date.parse(msg.timestamp)) || Date.now(),
       slash_commands: msg.slash_commands, skills: msg.skills,
     } });
     // 新的 CLI 进程:SDK 不会在启动时补发后台任务电平,必须重置为空,等下次 membership 变化再填充。

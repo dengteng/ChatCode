@@ -414,7 +414,7 @@ export function Sidebar({ onSearch, onOpenSettings, update, onShowUpdate }:
         })()}
         {/* 点击直接开设置弹窗的"扩展"页看清单,不再在侧栏内联展开 */}
         <button className="footer-row" onMouseDown={(e) => { if (e.button === 0) onOpenSettings("extensions"); }} title={t("查看插件")}>
-          <span className="footer-row-l"><Blocks size={14} /> {t("插件")}</span>
+          <span className="footer-row-l"><Blocks size={14} /> Plugin</span>
         </button>
         <button className="footer-row" onMouseDown={(e) => { if (e.button === 0) onOpenSettings(); }} title={t("设置")}>
           <span className="footer-row-l"><SettingsIcon size={14} /> {t("设置")}</span>

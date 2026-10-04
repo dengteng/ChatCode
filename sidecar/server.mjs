@@ -281,7 +281,24 @@ const GIT_COMMIT_RE = /(?:^|&&|\|\||;|\|)\s*git\s+(?:-C\s+\S+\s+)?commit\b/;
 // 返回 [{ text, files }]:files 是这一轮改过的文件路径,给 buildCommitMessage 按仓库过滤用
 // (同一会话里可能有几轮跑去改了别的项目的代码,那些小结不该混进本仓库的 commit)。
 // 条目数 = 小结条数,和以前一致 —— 水位(COMMIT_WM)是按条数存的,口径不能变。
-function collectRoundSummaries(id) {
+// agent 的提交落在哪个目录:`git -C X commit` 取 X,否则取同一条命令里 commit 之前最后一个 `cd X`;都没有 = null(会话目录)。
+// 不分目录的话,在别的仓库 commit 一次(一个会话顺手改了后端、改了别的服务)就把本仓库还没提交的小结全清掉。
+// 返回 undefined = 这条命令根本没提交。先剔掉 heredoc 正文、把引号串换成占位符再认 —— 写补丁脚本 / 测试数据的
+// heredoc 里常有 "… && git commit …" 字样,以前被当成真提交,一次清空了一百多条小结,弹窗退回拼用户原话。
+function commitDir(cmd) {
+  const strs = [];
+  const code = cmd
+    .replace(/<<-?\s*(['"]?)(\w+)\1[^\n]*\n[\s\S]*?\n\s*\2\s*(?=\n|$)/g, (m) => m.slice(0, m.indexOf("\n"))) // heredoc 只留开头那行
+    .replace(/'[^']*'|"(?:\\.|[^"\\])*"|`[^`]*`/g, (m) => `\0${strs.push(m) - 1}\0`);
+  const at = code.search(GIT_COMMIT_RE);
+  if (at < 0) return undefined;
+  const c = code.slice(at).match(/git\s+-C\s+(\S+)/);
+  const cds = [...code.slice(0, at).matchAll(/(?:^|&&|;|\|\|)\s*cd\s+(\S+)/g)];
+  const d = (c?.[1] ?? cds.at(-1)?.[1])?.replace(/\0(\d+)\0/g, (_, i) => strs[i].slice(1, -1));
+  return d ? d.replace(/^~(?=\/|$)/, os.homedir()) : null;
+}
+// ownCommit(dir):这次提交是不是提交进了「本仓库」(dir=null 即会话目录)。默认都算,调用方按仓库根细分
+function collectRoundSummaries(id, ownCommit = () => true) {
   const out = [];
   let roundChanged = false; // 当前这一轮(自上条真人消息起)有没有改过文件
   let roundCommitted = false; // 这一轮 agent 自己提交过:本轮随后的小结也已进仓库,不收
@@ -303,7 +320,11 @@ function collectRoundSummaries(id) {
         if (typeof p === "string" && p) roundFiles.push(p);
       }
       // agent 中途自己 commit 了:之前汇总的小结都已在这次提交里,清空不再汇进弹窗
-      if (b?.type === "tool_use" && b.name === "Bash" && GIT_COMMIT_RE.test(String(b.input?.command ?? ""))) { out.length = 0; roundCommitted = true; }
+      const cdir = b?.type === "tool_use" && b.name === "Bash" ? commitDir(String(b.input?.command ?? "")) : undefined;
+      if (cdir !== undefined) {
+        if (ownCommit(cdir)) { out.length = 0; roundCommitted = true; }
+        else roundChanged = true; // 提交的是别的仓库:不清本仓库的小结,这一轮照常算改过
+      }
       // 用 Bash 改文件(sed -i / python 脚本 / 重定向)也是改文件,只是拿不到路径。只认 Edit 类工具的话,
       // 这种轮次的小结整条被丢,弹窗退回"拿用户原话凑"。哪些 Bash 只读不写分不清,
       // ponytail: 一律算改过,靠小结约定把关(纯提问/诊断轮本就不该写小结);files 不加 = 不按仓库过滤
@@ -430,7 +451,7 @@ function recentUserTasksFromLog(id, limit = 8) {
       t = c.filter((b) => b.type === "text").map((b) => b.text).join(" ");
     }
     t = t.trim();
-    if (!t || t.startsWith("/")) continue;
+    if (!t || t.startsWith("/") || /^<(local-command|command-name|system-reminder)/.test(t)) continue; // 斜杠命令的回显/系统注入不是用户任务
     tasks.push(t.slice(0, 300)); // 单条截断,防止某次超长输入把 prompt 撑爆
   }
   return tasks.reverse();
@@ -915,13 +936,16 @@ function underRoot(file, cwd, root) {
 }
 // commit 信息 = 汇总各轮 AI 已写好的「本轮小结」(距上次提交的部分)。纯文本处理,不再跑一次 LLM。
 // force=true 时忽略水位,汇总本会话全部小结(手动「重新汇总」)。都没有小结时回退到最近用户任务清单。
+// 提交是否落在 root 这个仓库里(null = 会话目录,当作本仓库)
+const ownCommitIn = (cwd, root) => (d) => !d || underRoot(d, cwd, root);
 async function buildCommitMessage(cwd, id, force) {
-  const all = collectRoundSummaries(id);
+  const root = await repoRoot(cwd);
+  const own = ownCommitIn(cwd, root);
+  const all = collectRoundSummaries(id, own);
   // 水位是条数计数:agent 自己提交后旧小结被丢弃、总数变少,旧水位可能比总数还大 —— 失效就从头算,别一刀切没
   // (过滤放在 slice 之后:水位存的是「全部小结」里的位置,先过滤会让下标对不上)
   const wm = loadCommitWm()[id] || 0;
   const from = force || wm > all.length ? 0 : wm;
-  const root = await repoRoot(cwd);
   // 只留改动落在本仓库里的轮次:一轮同时改了本仓库和别的项目也留(确有本仓库的改动)。
   // files 为空 = 拿不到路径(旧日志/新工具),判断不了就别扔。
   const pending = all.slice(from)
@@ -939,13 +963,15 @@ async function buildCommitMessage(cwd, id, force) {
     for (const e of loadIndex()) {
       if (e.id === id) continue;
       try { if (fs.statSync(path.join(SESS_DIR, `${e.id}.jsonl`)).mtimeMs < minM) continue; } catch { continue; } // 日志比最老的脏文件还旧 = 不可能改过它们
-      for (const s of collectRoundSummaries(e.id)) if (s.files.some(hit) && !others.includes(s.text)) others.push(s.text);
+      for (const s of collectRoundSummaries(e.id, own)) if (s.files.some(hit) && !others.includes(s.text)) others.push(s.text);
     }
     if (others.length) return join(others);
   }
   // 兜底:旧会话没留小结 / 本轮无产出 —— 用最近几条用户任务凑一条,仍然不调 AI
-  const tasks = recentUserTasksFromLog(id).slice(-5);
-  if (tasks.length) return tasks.join("；");
+  // 每条只取首行、截到 40 字:原话常常多行多段,原样拼进来长短悬殊、换行错乱
+  const tasks = recentUserTasksFromLog(id).slice(-5)
+    .map((t) => { const l = t.split("\n").map((x) => x.trim()).find(Boolean) || ""; return l.length > 40 ? l.slice(0, 40) + "…" : l; });
+  if (tasks.length) return join(tasks);
   // 连用户任务都没有(全新会话接手别人的改动):退到文件清单,至少不是空框
   const names = dirty.map((d) => path.basename(d.replace(/\/$/, "")));
   return names.length ? `修改 ${names.slice(0, 3).join("、")}${names.length > 3 ? ` 等 ${names.length} 个文件` : ""}` : "";
@@ -3108,7 +3134,8 @@ wss.on("connection", (ws) => {
           }
           // commit 成功:推进小结水位到当前条数,下次 commit 只汇总此后的新小结(不重复已提交的)
           if (ec === 0 && /\bgit\b[\s\S]*\bcommit\b/.test(m.command) && !/--dry-run/.test(m.command)) {
-            const wm = loadCommitWm(); wm[m.sessionId] = collectRoundSummaries(m.sessionId).length; saveCommitWm(wm);
+            const wcwd = resolveCwd(m.sessionId); // 水位口径要和 buildCommitMessage 一致:同一个「本仓库」判断
+            repoRoot(wcwd).then((root) => { const wm = loadCommitWm(); wm[m.sessionId] = collectRoundSummaries(m.sessionId, ownCommitIn(wcwd, root)).length; saveCommitWm(wm); });
           }
           send(ws, { type: "terminal_result", sessionId: m.sessionId, command: m.command, cwd: newCwd, cwdChanged: newCwd !== cwd0, output, exitCode: ec });
         }, outStreamer(ws, m.sessionId, m.command));
