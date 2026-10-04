@@ -198,6 +198,25 @@ export function nextSteps(items: TimelineItem[]): string[] {
   return [];
 }
 
+// agent 按系统提示(sidecar 的 RECHECK_INSTRUCTION)留的「定时回查：2026-10-05 23:05 | 检查上报」:
+// 要等很久的事不 sleep 硬等,结束本轮,由前端排一条到点自动发的定时消息。
+// 时间是本机时间;只写 HH:MM 就取今天,已过则顺延到明天。过去的、7 天以外的不认(多半是写错了)。
+const RECHECK_RE = /^[\s>*#`\-]*定时回查\**\s*[：:]\**\s*(?:(\d{4})-(\d{1,2})-(\d{1,2})\s+)?(\d{1,2}):(\d{2})\s*[|｜丨]\s*(.+?)\s*\**$/;
+export function recheckOf(items: TimelineItem[], now = Date.now()): { at: number; text: string } | null {
+  const lines = turnText(items).split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const m = lines[i].match(RECHECK_RE);
+    if (!m) continue;
+    const [, y, mo, d, h, mi, text] = m;
+    const base = new Date(now);
+    let at = new Date(y ? +y : base.getFullYear(), y ? +mo - 1 : base.getMonth(), y ? +d : base.getDate(), +h, +mi).getTime();
+    if (!y && at <= now) at += 86_400_000;
+    const cmd = text.replace(/[*`]/g, "").trim();
+    return at > now && at - now <= 7 * 86_400_000 && cmd ? { at, text: cmd } : null;
+  }
+  return null;
+}
+
 // 把线性时间线按"用户消息"切成回合:每条用户消息独立成组,其后到下一条用户消息之间的
 // 所有 agent 动作(请求执行、回复、结果…)归到一个 agent 组,渲染时包进一个气泡。
 export type Turn = { user: TimelineItem } | { agent: TimelineItem[] } | { solo: TimelineItem };

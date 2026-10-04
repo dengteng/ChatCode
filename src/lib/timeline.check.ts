@@ -4,7 +4,7 @@
 // 这些函数以前埋在 Chat.tsx 里,只能靠 scripts/*.check.mjs 拿正则扫源码 —— 那种断言锁的是
 // "代码长什么样",改个变量名就红,真算错了反倒不吭声。搬到 lib/ 就是为了换成下面这种真调用。
 import {
-  aggregateRound, failedEdits, groupTurns, latestTodos, liveBgTasks, nextSteps, pendingBgTasks, permWaitMs,
+  aggregateRound, failedEdits, groupTurns, latestTodos, liveBgTasks, nextSteps, pendingBgTasks, permWaitMs, recheckOf,
   turnCopyText, usedMemories, usedSkillsMcp, workFeed,
 } from "./timeline";
 import type { TimelineItem } from "../types";
@@ -136,6 +136,17 @@ const t = ((k: string, p?: any) => (p ? `${k}:${JSON.stringify(p)}` : k)) as any
   eq(nextSteps(say("本轮建议：1 | 2 | 3 | 4")), ["1", "2", "3"], "最多留 3 条");
   eq(nextSteps(say("本轮建议：早的\n后面还有话\n本轮建议：晚的")), ["晚的"], "从后往前找,取最后一行");
   eq(nextSteps(say("没有建议行")), [], "没有就空数组");
+}
+
+// ---------- recheckOf:末尾那行「定时回查」 ----------
+{
+  const say = (text: string) => [it({ kind: "agent_text", text })];
+  const now = new Date(2026, 9, 5, 14, 0).getTime();
+  eq(recheckOf(say("正文\n定时回查：2026-10-05 23:05 | 检查上报\n本轮建议：甲"), now), { at: new Date(2026, 9, 5, 23, 5).getTime(), text: "检查上报" }, "带日期");
+  eq(recheckOf(say("**定时回查**：09:30 ｜ 看部署"), now), { at: new Date(2026, 9, 6, 9, 30).getTime(), text: "看部署" }, "只写时刻且已过 = 明天");
+  eq(recheckOf(say("定时回查：2026-10-04 23:05 | 过去了"), now), null, "过去的不认");
+  eq(recheckOf(say("定时回查：2026-11-05 23:05 | 太远"), now), null, "7 天外不认");
+  eq(recheckOf(say("没有回查行"), now), null, "没有就 null");
 }
 
 // ---------- turnCopyText:复制时抹掉「本轮小结」那行 ----------

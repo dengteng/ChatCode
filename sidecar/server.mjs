@@ -262,6 +262,15 @@ const NEXT_STEPS_INSTRUCTION =
   '(例:"提交并推送"、"修掉第 3 条"、"给这段加测试");' +
   '不要写"要不要…""是否需要…"这类问句,也不要写需要用户补充信息才能执行的模糊指令;' +
   "判断不出明确下一步时,直接不输出这行。";
+// 长等待不占会话:agent 用 sleep/后台轮询硬等几小时,会话一直锁着,用户的新消息只能排队干等。
+// 改成结束本轮 + 留一行「定时回查」,前端(src/lib/timeline.ts recheckOf)排一条到点自动发的定时消息。
+const RECHECK_INSTRUCTION =
+  "【定时回查约定】若接下来要等一件超过 10 分钟才会发生的事(定时任务首次运行、部署生效、数据上报等)," +
+  "不要用 sleep、后台命令或轮询去等。先用 date 确认本机当前时间,然后直接结束本轮,在回复末尾单独另起一行" +
+  "(放在「本轮建议」行之前)输出:\n" +
+  "定时回查：<YYYY-MM-DD HH:MM> | <到点后要你做的事>\n" +
+  "时间写本机时间,留几分钟余量;<到点后要你做的事>写成到点原样发回给你、你能直接执行的祈使句,不超过 30 字。" +
+  "到点后这句会作为用户消息自动发给你。等待不足 10 分钟时照常等,不输出这行。";
 // 闲聊会话:工作目录是我们后台建的临时空目录(~/.ChatCode/casual/<id>),对用户没有意义。
 // 让 agent 别把这个路径暴露/评论出来(不说"当前工作目录 … 不是 git 仓库"之类),就当普通对话。
 const CASUAL_INSTRUCTION =
@@ -2011,7 +2020,7 @@ function spawnAgent(ws, sess, { id, resume }) {
   }
   const savedModel = idxEntry?.model;
   // 闲聊会话额外追加"别暴露临时工作目录"的约定
-  const sysAppend = [COMMIT_SUMMARY_INSTRUCTION, NEXT_STEPS_INSTRUCTION, sshInstruction(), ...(idxEntry?.casual ? [CASUAL_INSTRUCTION] : [])].join("\n\n");
+  const sysAppend = [COMMIT_SUMMARY_INSTRUCTION, NEXT_STEPS_INSTRUCTION, RECHECK_INSTRUCTION, sshInstruction(), ...(idxEntry?.casual ? [CASUAL_INSTRUCTION] : [])].join("\n\n");
   // 非 Claude provider(如 DeepSeek):注入 ANTHROPIC_BASE_URL/AUTH_TOKEN/MODEL,复用 Claude Code CLI 走它的兼容 API。
   // env 会整体替换 process.env(SDK 不自动合并),必须自己摊平。model 传去掉前缀的真实 id。
   const provEnv = envForModel(savedModel, loadSettings());

@@ -10,6 +10,7 @@ import { PERMISSION_PRESETS, type PermissionMode } from "./permissions";
 import { COMMIT_HOLD_MS } from "./lib/gitcmd";
 import { pickAutoModel } from "./lib/automodel";
 import { resumeAt } from "./lib/autoresume";
+import { recheckOf } from "./lib/timeline";
 
 // 把顶级会话 sessionId 移动到 groupId(null=移出分组),插到 beforeId 之前(null=该组末尾)。
 // 前端乐观更新与后端持久化用同一套语义,保证拖拽后立即到位、广播回来不跳动。
@@ -720,6 +721,7 @@ export const autoResumeOn = () => localStorage.getItem(AUTO_RESUME_KEY) === "1";
 // 续跑发的就是一句"继续"(跟界面语言走),不让用户配:上下文还在(同一个 sdkSessionId),
 // agent 自己知道刚才干到哪儿,再多说反而是干扰。
 export const AUTO_RESUME_PID = "auto-resume-quota";
+const rechecked = new Set<string>(); // 定时回查已处理过的轮次,见 StoreProvider 里那个 effect
 // 「这个会话刚被额度挡回来了」——值是额度恢复的时刻。rate_limit_event 先到、result 后到,
 // 得跨这两条消息记一笔。不进 state:纯粹是两条消息之间的一次性传话,进 state 还得管清理和持久化。
 const quotaBlocked = new Map<string, number>();
@@ -1465,6 +1467,32 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
     }
   }, [state.sessions, state.connected, timedTick]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 定时回查:本次启动后真正跑完的一轮(freshDone)末尾带「定时回查」行 → 排一条到点自动发的定时消息。
+  // 放 effect 不放 result 分支:result 到达时 stateRef 里可能还没有这一轮最后的正文。
+  // 按「会话 + 最后一段正文的 ts」去重:用户取消后不会再被排回来;历史 reopen 的轮次 freshDone 为假,不会补排。
+  // ponytail: 待发队列只在前端内存,重启 ChatCode 定时回查就丢了(同额度自动续跑);要持久化再挪进 sidecar。
+  useEffect(() => {
+    for (const s of Object.values(state.sessions)) {
+      if (!s.freshDone || s.status !== "idle" || s.bgWait) continue;
+      let i = s.timeline.length - 1;
+      while (i >= 0 && s.timeline[i].kind !== "user") i--;
+      const turn = s.timeline.slice(i + 1);
+      const last = [...turn].reverse().find((t) => t.kind === "agent_text");
+      const key = `${s.id}:${last?.ts}`;
+      if (!last || rechecked.has(key)) continue;
+      rechecked.add(key);
+      const r = recheckOf(turn);
+      if (!r) continue;
+      const time = new Date(r.at).toLocaleString();
+      if ((s.pending?.length ?? 0) >= PENDING_MAX) {
+        dispatch({ type: "append", id: s.id, item: { kind: "system", ts: Date.now(), text: i18n.t("待发队列已满,没排上 {{time}} 的定时回查", { time }) } });
+        continue;
+      }
+      dispatch({ type: "enqueue_pending", id: s.id, item: { pid: `recheck-${r.at}`, text: r.text, blocks: [{ type: "text", text: r.text }], at: r.at } });
+      dispatch({ type: "append", id: s.id, item: { kind: "system", ts: Date.now(), text: i18n.t("已排到 {{time}} 定时回查,这期间会话空闲,可以继续聊别的", { time }) } });
+    }
+  }, [state.sessions]);
 
   // 把本机待发队列镜像广播给别端(手机/另一台电脑)只读显示。本机队列是纯前端 pending,
   // 不进 sidecar,不广播的话别端根本不知道 —— 就是「手机看不到 PC 排队」那个问题。

@@ -85,6 +85,7 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
    一行会话两行文字就白多占 3px。侧栏一屏能多放几条,比那点行距值钱。 */
 .session-title { font-size: 13px; line-height: 1.25; display: flex; align-items: center; gap: 6px; min-width: 0; }
 .session-title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-timer { flex: none; display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--accent); font-variant-numeric: tabular-nums; }
 .session-cwd { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.2; }
 .dot { font-size: 9px; flex-shrink: 0; }
 /* 删除按钮平时不占位:绝对定位悬浮在右侧,仅 hover 显示,盖在预览文字上 */

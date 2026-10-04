@@ -17,7 +17,7 @@ import { useTranslation } from "react-i18next";
 interface Img { media_type: string; data: string }
 
 // 定时时刻的显示:今天内只给 HH:MM;跨天补上月-日 —— 睡前排的消息多半落在明天凌晨,不写日期会看错成"马上发"
-function clockOf(ts: number) {
+export function clockOf(ts: number) {
   const d = new Date(ts);
   const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   return d.toDateString() === new Date().toDateString() ? hm : `${d.getMonth() + 1}-${d.getDate()} ${hm}`;
