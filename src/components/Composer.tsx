@@ -1343,7 +1343,7 @@ export function Composer({ session }: { session: Session }) {
               {effortOpts.map((l) => (
                 <button key={l ?? "auto"} className={`effort-opt ${l === effortSel ? "sel" : ""}`}
                   title={l === null ? t("自动:模型按难度自己决定想多少;plan 模式下提到 xhigh") : l === "max" ? t("最深思考,很费额度;只对当前会话有效") : undefined}
-                  onMouseDown={(e) => { e.preventDefault(); setEffort(session.id, l); }}>
+                  onMouseDown={(e) => { e.preventDefault(); setEffort(session.id, l); setModelMenu(false); }}>
                   {l ?? t("自动")}
                 </button>
               ))}

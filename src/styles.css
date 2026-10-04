@@ -1634,6 +1634,10 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 /* 整行统一 line-height:1 —— 文字盒贴紧字高,和 10px 进度条 / 勾选框在 align-items:center 下真正同心,不再偏上/偏下 */
 .model-line { display: flex; align-items: center; gap: 10px; padding: 7px 1px 0; color: var(--muted); font-size: 11px; line-height: 1; }.model-line strong { color: var(--text); white-space: nowrap; line-height: 1; }
 .model-switch { display: inline-flex; align-items: center; gap: 3px; background: none; border: none; padding: 0; color: inherit; font: inherit; cursor: pointer; border-radius: 4px; }.model-switch:hover strong { color: var(--accent); }.model-switch:hover svg { color: var(--accent); }
+/* 底栏「模型 + effort」是同一个热区:撑开内边距、整块悬停底色,effort 也跟着变色,看起来就是一个按钮 */
+.model-line .model-switch { padding: 4px 6px; margin: -4px -6px; border-radius: 6px; }
+.model-line .model-switch:hover { background: var(--panel); }
+.model-line .model-switch:hover .model-effort-tag:not(.down) { color: var(--accent); }
 
 /* 项目详情 = 抽屉,和"本轮回复详情"一样从右侧盖上来。以前它是 .app 里的第三根 flex 列,一开一关就把
    聊天列挤窄/放宽:timeline 整块重排,滚动位置从底部跳到中间,宽表格还被挤出横向滚动条。盖上来就没有重排。 */

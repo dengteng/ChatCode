@@ -556,7 +556,15 @@ function makeMdComponents(cwd: string) {
       const { url, rest } = splitAutoLink(href, children);
       return <><PathToken raw={url} cwd={cwd} isUrl={/^https?:\/\//.test(url)} />{rest}</>;
     },
-    code: ({ children }: { children?: ReactNode }) => <code><Linkify text={String(children ?? "")} cwd={cwd} /></code>,
+    code: ({ children }: { children?: ReactNode }) => {
+      const text = String(children ?? "");
+      // 整段 code 就是一条带空格的路径(`~/Obsidian Vault/关于我.md`):按空格切会只认到空格前。
+      // 判据:单行、以 / 或 ~/ 开头,空格后每一截都带 / 或扩展名、不以 - 开头(排除 `/bin/ls -la` 这类命令)。
+      const t = text.trim();
+      if (/^(?:\/|~\/)[^\n<>"'`]*\s/.test(t) && t.split(/\s+/).slice(1).every((p) => !p.startsWith("-") && /\/|\.\w+$/.test(p)))
+        return <code><PathToken raw={t} cwd={cwd} isUrl={false} /></code>;
+      return <code><Linkify text={text} cwd={cwd} /></code>;
+    },
     pre: ({ children }: { children?: ReactNode }) => <CodeBlock>{children}</CodeBlock>,
   };
 }
