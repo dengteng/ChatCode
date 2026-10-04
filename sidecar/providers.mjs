@@ -186,7 +186,9 @@ export const PROVIDERS = {
 // 所以这里按白名单逐字段挑,连 value 都强制重拼成 "<provider>/<model>" —— 清单改不了模型归谁管,
 // 也就改不了用哪个端点、注哪把 key。sanitize 放在**读取时**做,不是写入时:
 // 这样连被改过的 settings.json 也注不进 baseUrl。
-const CATALOG_FIELDS = ["model", "displayName", "description", "contextWindow", "vision", "price"];
+// hidden 也放行:厂商下架的模型靠清单从菜单里摘掉,不用等发版(定时任务见 scripts/model-watch.mjs)。
+// 已选着它的老会话照常能跑(只是模型条显示原始 id),直到厂商真的关掉那个 id。
+const CATALOG_FIELDS = ["model", "displayName", "description", "contextWindow", "vision", "price", "hidden"];
 export function sanitizeCatalogModels(id, list) {
   if (!Array.isArray(list)) return [];
   const out = [];

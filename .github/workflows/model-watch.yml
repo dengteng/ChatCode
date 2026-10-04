@@ -1,0 +1,120 @@
+# 每天对一遍各家新模型 / 弃用模型。有变化就让 Claude 按现有写法改 providers.mjs,开 PR 等人合并,
+# 再推一条通知到 tt-center 手机端。合并后 catalog/models.json 进 main,客户端一天内自动拉到。
+#
+# 需要的 Secrets(Settings → Secrets and variables → Actions):
+#   ANTHROPIC_API_KEY 或 CLAUDE_CODE_OAUTH_TOKEN(`claude setup-token` 生成,走订阅额度)二选一
+#   TT_NOTIFY_KEY     tt-center 的推送 key,scopes 要含 cron 和 chatcode
+# 还要在 Settings → Actions → General 勾上「Allow GitHub Actions to create and approve pull requests」。
+name: model-watch
+
+on:
+  schedule:
+    - cron: "0 1 * * *" # UTC 01:00 = 北京 09:00
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency: model-watch
+
+env:
+  TT: https://api.dengteng.xyz
+  TT_KEY: ${{ secrets.TT_NOTIFY_KEY }}
+  BRANCH: bot/model-watch
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # 心跳:tt-center「定时任务」页能看到它,漏跑 / 失败推手机。GitHub 的 schedule 常晚一两个小时,宽限给足。
+      - name: 心跳 start
+        run: |
+          curl -s -m 10 -o /dev/null -H "x-notify-key: $TT_KEY" -H 'content-type: application/json' \
+            -d '{"slug":"chatcode.model-watch","event":"start","name":"ChatCode 模型巡检","schedule":"0 1 * * *","tz":"UTC","graceMin":240}' \
+            "$TT/api/cron/ping" || true
+
+      # 上一个 PR 还没处理,就先不跑:免得把人还没看的改动覆盖掉
+      - name: 有没处理的 PR 就跳过
+        id: open
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "count=$(gh pr list --head "$BRANCH" --state open --json number -q length)" >> "$GITHUB_OUTPUT"
+
+      - name: 对比 models.dev
+        id: diff
+        if: steps.open.outputs.count == '0'
+        run: node scripts/model-watch.mjs model-watch-report.json "$RUNNER_TEMP/seen.json"
+
+      - name: Claude 改模型表
+        if: steps.diff.outputs.changed == 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ github.token }}
+          prompt: 按 .github/model-watch-prompt.md 的要求处理 model-watch-report.json。
+          # 工具收窄到只能读写文件、查网页、跑两个固定脚本:报告来自外部,不给它任意 Bash
+          claude_args: >-
+            --model claude-opus-5-5 --max-turns 80
+            --allowedTools "Read,Edit,Write,Glob,Grep,WebFetch,WebSearch,Bash(node scripts/gen-catalog.mjs),Bash(node sidecar/providers.check.mjs)"
+
+      # 不信 Claude 说"跑过了",自己再跑一遍:清单没同步、表写坏了都在这儿拦下
+      - name: 校验
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          node scripts/gen-catalog.mjs
+          node sidecar/providers.check.mjs
+          test -s model-watch-pr.md || echo "${{ steps.diff.outputs.summary }}" > model-watch-pr.md
+
+      - name: 开 PR
+        id: pr
+        if: steps.diff.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: ${{ env.BRANCH }}
+          add-paths: |
+            sidecar/providers.mjs
+            catalog/models.json
+          commit-message: "模型表:按 models.dev 接入新模型 / 下架弃用模型"
+          title: "模型巡检:${{ steps.diff.outputs.summary }}"
+          body-path: model-watch-pr.md
+          delete-branch: true
+
+      - name: 推送到手机
+        if: steps.pr.outputs.pull-request-operation == 'created' || steps.pr.outputs.pull-request-operation == 'updated'
+        env:
+          URL: ${{ steps.pr.outputs.pull-request-url }}
+        run: |
+          body=$(head -c 3000 model-watch-pr.md)
+          jq -n --arg b "$body" --arg u "$URL" \
+            '{topic:"chatcode", title:"ChatCode 有模型待更新,合并 PR 后生效", body:$b, link:$u}' |
+            curl -s -m 10 -H "x-notify-key: $TT_KEY" -H 'content-type: application/json' -d @- "$TT/api/notify"
+
+      # 已见表直接进 main:报过的模型不管 PR 合不合都不再报(关掉 PR = 不接)。放在开 PR 之后,
+      # 前面任何一步失败都不会走到这里,下次会重报。
+      - name: 记下已见过的模型
+        if: steps.diff.outcome == 'success'
+        run: |
+          git fetch -q origin main
+          git checkout -q -f -B main origin/main
+          cp "$RUNNER_TEMP/seen.json" catalog/model-watch-seen.json
+          git add catalog/model-watch-seen.json
+          git diff --cached --quiet && exit 0
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "模型巡检:更新已见模型表"
+          git push -q origin main
+
+      - name: 心跳 ok / fail
+        if: always()
+        run: |
+          ev=$([ "${{ job.status }}" = success ] && echo ok || echo fail)
+          jq -n --arg ev "$ev" --arg out "${{ steps.diff.outputs.summary }} $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            '{slug:"chatcode.model-watch", event:$ev, schedule:"0 1 * * *", tz:"UTC", output:$out}' |
+            curl -s -m 10 -o /dev/null -H "x-notify-key: $TT_KEY" -H 'content-type: application/json' -d @- "$TT/api/cron/ping" || true

@@ -159,6 +159,15 @@ const hidden = resolvedProvider("deepseek", {
 });
 assert.ok(!hidden.models.some((m) => m.model === "deepseek-v4-flash"), "标了 hidden 的模型该从列表里消失");
 assert.ok(hidden.models.some((m) => m.model === "deepseek-v4-pro"), "只藏标了的那条,别把别的一起带走");
+// 远程清单也能下架内置模型(不然下架只能等发版)
+const remoteHidden = resolvedProvider("deepseek", { modelCatalog: { deepseek: [{ model: "deepseek-v4-flash", hidden: true }] } });
+assert.ok(!remoteHidden.models.some((m) => m.model === "deepseek-v4-flash"), "清单标了 hidden 的内置模型该消失");
+// 用户手填 hidden: false 能把清单下架的再请回来
+const unhidden = resolvedProvider("deepseek", {
+  modelCatalog: { deepseek: [{ model: "deepseek-v4-flash", hidden: true }] },
+  providerConfig: { deepseek: { models: [{ model: "deepseek-v4-flash", hidden: false }] } },
+});
+assert.ok(unhidden.models.some((m) => m.model === "deepseek-v4-flash"), "手填 hidden: false 压过清单");
 console.log("✓ 清单优先级:用户手填 > 远程 > 内置(逐个模型合并,hidden 显式隐藏)");
 
 // 仓库里那份 catalog/models.json 必须和内置表同步 —— 加了模型忘了跑 gen-catalog.mjs,

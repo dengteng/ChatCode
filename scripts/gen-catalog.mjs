@@ -14,7 +14,7 @@ import { PROVIDERS } from "../sidecar/providers.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = path.join(ROOT, "catalog", "models.json");
-const FIELDS = ["model", "displayName", "description", "contextWindow", "vision", "price"];
+const FIELDS = ["model", "displayName", "description", "contextWindow", "vision", "price", "hidden"];
 
 const providers = {};
 for (const p of Object.values(PROVIDERS)) {
