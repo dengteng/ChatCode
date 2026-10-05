@@ -117,6 +117,8 @@ export interface AccountUsage { session: LimitUsage; weekly: LimitUsage; fetched
 export interface ResumePrompt { tokens: number; ageMs: number }
 // fresh = 不接历史、不压缩,在该项目下直接开一段全新对话(等于放弃这次恢复)
 export type ResumeChoice = "summary" | "full" | "fresh";
+// 设置里的固定恢复方式:ask = 每次弹卡片问(默认)。不含 fresh —— 它会丢旧上下文,不能悄悄替人选
+export type ResumeMode = "ask" | "summary" | "full";
 
 // 待发消息:agent 工作时继续发的消息进队列,完成后自动依次发出。html/imgs 供发出后"编辑"完整还原
 // at = 定时发送的时刻(ms):到点之前不出队,队列里排在它后面的普通消息可以先走。
@@ -335,6 +337,7 @@ export interface AuthStatus {
   github: { installed: boolean; loggedIn: boolean; account?: string; detail?: string };
   providers?: Record<string, ProviderState>;
   cnEndpoint?: boolean;           // 国内节点总开关
+  resumeMode?: ResumeMode;        // 重开大会话的恢复方式(缺 = ask)
   catalogAt?: number;             // 远程模型清单上次拉成功的时刻(0/缺 = 还没拉到过)
 }
 // 设置:全局 SSH 主机预设(独立于会话,可复用)

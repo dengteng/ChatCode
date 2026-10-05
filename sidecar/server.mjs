@@ -1325,7 +1325,8 @@ async function authStatus() {
   }
   // catalogAt:远程模型清单上次拉成功的时刻(0 = 还没拉到过)。设置页拿它显示「上次更新」,
   // 让「立即刷新」这个按钮有个可对照的状态,而不是点完只看见一句 toast。
-  return { claude, github, providers, cnEndpoint: !!settings.cnEndpoint, catalogAt: settings.modelCatalogAt || 0 };
+  return { claude, github, providers, cnEndpoint: !!settings.cnEndpoint, catalogAt: settings.modelCatalogAt || 0,
+    resumeMode: settings.resumeMode === "summary" || settings.resumeMode === "full" ? settings.resumeMode : "ask" };
 }
 
 // 新发布但 SDK supportedModels 还没上报(后端按账户放量,菜单里看不到)的 Claude 模型手动补进来。
@@ -2815,21 +2816,27 @@ wss.on("connection", (ws) => {
         const tokens = contextSize(log);
         if (tokens) send(ws, { type: "session_ctx", sessionId: entry.id, tokens, ctxWindow: contextWindowOfLog(log) || undefined });
         if (!sessions.has(entry.id)) {
-          // 大会话完整恢复会吃掉可观的额度,先问一句(除非用户选过"不再询问")
-          if (!m.choice && entry.sdkSessionId && tokens >= RESUME_ASK_TOKENS && !loadSettings().resumeAlwaysFull) {
-            send(ws, { type: "resume_prompt", sessionId: entry.id, tokens, ageMs: Date.now() - (entry.createdAt ?? Date.now()) });
-            break; // 等前端回一条带 choice 的 reopen_session 再真正启动
+          // 大会话完整恢复会吃掉可观的额度,先问一句。设置(电脑端「大模型」页)里选了固定方式就不问,
+          // 照那个来 —— 在这里统一处理,电脑和手机重开会话都吃同一份设置,手机端不另设。
+          let choice = m.choice;
+          if (!choice && entry.sdkSessionId && tokens >= RESUME_ASK_TOKENS) {
+            const mode = loadSettings().resumeMode;
+            if (mode === "summary" || mode === "full") choice = mode;
+            else {
+              send(ws, { type: "resume_prompt", sessionId: entry.id, tokens, ageMs: Date.now() - (entry.createdAt ?? Date.now()) });
+              break; // 等前端回一条带 choice 的 reopen_session 再真正启动
+            }
           }
           // 取消 = 这一轮开全新对话:不接历史上下文(resume: undefined),但旧日志一个字都不动 ——
           // 用户明确要留着旧记录。代价是下次重开这个会话仍会按旧历史体积再弹一次恢复卡,这是用户接受的。
-          const fresh = m.choice === "fresh";
+          const fresh = choice === "fresh";
           // 全新上下文:进度条得归零,否则上面按旧日志算的体积一直挂着,用户以为还有 26% 要压、
           // 而 CLI 那边是空对话(/compact 只会回 Not enough messages)。reset 让前端绕过单调守卫。
           if (fresh) broadcast({ type: "session_ctx", sessionId: entry.id, tokens: 0, reset: true });
           startSession(ws, {
             id: entry.id, cwd: entry.cwd,
             resume: fresh ? undefined : (entry.sdkSessionId ?? undefined),
-            compactFirst: m.choice === "summary",
+            compactFirst: choice === "summary",
           });
         }
         const s = sessions.get(entry.id);
@@ -3031,6 +3038,12 @@ wss.on("connection", (ws) => {
         for (const [sid, sess] of sessions) reportModels(ws, sid, sess.q);
         // 手填了 baseUrl 就只剩一个候选(probeEndpoint 直接跳过);清空覆盖则候选恢复成两个,重探
         reprobeProvider(m.provider, ws);
+        break;
+      }
+      case "set_resume_mode": {
+        // 重开大会话时的恢复方式:ask(默认,弹卡片问)/ summary / full。「全新对话」不收 —— 会丢旧上下文。
+        saveSettings({ ...loadSettings(), resumeMode: m.mode === "summary" || m.mode === "full" ? m.mode : "ask" });
+        authStatus().then((status) => send(ws, { type: "auth_status", status }));
         break;
       }
       case "set_cn_endpoint": {

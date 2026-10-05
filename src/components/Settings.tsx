@@ -9,7 +9,7 @@ import remarkGfm from "remark-gfm";
 import { rawHtml, useMdImages } from "../lib/mdhtml";
 import { useStore, useApi, DOCK_BOUNCE_KEY, dockBounceOn, SOUND_KEY, soundOn, playDing, AUTO_RESUME_KEY, autoResumeOn } from "../store";
 import { toast } from "./Toast";
-import { THEMES, EFFORT_LEVELS, modelName, modelProvider, providerBrand, type EffortLevel, type SshHost, type ThemeId, type CustomArt } from "../types";
+import { THEMES, EFFORT_LEVELS, modelName, modelProvider, providerBrand, type EffortLevel, type ResumeMode, type SshHost, type ThemeId, type CustomArt } from "../types";
 import { loadExtensions, loadMarketplace, marketplaceNames, installPlugin, uninstallPlugin, enablePlugin, disablePlugin, addMarketplace, removeMarketplace, installSkillGit, setSkillOn, removeSkill, setMcpOn, removeMcp, loadExtNotes, saveExtNote, SEED_MARKETPLACES, type Exts, type MarketPlugin } from "../extensions";
 import { EXT_NOTE_ZH } from "../extNotesZh";
 import { openEditorWindow } from "../popout";
@@ -273,6 +273,29 @@ function DefaultModelRow() {
   );
 }
 
+// 重开大会话(上下文 ≥ 10 万 token)时怎么接回上下文。选了固定方式,重开就不再弹卡片。
+function ResumeModeRow() {
+  const { t } = useTranslation();
+  const { state, setResumeMode } = useStore();
+  const mode = state.auth?.resumeMode ?? "ask";
+  const change = (v: ResumeMode) => setResumeMode(v);
+  return (
+    <div className="provider-row setting-row">
+      <div className="provider-id"><div>
+        <b>{t("每次启动 ChatCode 后重开会话")}</b>
+        <div className="muted">{t("只对上下文 ≥ 10 万 token 的会话生效,更小的会话本来就直接恢复。手机端同样照此执行")}</div>
+      </div></div>
+      <div className="provider-actions">
+        <select className="perm-picker on" value={mode} onChange={(e) => change(e.target.value as ResumeMode)}>
+          <option value="ask">{t("每次询问")}</option>
+          <option value="summary">{t("从摘要恢复(省额度)")}</option>
+          <option value="full">{t("完整恢复")}</option>
+        </select>
+      </div>
+    </div>
+  );
+}
+
 const Dot = ({ ok }: { ok: boolean }) => <span className={`auth-dot ${ok ? "on" : "off"}`}>●</span>;
 
 // provider 显示元数据:徽标字母 + logo css class。顺序即渲染顺序。
@@ -322,6 +345,9 @@ function AccountTab() {
 
       <h4>{t("新会话默认")}</h4>
       <DefaultModelRow />
+
+      <h4>{t("重开会话时的压缩方式")}</h4>
+      <ResumeModeRow />
 
       {/* 下面三组(国内节点 / 模型列表 / 自动继续)统一成同一套排版:h4 分组名 + 一张 setting-row 卡片,
           卡片左边「设置名 + 一行 muted 元信息」,右边是控件列(开关或按钮)。三组各写各的样式时

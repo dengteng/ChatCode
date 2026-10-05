@@ -812,6 +812,7 @@ interface Api {
   setProviderKey: (provider: string, apiKey: string) => void; // 存/清 其他 LLM provider 的 API key(本地 settings)
   setProviderConfig: (provider: string, config: { baseUrl?: string; smallFast?: string; models?: any[] } | null) => void; // 覆盖/重置 provider 的 baseUrl/模型表
   setCnEndpoint: (on: boolean) => void;                       // 国内节点总开关(GLM/Qwen/MiniMax 换国内域名)
+  setResumeMode: (mode: import("./types").ResumeMode) => void; // 重开大会话的恢复方式(存 sidecar,电脑和手机共用)
   listSshHosts: () => void;
   saveSshHost: (host: SshHost) => void;
   deleteSshHost: (id: string) => void;
@@ -1376,6 +1377,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setProviderKey(provider, apiKey) { send({ type: "set_provider_key", provider, apiKey }); },
     setProviderConfig(provider, config) { send({ type: "set_provider_config", provider, config: config ?? {} }); },
     setCnEndpoint(on) { send({ type: "set_cn_endpoint", on }); },
+    setResumeMode(mode) { send({ type: "set_resume_mode", mode }); },
     listSshHosts() { send({ type: "ssh_hosts" }); },
     saveSshHost(host) { send({ type: "ssh_host_save", host }); },
     deleteSshHost(id) { send({ type: "ssh_host_delete", id }); },
