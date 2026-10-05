@@ -1,9 +1,8 @@
-# 每天对一遍各家新模型 / 弃用模型。有变化就让 Claude 按现有写法改 providers.mjs,开 PR 等人合并,
-# 再推一条通知到 tt-center 手机端。合并后 catalog/models.json 进 main,客户端一天内自动拉到。
+# 每天对一遍各家新模型 / 弃用模型。有变化就让 Claude Code(模型用 DeepSeek)按现有写法改 providers.mjs,
+# 开 PR 等人合并,再推一条通知到 tt-center 手机端。合并后 catalog/models.json 进 main,客户端一天内自动拉到。
 #
 # 需要的 Secrets(Settings → Secrets and variables → Actions):
-#   ANTHROPIC_API_KEY 或 CLAUDE_CODE_OAUTH_TOKEN(`claude setup-token` 生成,走订阅额度)二选一
-#   TT_NOTIFY_KEY     tt-center 的推送 key,scopes 要含 cron 和 chatcode
+#   TT_NOTIFY_KEY     tt-center 的机器 key,scopes 要含 cron、chatcode、llm:deepseek(DeepSeek key 从它现领)
 # 还要在 Settings → Actions → General 勾上「Allow GitHub Actions to create and approve pull requests」。
 name: model-watch
 
@@ -52,18 +51,47 @@ jobs:
         if: steps.open.outputs.count == '0'
         run: node scripts/model-watch.mjs model-watch-report.json "$RUNNER_TEMP/seen.json"
 
-      - name: Claude 改模型表
+      # 模型走 DeepSeek 的 Anthropic 兼容端点。key 不存 GitHub,每次从 tt-center 现领
+      # (TT_NOTIFY_KEY 要带 llm:deepseek scope),后台换号、停号这里自动跟上。
+      - name: 领 DeepSeek key
+        id: llm
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          r=$(curl -sf -m 10 -H "x-notify-key: $TT_KEY" "$TT/api/llm/key?provider=deepseek")
+          key=$(jq -r .key <<<"$r")
+          echo "::add-mask::$key"
+          echo "DEEPSEEK_KEY=$key" >> "$GITHUB_ENV"
+          echo "key_id=$(jq -r '.keyId // empty' <<<"$r")" >> "$GITHUB_OUTPUT"
+
+      - name: DeepSeek 改模型表
+        id: agent
         if: steps.diff.outputs.changed == 'true'
         uses: anthropics/claude-code-action@v1
+        env:
+          ANTHROPIC_BASE_URL: https://api.deepseek.com/anthropic
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: deepseek-flash
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ env.DEEPSEEK_KEY }}
           github_token: ${{ github.token }}
           prompt: 按 .github/model-watch-prompt.md 的要求处理 model-watch-report.json。
           # 工具收窄到只能读写文件、查网页、跑两个固定脚本:报告来自外部,不给它任意 Bash
           claude_args: >-
-            --model claude-opus-5-5 --max-turns 80
+            --model deepseek-v4-pro[1m] --max-turns 80
             --allowedTools "Read,Edit,Write,Glob,Grep,WebFetch,WebSearch,Bash(node scripts/gen-catalog.mjs),Bash(node sidecar/providers.check.mjs)"
+
+      # token 用量回报给 tt-center,后台按项目看得到这次烧了多少
+      - name: 回报用量
+        if: always() && steps.llm.outputs.key_id != ''
+        env:
+          KEY_ID: ${{ steps.llm.outputs.key_id }}
+          EXEC: ${{ steps.agent.outputs.execution_file }}
+        run: |
+          [ -s "$EXEC" ] || exit 0
+          jq --arg k "$KEY_ID" '[.[] | select(.type == "result")] | last | .usage as $u |
+            {keyId:$k, model:"deepseek-v4-pro", calls:(.num_turns // 1),
+             inputTokens:(($u.input_tokens // 0) + ($u.cache_read_input_tokens // 0) + ($u.cache_creation_input_tokens // 0)),
+             outputTokens:($u.output_tokens // 0)}' "$EXEC" |
+            curl -s -m 10 -o /dev/null -H "x-notify-key: $TT_KEY" -H 'content-type: application/json' -d @- "$TT/api/llm/usage" || true
 
       # 不信 Claude 说"跑过了",自己再跑一遍:清单没同步、表写坏了都在这儿拦下
       - name: 校验
