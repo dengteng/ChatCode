@@ -803,7 +803,7 @@
   "{{clock}} 发出": "sends at {{clock}}",
   "重开会话时的压缩方式": "Compression when reopening a session",
   "每次启动 ChatCode 后重开会话": "Reopening a session after ChatCode starts",
-  "只对上下文 ≥ 10 万 token 的会话生效,更小的会话本来就直接恢复。手机端同样照此执行": "Applies to sessions with 100k+ tokens of context. Smaller ones always resume in full. The phone follows this too",
+  "只对上下文 ≥ 10 万 token 的会话生效。选「从摘要恢复」时,启动后先压你点开的那个,其余在后台逐个自动压。手机端同样照此执行": "Applies to sessions with 100k+ tokens. With summary restore, the session you open is compacted first and the rest are compacted one by one in the background. The phone follows this too",
   "每次询问": "Ask every time",
   "从摘要恢复(省额度)": "Resume from summary (saves quota)",
   "定时消息 {{clock}} 自动发出": "Scheduled message sends at {{clock}}",

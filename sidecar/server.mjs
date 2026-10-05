@@ -1925,6 +1925,30 @@ function startSession(ws, { id, cwd, resume, compactFirst }) {
   if (compactFirst) pushTurn(sess, userMessage(sess, "/compact"));
 }
 
+// 设置「重开会话压缩方式」= 从摘要恢复时,每次启动后把没人动的大会话也在后台逐个压掉。
+// 用户点开的那个不用排队:reopen_session 当场起它并压缩,同时清掉 bgCompact 标记,这里就不再收它。
+// ponytail: 串行一个一个压(额度/CLI 进程数有上限);压完用 queue.end 收掉,不留一堆空闲进程。
+async function compactBacklog() {
+  if (loadSettings().resumeMode !== "summary") return;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  for (const { id } of loadIndex()) {
+    const entry = loadIndex().find((e) => e.id === id);
+    if (!entry?.sdkSessionId || sessions.has(id)) continue;
+    let tokens = 0;
+    try { tokens = contextSize(readLog(id).filter((msg) => !isCaptionEcho(msg))); } catch { continue; }
+    if (tokens < RESUME_ASK_TOKENS) continue;
+    startSession(null, { id, cwd: entry.cwd, resume: entry.sdkSessionId, compactFirst: true });
+    const sess = sessions.get(id);
+    if (!sess) continue;
+    sess.bgCompact = true;
+    const t0 = Date.now();
+    while (sessions.get(id) === sess && sess.running && Date.now() - t0 < 15 * 60_000) await sleep(2000);
+    if (sessions.get(id) === sess && sess.bgCompact && !sess.running) sess.queue.end();
+    await sleep(500);
+  }
+}
+setTimeout(() => compactBacklog().catch((e) => console.error("[sidecar] 后台压缩", e)), 8000);
+
 const userMessage = (sess, text) => ({
   type: "user",
   message: { role: "user", content: [{ type: "text", text }] },
@@ -2815,6 +2839,8 @@ wss.on("connection", (ws) => {
         // ctxWindow 一起给:手机端从裁过的历史里翻不到带 modelUsage 的 result(见 contextWindowOfLog)
         const tokens = contextSize(log);
         if (tokens) send(ws, { type: "session_ctx", sessionId: entry.id, tokens, ctxWindow: contextWindowOfLog(log) || undefined });
+        const live = sessions.get(entry.id);
+        if (live) live.bgCompact = false; // 后台压缩中的会话被用户点开:归用户用,压完别收掉
         if (!sessions.has(entry.id)) {
           // 大会话完整恢复会吃掉可观的额度,先问一句。设置(电脑端「大模型」页)里选了固定方式就不问,
           // 照那个来 —— 在这里统一处理,电脑和手机重开会话都吃同一份设置,手机端不另设。

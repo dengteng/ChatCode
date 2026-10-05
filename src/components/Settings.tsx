@@ -283,7 +283,7 @@ function ResumeModeRow() {
     <div className="provider-row setting-row">
       <div className="provider-id"><div>
         <b>{t("每次启动 ChatCode 后重开会话")}</b>
-        <div className="muted">{t("只对上下文 ≥ 10 万 token 的会话生效,更小的会话本来就直接恢复。手机端同样照此执行")}</div>
+        <div className="muted">{t("只对上下文 ≥ 10 万 token 的会话生效。选「从摘要恢复」时,启动后先压你点开的那个,其余在后台逐个自动压。手机端同样照此执行")}</div>
       </div></div>
       <div className="provider-actions">
         <select className="perm-picker on" value={mode} onChange={(e) => change(e.target.value as ResumeMode)}>
