@@ -82,7 +82,8 @@
               ]
             ]
           }
-        }
+        },
+        "hidden": true
       }
     ],
     "kimi": [
@@ -160,6 +161,13 @@
         "description": "glm-5.3 · 最强"
       },
       {
+        "model": "glm-5.3-flash",
+        "displayName": "GLM-5.3 Flash",
+        "description": "glm-5.3-flash · 快 · 看图",
+        "contextWindow": 1000000,
+        "vision": true
+      },
+      {
         "model": "glm-4.6",
         "displayName": "GLM-4.6",
         "description": "glm-4.6 · 通用",
@@ -169,7 +177,8 @@
         "model": "glm-4.5-air",
         "displayName": "GLM-4.5 Air",
         "description": "glm-4.5-air · 快",
-        "contextWindow": 128000
+        "contextWindow": 128000,
+        "hidden": true
       }
     ],
     "qwen": [
@@ -177,6 +186,13 @@
         "model": "qwen3.8-max",
         "displayName": "Qwen3.8 Max",
         "description": "qwen3.8-max · 最强"
+      },
+      {
+        "model": "qwen3.8-flash",
+        "displayName": "Qwen3.8 Flash",
+        "description": "qwen3.8-flash · 快 · 看图",
+        "contextWindow": 1000000,
+        "vision": true
       },
       {
         "model": "qwen3-coder-plus",
@@ -192,6 +208,13 @@
       }
     ],
     "minimax": [
+      {
+        "model": "MiniMax-M3",
+        "displayName": "MiniMax M3",
+        "description": "MiniMax-M3 · 最强 · 看图",
+        "contextWindow": 1000000,
+        "vision": true
+      },
       {
         "model": "MiniMax-M2",
         "displayName": "MiniMax M2",
@@ -234,6 +257,18 @@
     ],
     "openai": [
       {
+        "model": "gpt-6.1-sol",
+        "displayName": "GPT-6.1 Sol",
+        "description": "gpt-6.1-sol · 最强",
+        "contextWindow": 1050000
+      },
+      {
+        "model": "gpt-6-luna",
+        "displayName": "GPT-6 Luna",
+        "description": "gpt-6-luna · 快",
+        "contextWindow": 1050000
+      },
+      {
         "model": "gpt-5-codex",
         "displayName": "GPT-5 Codex",
         "description": "gpt-5-codex · 编码",
@@ -243,7 +278,8 @@
         "model": "gpt-5",
         "displayName": "GPT-5",
         "description": "gpt-5 · 通用",
-        "contextWindow": 400000
+        "contextWindow": 400000,
+        "hidden": true
       }
     ],
     "gemini": [
@@ -254,10 +290,17 @@
         "contextWindow": 1000000
       },
       {
+        "model": "gemini-3.8-flash",
+        "displayName": "Gemini 3.8 Flash",
+        "description": "gemini-3.8-flash · 快",
+        "contextWindow": 1048576
+      },
+      {
         "model": "gemini-2.5-flash",
         "displayName": "Gemini 2.5 Flash",
         "description": "gemini-2.5-flash · 快",
-        "contextWindow": 1000000
+        "contextWindow": 1000000,
+        "hidden": true
       }
     ]
   }

@@ -62,12 +62,13 @@ export const PROVIDERS = {
       // 原生多模态,所以 vision: true(provider 那级是 false,不写会被输入框拦掉图片,见顶部 vision 说明)。
       { value: "deepseek/deepseek-flash", model: "deepseek-flash", displayName: "DeepSeek V4.1 Flash", description: "deepseek-flash · 快 · 看图", provider: "deepseek", contextWindow: 1_000_000, vision: true, price: { in: 2, out: 8, cacheRead: 0.04, currency: "¥", offPeak: { in: 1, out: 4, cacheRead: 0.02, peakHours: DS_PEAK } } },
       { value: "deepseek/deepseek-v4-pro",   model: "deepseek-v4-pro",   displayName: "DeepSeek V4 Pro",   description: "deepseek-v4-pro · 最强", provider: "deepseek", contextWindow: 1_000_000, price: { in: 9, out: 27, cacheRead: 0.3, currency: "¥", offPeak: { in: 4.5, out: 13.5, cacheRead: 0.15, peakHours: DS_PEAK } } },
-      // V4.1 之前的旧名。官方已把它**路由到 V4.1 Flash 并按 Flash 计价**,所以单价跟着改成 Flash 那档
+      // 2026-10-05 下架:models.dev 已标 deprecated,旧名路由终止。加 hidden 摘出菜单,老会话仍可用。
+      // V4.1 之前的旧名。官方曾把它**路由到 V4.1 Flash 并按 Flash 计价**,所以单价跟着改成 Flash 那档
       // —— 留着旧价会把老会话的花费按早已不存在的价目表报高一半。
       // 留在表里而不是删掉:已经选中它的会话删了就会在模型选择器里显示成空。
       // vision 保持 false:路由是临时的,不拿一个随时会变的行为去放行图片。
       // (同批的 deepseek-v4-flash-vision-exp 已从表里删掉 —— 实验版旧名,和上面 Flash 同一个模型。)
-      { value: "deepseek/deepseek-v4-flash", model: "deepseek-v4-flash", displayName: "DeepSeek V4 Flash", description: "deepseek-v4-flash · 旧名,已路由到 Flash", provider: "deepseek", contextWindow: 1_000_000, price: { in: 2, out: 8, cacheRead: 0.04, currency: "¥", offPeak: { in: 1, out: 4, cacheRead: 0.02, peakHours: DS_PEAK } } },
+      { value: "deepseek/deepseek-v4-flash", model: "deepseek-v4-flash", displayName: "DeepSeek V4 Flash", description: "deepseek-v4-flash · 旧名,已路由到 Flash", provider: "deepseek", contextWindow: 1_000_000, hidden: true, price: { in: 2, out: 8, cacheRead: 0.04, currency: "¥", offPeak: { in: 1, out: 4, cacheRead: 0.02, peakHours: DS_PEAK } } },
     ],
   },
   kimi: {
@@ -108,13 +109,17 @@ export const PROVIDERS = {
     id: "glm", label: "GLM", transport: "anthropic", subscriptionUsage: false, vision: false,
     baseUrl: "https://api.z.ai/api/anthropic",
     baseUrlCN: "https://open.bigmodel.cn/api/anthropic",
-    smallFast: "glm-4.5-air",
+    smallFast: "glm-5.3-flash",
     models: [
       // 不写 contextWindow:官方窗口没查到就别猜。省掉后会话第一条 message_start 的 modelUsage
       // 会报真实窗口(见 types.ts 的 contextWindowOf),猜错反而会压过真值。
       { value: "glm/glm-5.3",     model: "glm-5.3",     displayName: "GLM-5.3",     description: "glm-5.3 · 最强", provider: "glm" },
+      // GLM-5.3-Flash(2026-09-18 发布)。原生多模态,vision: true 覆盖 provider 级的 false。
+      // 未写 price:同家现有条目都没写价,官方价格页没查到就不写(见顶部 price 说明)。
+      { value: "glm/glm-5.3-flash", model: "glm-5.3-flash", displayName: "GLM-5.3 Flash", description: "glm-5.3-flash · 快 · 看图", provider: "glm", contextWindow: 1_000_000, vision: true },
       { value: "glm/glm-4.6",     model: "glm-4.6",     displayName: "GLM-4.6",     description: "glm-4.6 · 通用", provider: "glm", contextWindow: 200_000 },
-      { value: "glm/glm-4.5-air", model: "glm-4.5-air", displayName: "GLM-4.5 Air", description: "glm-4.5-air · 快", provider: "glm", contextWindow: 128_000 },
+      // 2026-10-05 下架:被 GLM-5.3-Flash 取代(新一代快档,窗口 1M 且多模态)。加 hidden,老会话仍可用。
+      { value: "glm/glm-4.5-air", model: "glm-4.5-air", displayName: "GLM-4.5 Air", description: "glm-4.5-air · 快", provider: "glm", contextWindow: 128_000, hidden: true },
     ],
   },
   qwen: {
@@ -126,6 +131,9 @@ export const PROVIDERS = {
       // 模型 id 按百炼历代命名推的(qwen2.5-max / qwen3-max → qwen3.8-max)。对不上就在设置里改 ——
       // 同样不写 contextWindow,理由见 glm 那条。
       { value: "qwen/qwen3.8-max",       model: "qwen3.8-max",       displayName: "Qwen3.8 Max",       description: "qwen3.8-max · 最强", provider: "qwen" },
+      // Qwen3.8 Flash(2026-08-26 发布)。原生多模态,vision: true 覆盖 provider 级的 false。
+      // 未写 price:同家现有条目都没写价,官方价格页没查到就不写(见顶部 price 说明)。
+      { value: "qwen/qwen3.8-flash",     model: "qwen3.8-flash",     displayName: "Qwen3.8 Flash",     description: "qwen3.8-flash · 快 · 看图", provider: "qwen", contextWindow: 1_000_000, vision: true },
       { value: "qwen/qwen3-coder-plus",  model: "qwen3-coder-plus",  displayName: "Qwen3 Coder Plus",  description: "qwen3-coder-plus · 编码", provider: "qwen", contextWindow: 1_000_000 },
       { value: "qwen/qwen3-coder-flash", model: "qwen3-coder-flash", displayName: "Qwen3 Coder Flash", description: "qwen3-coder-flash · 快", provider: "qwen", contextWindow: 1_000_000 },
     ],
@@ -136,6 +144,9 @@ export const PROVIDERS = {
     baseUrlCN: "https://api.minimaxi.com/anthropic",
     smallFast: "MiniMax-M2",
     models: [
+      // MiniMax-M3(2026-06-01 发布)。原生多模态,vision: true 覆盖 provider 级的 false。
+      // 未写 price:同家现有条目都没写价,官方价格页没查到就不写(见顶部 price 说明)。
+      { value: "minimax/MiniMax-M3", model: "MiniMax-M3", displayName: "MiniMax M3", description: "MiniMax-M3 · 最强 · 看图", provider: "minimax", contextWindow: 1_000_000, vision: true },
       { value: "minimax/MiniMax-M2", model: "MiniMax-M2", displayName: "MiniMax M2", description: "MiniMax-M2 · 编码", provider: "minimax", contextWindow: 200_000 },
     ],
   },
@@ -159,17 +170,25 @@ export const PROVIDERS = {
     baseUrl: "https://api.openai.com/v1",
     smallFast: "gpt-5-mini",
     models: [
+      // GPT-6.1 Sol(2026-09-29 发布)与 GPT-6 Luna(2026-09-22 发布),models.dev 口径。
+      // 未写 price:同家现有条目都没写价,官方价格页没查到就不写(见顶部 price 说明)。
+      { value: "openai/gpt-6.1-sol", model: "gpt-6.1-sol", displayName: "GPT-6.1 Sol", description: "gpt-6.1-sol · 最强", provider: "openai", contextWindow: 1_050_000 },
+      { value: "openai/gpt-6-luna",  model: "gpt-6-luna",  displayName: "GPT-6 Luna",  description: "gpt-6-luna · 快", provider: "openai", contextWindow: 1_050_000 },
       { value: "openai/gpt-5-codex", model: "gpt-5-codex", displayName: "GPT-5 Codex", description: "gpt-5-codex · 编码", provider: "openai", contextWindow: 400_000 },
-      { value: "openai/gpt-5",       model: "gpt-5",       displayName: "GPT-5",       description: "gpt-5 · 通用", provider: "openai", contextWindow: 400_000 },
+      // 2026-10-05 下架:被 GPT-6.1 Sol 取代(新一代旗舰)。加 hidden,老会话仍可用。
+      { value: "openai/gpt-5",       model: "gpt-5",       displayName: "GPT-5",       description: "gpt-5 · 通用", provider: "openai", contextWindow: 400_000, hidden: true },
     ],
   },
   gemini: {
     id: "gemini", label: "Gemini", transport: "openai", subscriptionUsage: false,
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", // Gemini 的 OpenAI 兼容端点
-    smallFast: "gemini-2.5-flash",
+    smallFast: "gemini-3.8-flash",
     models: [
       { value: "gemini/gemini-2.5-pro",   model: "gemini-2.5-pro",   displayName: "Gemini 2.5 Pro",   description: "gemini-2.5-pro · 最强", provider: "gemini", contextWindow: 1_000_000 },
-      { value: "gemini/gemini-2.5-flash", model: "gemini-2.5-flash", displayName: "Gemini 2.5 Flash", description: "gemini-2.5-flash · 快", provider: "gemini", contextWindow: 1_000_000 },
+      // Gemini 3.8 Flash(2026-09-02 发布)。新一代 flash 档,取代 2.5-flash。
+      { value: "gemini/gemini-3.8-flash", model: "gemini-3.8-flash", displayName: "Gemini 3.8 Flash", description: "gemini-3.8-flash · 快", provider: "gemini", contextWindow: 1_048_576 },
+      // 2026-10-05 下架:被 Gemini 3.8 Flash 取代。加 hidden,老会话仍可用。
+      { value: "gemini/gemini-2.5-flash", model: "gemini-2.5-flash", displayName: "Gemini 2.5 Flash", description: "gemini-2.5-flash · 快", provider: "gemini", contextWindow: 1_000_000, hidden: true },
     ],
   },
 };
