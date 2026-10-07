@@ -153,7 +153,7 @@ export interface Session {
   loadingHistory?: boolean;  // 重开会话:等 sidecar 回放历史期间为 true,timeline 空时显示"加载中"而非白屏
   histMore?: { before: number; rounds: number } | null; // 历史分页:sidecar 那边还有更早的 rounds 轮没发,before = 日志下标游标(见 sidecar/histpage.mjs)
   pending?: PendingMsg[];    // 待发队列:agent 忙时排队,完成后自动发下一条(最多 3 条)
-  peerQueue?: { pid: string; text: string }[]; // 别的端(手机 / 另一台电脑)排在这个会话上的待发,只读显示
+  peerQueue?: { pid: string; text: string; at?: number; srv?: boolean }[]; // 别的端(手机 / 另一台电脑)排在这个会话上的待发,只读显示
   bgTasks?: string[];        // SDK background_tasks_changed 电平(REPLACE):当前在跑的后台任务 id 集,空=无
   bgWait?: boolean;          // 上一轮有后台任务,轮次还没完全了结(还在等后台任务及它的续跑)→ 禁止待发队列出队
   compactRetried?: boolean;  // /compact 被并进别人的轮次、已自动重发过一次 —— 防重发死循环,压缩真做成了就清
@@ -337,6 +337,7 @@ export interface AuthStatus {
   github: { installed: boolean; loggedIn: boolean; account?: string; detail?: string };
   providers?: Record<string, ProviderState>;
   cnEndpoint?: boolean;           // 国内节点总开关
+  autoResume?: boolean;           // 额度用尽后恢复时自动补发「继续」(sidecar 排,默认关)
   resumeMode?: ResumeMode;        // 重开大会话的恢复方式(缺 = ask)
   catalogAt?: number;             // 远程模型清单上次拉成功的时刻(0/缺 = 还没拉到过)
 }

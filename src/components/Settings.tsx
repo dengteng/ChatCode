@@ -7,7 +7,7 @@ import { X, RotateCw, Plus, Check, GitBranch, Pencil, Copy, Search, Trash2, Down
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { rawHtml, useMdImages } from "../lib/mdhtml";
-import { useStore, useApi, DOCK_BOUNCE_KEY, dockBounceOn, SOUND_KEY, soundOn, playDing, AUTO_RESUME_KEY, autoResumeOn } from "../store";
+import { useStore, useApi, DOCK_BOUNCE_KEY, dockBounceOn, SOUND_KEY, soundOn, playDing } from "../store";
 import { toast } from "./Toast";
 import { THEMES, EFFORT_LEVELS, modelName, modelProvider, providerBrand, type EffortLevel, type ResumeMode, type SshHost, type ThemeId, type CustomArt } from "../types";
 import { loadExtensions, loadMarketplace, marketplaceNames, installPlugin, uninstallPlugin, enablePlugin, disablePlugin, addMarketplace, removeMarketplace, installSkillGit, setSkillOn, removeSkill, setMcpOn, removeMcp, loadExtNotes, saveExtNote, SEED_MARKETPLACES, type Exts, type MarketPlugin } from "../extensions";
@@ -313,15 +313,14 @@ const PROVIDER_META: { id: string; ini: string; cls: string }[] = [
 // 账号:Claude 登录 + 各第三方 LLM(key + baseUrl/模型可编辑)
 function AccountTab() {
   const { t } = useTranslation();
-  const { state, authAction, setCnEndpoint, refreshModelCatalog, requestHomeModels } = useStore();
+  const { state, authAction, setCnEndpoint, refreshModelCatalog, requestHomeModels, setAutoResume } = useStore();
   useEffect(() => { requestHomeModels(); }, []); // 默认模型下拉要列表;首页没打开过时 homeModels 是空的
   const c = state.auth?.claude;
   const provs = state.auth?.providers ?? {};
   const catalogAt = state.auth?.catalogAt ?? 0;
   const cnList = Object.values(provs).filter((p) => p.cnAvailable || p.baseUrlCN).map((p) => p.label);
   const [edit, setEdit] = useState<{ id: string; mode: "key" | "config" } | null>(null);
-  const [autoResume, setAutoResume] = useState(autoResumeOn);
-  const toggleAutoResume = (v: boolean) => { localStorage.setItem(AUTO_RESUME_KEY, v ? "1" : "0"); setAutoResume(v); };
+  const autoResume = !!state.auth?.autoResume;
   if (edit) return <ProviderEditPage id={edit.id} mode={edit.mode} onDone={() => setEdit(null)} />;
   return (
     <section className="settings-section">
@@ -383,7 +382,7 @@ function AccountTab() {
         <div className="provider-actions">
           <button type="button" role="switch" aria-checked={autoResume} aria-label={t("额度恢复时自动接着跑")}
             className={`ext-switch${autoResume ? " on" : ""}`}
-            {...btnPress(() => toggleAutoResume(!autoResume))} />
+            {...btnPress(() => setAutoResume(!autoResume))} />
         </div>
       </div>
     </section>

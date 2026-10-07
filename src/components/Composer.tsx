@@ -211,7 +211,7 @@ function scoreEntry(e: FileEntry, q: string): number {
 // a: 输入区是 contentEditable —— 图片以内联标签插在光标处,和文本混排,方向键可在其间移动
 export function Composer({ session }: { session: Session }) {
   const { t } = useTranslation();
-  const { state, sendMessage, respondPermission, interrupt, runTerminal, reopenSession, setModel, clearContext, requestModels, setPermissionPreset, dispatch, enqueuePending, cancelPending, setEffort } = useStore();
+  const { state, sendMessage, respondPermission, interrupt, runTerminal, reopenSession, setModel, clearContext, requestModels, setPermissionPreset, dispatch, enqueuePending, cancelPending, cancelQueued, setEffort } = useStore();
   const edRef = useRef<HTMLDivElement>(null);
   const imgData = useRef(new Map<string, Img>()); // chip id -> 图片数据
   const idc = useRef(0);
@@ -1314,8 +1314,10 @@ export function Composer({ session }: { session: Session }) {
         <div className="pending-queue">
           {session.peerQueue!.map((p, i) => (
             <div key={p.pid} className="pending-row">
-              <span className="pending-tag">{t("其他端排队{{n}}", { n: i + 1 })}</span>
+              <span className="pending-tag">{p.at ? <><Clock size={11} /> {t("定时")}</> : t("其他端排队{{n}}", { n: i + 1 })}</span>
               <span className="pending-text" title={p.text}>{p.text || t("（图片）")}</span>
+              {p.at && <span className="pending-note">{t("{{clock}} 发出", { clock: clockOf(p.at) })}</span>}
+              {p.srv && <button className="pending-cancel" title={t("取消这条待发消息")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); cancelQueued(session.id, p.pid); } }}><X size={13} /></button>}
             </div>
           ))}
         </div>

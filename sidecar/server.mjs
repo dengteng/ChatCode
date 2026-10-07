@@ -1214,6 +1214,8 @@ const EN_DICT = {
   "不是文件: {{path}}": "Not a file: {{path}}",
   "文件超过 2MB,不在线编辑": "File is over 2MB, not editable online",
   "文件超过 8MB,不内联显示": "File is over 8MB, not shown inline",
+  "继续": "Continue",
+  "额度用尽,已排到 {{time}} 自动继续这一轮(设置 › 账号里可关)": "Usage limit reached — queued to continue this turn automatically at {{time}} (turn it off in Settings › Account)",
   "📁 已将 agent 工作目录切到 {{target}}(在该目录重开上下文,之前的对话记忆不带过来)": "📁 Switched agent working directory to {{target}} (context restarts there, previous memory is not carried over)",
   "📁 已将 agent 工作目录设为 {{target}}": "📁 Set agent working directory to {{target}}",
   "项目目录必须是已存在的绝对路径: {{path}}": "Project directory must be an existing absolute path: {{path}}",
@@ -1333,7 +1335,8 @@ async function authStatus() {
   // catalogAt:远程模型清单上次拉成功的时刻(0 = 还没拉到过)。设置页拿它显示「上次更新」,
   // 让「立即刷新」这个按钮有个可对照的状态,而不是点完只看见一句 toast。
   return { claude, github, providers, cnEndpoint: !!settings.cnEndpoint, catalogAt: settings.modelCatalogAt || 0,
-    resumeMode: settings.resumeMode === "summary" || settings.resumeMode === "full" ? settings.resumeMode : "ask" };
+    resumeMode: settings.resumeMode === "summary" || settings.resumeMode === "full" ? settings.resumeMode : "ask",
+    autoResume: settings.autoResume === true };
 }
 
 // 新发布但 SDK supportedModels 还没上报(后端按账户放量,菜单里看不到)的 Claude 模型手动补进来。
@@ -1885,6 +1888,28 @@ function makeInputQueue() {
 
 // ---------- session 管理 ----------
 const sessions = new Map(); // id -> { queue, q, sdkSessionId, pendingPerms: Map }
+
+// 定时待发(额度续跑 / 手机的「⏱」)落盘:msgQueue 只在内存,sidecar 一重启「到点继续」就丢了。
+// 只存纯文本项(图片 base64 太大);超 12h 的当过期。会话不在内存时(重启后 / 会话进程死了)
+// 条目留在 timedOrphans,到点由下面的 interval 直接送(deliverUserMessage 会按 index 把会话拉起来),
+// 会话起来时 startSession 把剩下的接回它自己的 msgQueue。
+const TIMED_FILE = path.join(DATA_DIR, "timed-queue.json");
+const TIMED_STALE = 12 * 3600_000;
+const timedOrphans = new Map(); // id -> [{ pid, text, at, m }]
+const timedItems = (q) => q.filter((x) => x.at && Array.isArray(x.m?.content) && x.m.content.every((b) => b.type === "text"))
+  .map(({ pid, text, at, m }) => ({ pid, text, at, m }));
+try {
+  for (const [id, items] of Object.entries(JSON.parse(fs.readFileSync(TIMED_FILE, "utf8")))) {
+    const keep = items.filter((x) => x.at > Date.now() - TIMED_STALE);
+    if (keep.length) timedOrphans.set(id, keep);
+  }
+} catch {}
+function saveTimed() {
+  const out = {};
+  for (const [id, items] of timedOrphans) out[id] = items;
+  for (const [id, sess] of sessions) { const t = timedItems(sess.msgQueue); if (t.length) out[id] = t; else delete out[id]; }
+  try { fs.writeFileSync(TIMED_FILE, JSON.stringify(out)); } catch {}
+}
 // 别端(电脑前端本地待发队列)的最新镜像,按会话。纯显示中转 + 给手机 reopen 补发,不参与真正的出队。
 const peerPendingSnap = new Map(); // sessionId -> [{ pid, text }]
 
@@ -1914,7 +1939,7 @@ function startSession(ws, { id, cwd, resume, compactFirst }) {
     generation: 0,      // query 代数,重启时 +1,旧循环据此判断是否已被取代
     hadUserTurn: !!resume, // 是否已有对话历史(有历史则不能迁移 cwd:SDK 按目录存 transcript)
     running: false,         // 本轮是否还在跑(收到 result 即结束)
-    msgQueue: [],           // agent 忙时压在这儿的用户消息,本轮跑完依次送进去(见 enqueueMsg / drainMsgQueue)
+    msgQueue: takeTimedOrphans(id), // agent 忙时压在这儿的用户消息,本轮跑完依次送进去(见 enqueueMsg / drainMsgQueue)
     freshDone: false,       // 本次启动后完成过一轮(非中断)→ 列表绿✅
 
     userInterrupted: false, // 用户按了停止:本轮 result 标记为"用户终止"而非"出错"
@@ -2139,6 +2164,10 @@ function spawnAgent(ws, sess, { id, resume }) {
         // 登录失效:记下来,下一条消息先重启 CLI(见 user_message)。常驻的 CLI 进程这时手里是过期令牌,
         // 用户去终端重新登录后,新会话能用、这个会话却不一定肯重读钥匙串 —— 重启换进程最稳,resume 上下文不丢。
         if (msg.type === "assistant" && msg.error === "authentication_failed") sess.authFailed = true;
+        // 额度被拒:SDK 明说本轮被限流挡回来并给了恢复时刻。记一笔,等本轮真以错误收尾(result)再排续跑 ——
+        // rejected 之后 SDK 自己重试成功的情况也有。
+        if (msg.type === "rate_limit_event" && msg.rate_limit_info?.status === "rejected")
+          sess.quotaBlockedAt = msg.rate_limit_info.resetsAt ?? msg.rate_limit_info.overageResetsAt ?? null;
         if (msg.type === "result") {
           if (sess.userInterrupted) msg = { ...msg, aborted: true };
           else { const title = loadIndex().find((e) => e.id === id)?.title || tr("会话"); pushOverlay(tr("任务完成"), tr("{{title}} 已完成", { title })); } // 用户主动中断不推
@@ -2146,6 +2175,10 @@ function spawnAgent(ws, sess, { id, resume }) {
           sess.running = false;
           sess.freshDone = !msg.aborted; // 完成过一轮(非中断)→ 列表绿✅
           sess.userInterrupted = false;
+          if (sess.quotaBlockedAt) {
+            if (!msg.aborted && (msg.is_error || msg.subtype !== "success")) armAutoResume(id, sess, sess.quotaBlockedAt);
+            sess.quotaBlockedAt = null; // 取一次就扔,不然下一轮普通报错会被当成额度问题
+          }
           bumpSpend(id, msg); // 花费账本(按量计费的 provider 靠它显示用量);内含 saveIndex
           broadcastIndex(); // 列表图标转「完成/空闲」
           refreshSubscriptionUsage();
@@ -2178,7 +2211,10 @@ function spawnAgent(ws, sess, { id, resume }) {
     }
     if (gen === sess.generation) { // 非重启导致的自然结束才清理
       broadcast({ type: "session_closed", sessionId: id });
+      const timed = timedItems(sess.msgQueue); // 进程自己死了:定时待发留着,到点照样把会话拉起来送
+      if (timed.length) timedOrphans.set(id, timed);
       sessions.delete(id);
+      saveTimed();
     }
   })();
 }
@@ -2206,7 +2242,9 @@ const queueText = (content) => (Array.isArray(content) ? content : [])
 // at = 定时发送的时刻(ms):到点之前不出队,排在它后面的普通消息可以先走。
 // 桌面前端那套定时(见 types.ts PendingMsg.at)只活在它自己的内存里,手机不能照抄 ——
 // 手机一息屏 JS 就被冻住,约在凌晨的消息根本不会响。所以手机的定时落在这里。
+const takeTimedOrphans = (id) => { const x = timedOrphans.get(id) ?? []; timedOrphans.delete(id); return x; };
 function broadcastMsgQueue(id, sess) {
+  saveTimed();
   broadcast({ type: "msg_queue", sessionId: id, items: sess.msgQueue.map((x) => ({ pid: x.pid, text: x.text, at: x.at })) });
 }
 
@@ -2231,6 +2269,21 @@ function drainMsgQueue(id, sess) {
   deliverUserMessage(null, next.m);
 }
 
+// 额度用尽中断 → 排一条到点自动发的「继续」。放 sidecar 而不是前端:前端队列在内存里,
+// 重启 ChatCode / 关窗口就丢,而额度恢复的点往往在人睡着之后。开关在 settings.autoResume(默认关:
+// 软件会在没人看着时替用户发消息、接着烧额度,不能默认替人做主)。
+const AUTO_RESUME_PID = "auto-resume-quota";
+function armAutoResume(id, sess, resetsAt) {
+  if (loadSettings().autoResume !== true) return;
+  // 缓冲 1 分钟:服务端 resetsAt 和本机时钟差几十秒是常事,掐着点发就是再撞一次墙。秒/毫秒都可能出现
+  const at = (resetsAt < 1e12 ? resetsAt * 1000 : resetsAt) + 60_000;
+  if (at <= Date.now() || sess.msgQueue.some((x) => x.pid === AUTO_RESUME_PID)) return;
+  const go = tr("继续");
+  sess.msgQueue.push({ pid: AUTO_RESUME_PID, text: go, at, m: { type: "user_message", sessionId: id, content: [{ type: "text", text: go }] } });
+  broadcastMsgQueue(id, sess);
+  broadcast({ type: "system_note", sessionId: id, text: tr("额度用尽,已排到 {{time}} 自动继续这一轮(设置 › 账号里可关)", { time: new Date(at).toLocaleString("sv-SE") }) });
+}
+
 // 定时到点的那一刻不会有任何事件发生 —— drainMsgQueue 只在本轮跑完时被调一次,
 // 空闲会话上排的定时消息没人去碰它。每 15s 扫一遍到点的。
 // 用 interval 而不是给每条排精确 setTimeout:睡一夜那种长定时跨越系统睡眠会不响,
@@ -2239,6 +2292,15 @@ setInterval(() => {
   for (const [id, sess] of sessions) {
     if (sess.running) continue; // 忙着的会话由 turn_ended 那条路 drain
     if (sess.msgQueue.some((x) => x.at && x.at <= Date.now())) drainMsgQueue(id, sess);
+  }
+  for (const [id, items] of [...timedOrphans]) {
+    if (sessions.has(id)) continue;
+    const i = items.findIndex((x) => x.at <= Date.now());
+    if (i < 0) continue;
+    const [next] = items.splice(i, 1);
+    if (!items.length) timedOrphans.delete(id);
+    saveTimed();
+    deliverUserMessage(null, next.m);
   }
 }, 15_000);
 
@@ -2875,7 +2937,7 @@ wss.on("connection", (ws) => {
         const s = sessions.get(entry.id);
         // 回显当前"自动同意"开关(内存优先,未启动则读持久化的 index),让重连端同步显示
         send(ws, { type: "auto_approve", sessionId: entry.id, on: s ? !!s.autoApprove : !!entry.autoApprove });
-        send(ws, { type: "msg_queue", sessionId: entry.id, items: (s?.msgQueue || []).map((x) => ({ pid: x.pid, text: x.text, at: x.at })) }); // 重连要看到还压着的待发(含定时)
+        send(ws, { type: "msg_queue", sessionId: entry.id, items: (s?.msgQueue || timedOrphans.get(entry.id) || []).map((x) => ({ pid: x.pid, text: x.text, at: x.at })) }); // 重连要看到还压着的待发(含定时)
         // 别端(电脑前端本地队列)的镜像只补给手机:m.limit 是手机端的标记(见上面 buildMobileHistory)。
         // 桌面自己就是这份快照的来源,补给它会把它自己排的又显示一遍(本地 pending + 收回来的镜像)。
         if (m.limit) send(ws, { type: "peer_pending", sessionId: entry.id, items: peerPendingSnap.get(entry.id) ?? [] }); // 没快照也发空表:sidecar 重启后手机还留着旧的「其他端排队」,得让它清掉
@@ -3076,6 +3138,11 @@ wss.on("connection", (ws) => {
       case "set_resume_mode": {
         // 重开大会话时的恢复方式:ask(默认,弹卡片问)/ summary / full。「全新对话」不收 —— 会丢旧上下文。
         saveSettings({ ...loadSettings(), resumeMode: m.mode === "summary" || m.mode === "full" ? m.mode : "ask" });
+        authStatus().then((status) => send(ws, { type: "auth_status", status }));
+        break;
+      }
+      case "set_auto_resume": {
+        saveSettings({ ...loadSettings(), autoResume: m.on === true });
         authStatus().then((status) => send(ws, { type: "auth_status", status }));
         break;
       }
@@ -3373,6 +3440,8 @@ wss.on("connection", (ws) => {
         // 闲聊会话仍是彻底删除 —— 它的临时目录跟着一起清掉,留个空壳没意义。
         sessions.get(m.sessionId)?.queue.end();
         sessions.delete(m.sessionId);
+        timedOrphans.delete(m.sessionId);
+        saveTimed();
         const idx = loadIndex();
         const entry = idx.find((e) => e.id === m.sessionId);
         saveIndex(idx.filter((e) => e.id !== m.sessionId));

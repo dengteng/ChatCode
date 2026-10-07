@@ -9,7 +9,6 @@ import i18n, { getLang } from "./i18n";
 import { PERMISSION_PRESETS, type PermissionMode } from "./permissions";
 import { COMMIT_HOLD_MS } from "./lib/gitcmd";
 import { pickAutoModel } from "./lib/automodel";
-import { resumeAt } from "./lib/autoresume";
 import { recheckOf } from "./lib/timeline";
 
 // 把顶级会话 sessionId 移动到 groupId(null=移出分组),插到 beforeId 之前(null=该组末尾)。
@@ -521,37 +520,9 @@ function nextTs(id: string, at?: string) {
   return n;
 }
 
-// 额度用尽中断 → 排一条到点自动发的"继续"。复用待发队列已有的定时能力(PendingMsg.at),
-// 不另起一套调度:出队 effect 每 15s 打一拍,到点、会话空闲、连着 sidecar 才发得出去,
-// 这三个条件本来就是这条消息该等的。
-function armAutoResume(dispatch: (a: Action) => void, id: string, resetAt: number, stateRef?: MutableRefObject<State>) {
-  if (!autoResumeOn()) return;
-  const at = resumeAt(resetAt, Date.now());
-  if (!at) return; // 拿不到恢复时刻、或那一刻已经过去 = 这轮不是卡在等额度上,别乱排
-  // 已经排过一条就不叠:额度耗尽后每次手动重试都会再撞一次墙,不去重就攒出一串"继续"
-  if (stateRef?.current.sessions[id]?.pending?.some((p) => p.pid === AUTO_RESUME_PID)) return;
-  const go = i18n.t("继续");
-  dispatch({ type: "enqueue_pending", id, item: { pid: AUTO_RESUME_PID, text: go, blocks: [{ type: "text", text: go }], at } });
-  // 带上模型名:限流多半是当前模型的专属限额(如 "Fable 额度"),底部订阅用量条可能还很空 ——
-  // 光说"额度用尽"会和底部对不上,让人以为是软件算错了。拿不到模型名就退回泛称。
-  const sess = stateRef?.current.sessions[id];
-  const model = sess ? modelLabel(sess) : "";
-  dispatch({ type: "append", id, item: { kind: "system", ts: Date.now(),
-    text: model
-      ? i18n.t("{{model}} 额度用尽,已排到 {{time}} 自动继续这一轮(设置 › 账号里可关)", { model, time: new Date(at).toLocaleString() })
-      : i18n.t("额度用尽,已排到 {{time}} 自动继续这一轮(设置 › 账号里可关)", { time: new Date(at).toLocaleString() }) } });
-}
-
 function handleSdkMessage(dispatch: (a: Action) => void, id: string, msg: any, live: boolean, stateRef?: MutableRefObject<State>) {
   const ts = nextTs(id, msg.timestamp);
-  // 额度被拒:SDK 明说了本轮被限流挡回来,还给了恢复时刻 —— 不用去猜 result 里的报错文案。
-  // 这里只记一笔,排队要等本轮真以错误收尾(result)才做:rejected 之后 SDK 自己重试成功的情况也有。
-  if (msg.type === "rate_limit_event") {
-    const info = msg.rate_limit_info;
-    const at = info?.resetsAt ?? info?.overageResetsAt;
-    if (live && info?.status === "rejected" && at) quotaBlocked.set(id, at);
-    return;
-  }
+  if (msg.type === "rate_limit_event") return; // 额度被拒的续跑由 sidecar 排(见 server.mjs armAutoResume)
   if (msg.type === "system" && msg.subtype === "init") {
     dispatch({ type: "sdk_init", id, keepModel: !live, info: {
       model: msg.model, tools: msg.tools, mcp_servers: msg.mcp_servers, initAt: (msg.timestamp && Date.parse(msg.timestamp)) || Date.now(),
@@ -705,27 +676,11 @@ function handleSdkMessage(dispatch: (a: Action) => void, id: string, msg: any, l
       const done = !msg.aborted && !hasBg;
       dispatch({ type: "patch", id, patch: { status: "idle", freshDone: done, apiRetry: null, ...(msg.aborted || !hasBg ? { bgWait: false } : {}) } });
       if (done) { notify(i18n.t("任务完成"), i18n.t("花费 ${{cost}}", { cost: (msg.total_cost_usd ?? 0).toFixed(4) })); alertUser(); } // d: 完成提醒 + dock 跳动(不在前台时才跳) + 提示音
-      // 这一轮是被额度挡下来收尾的 → 约到额度恢复后自动接着跑。标记取一次就扔:
-      // 留着的话下一轮正常报错也会被当成额度问题排一条"继续"。
-      const blockedAt = quotaBlocked.get(id);
-      quotaBlocked.delete(id);
-      if (blockedAt && !msg.aborted && (msg.is_error || msg.subtype !== "success")) armAutoResume(dispatch, id, blockedAt, stateRef);
     }
   }
 }
 
-// 额度用尽自动续跑。默认关:开了之后软件会在无人看着的时候替用户发消息、把额度接着烧掉,
-// 这种事不能默认替人做主。只有显式存过 "1" 才算开。
-export const AUTO_RESUME_KEY = "ChatCode-auto-resume-quota";
-export const autoResumeOn = () => localStorage.getItem(AUTO_RESUME_KEY) === "1";
-// 续跑发的就是一句"继续"(跟界面语言走),不让用户配:上下文还在(同一个 sdkSessionId),
-// agent 自己知道刚才干到哪儿,再多说反而是干扰。
-export const AUTO_RESUME_PID = "auto-resume-quota";
 const rechecked = new Set<string>(); // 定时回查已处理过的轮次,见 StoreProvider 里那个 effect
-// 「这个会话刚被额度挡回来了」——值是额度恢复的时刻。rate_limit_event 先到、result 后到,
-// 得跨这两条消息记一笔。不进 state:纯粹是两条消息之间的一次性传话,进 state 还得管清理和持久化。
-const quotaBlocked = new Map<string, number>();
-
 // dock 跳动提醒(窗口在前台时系统本来就不跳)。用户可在设置里关掉,默认开 ——
 // 只有显式存过 "0" 才算关,不然第一次启动读到 null 就成了默认关。
 // 所有跳动都必须走 bounceDock:直接 invoke 会绕开这个开关,新增提醒点时最容易漏(自检盯着这条)。
@@ -793,6 +748,8 @@ interface Api {
   // at:定时发送的时刻(ms),到点前不出队;不给就是普通排队(agent 一空闲就发)
   enqueuePending: (id: string, item: { blocks: any[]; text: string; html?: string; imgs?: Record<string, { media_type: string; data: string }>; at?: number }) => boolean;
   cancelPending: (id: string, pid: string) => void;
+  cancelQueued: (id: string, pid: string) => void; // 取消 sidecar 队列里的待发(额度续跑 / 手机排的)
+  setAutoResume: (on: boolean) => void; // 额度恢复时自动接着跑(存 sidecar)
   respondPermission: (id: string, requestId: string, behavior: "allow" | "deny", message?: string, remember?: RememberChoice) => void;
   interrupt: (id: string) => void;
   setModel: (id: string, model: string, label?: string) => void; // label:模型表还没到时(刚配好 key)由调用方给出显示名
@@ -964,9 +921,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           case "usage": dispatch({ type: "set_usage", usage: m.usage, kimiUsage: m.kimiUsage }); break;
           // 别端排在这个会话上的待发,只读显示。手机走 sidecar 真队列(msg_queue),别的前端走镜像(peer_pending),
           // 两条通路都指向「对端队列」这一栏 —— 本机自己的队列是前端 pending,不会经这两条回来,不重复。
-          case "msg_queue":
+          case "msg_queue": dispatch({ type: "set_peer_queue", id: m.sessionId, items: (m.items || []).map((x: any) => ({ ...x, srv: true })) }); break; // srv:sidecar 真队列,能取消
           case "peer_pending": dispatch({ type: "set_peer_queue", id: m.sessionId, items: m.items || [] }); break;
           case "auth_status": {
+            // 旧版开关存在 localStorage(只这台电脑的前端能用);搬进 sidecar 后让它一次性迁过去
+            if (localStorage.getItem("ChatCode-auto-resume-quota") !== null) {
+              if (localStorage.getItem("ChatCode-auto-resume-quota") === "1" && !m.status?.autoResume) send({ type: "set_auto_resume", on: true });
+              localStorage.removeItem("ChatCode-auto-resume-quota");
+            }
             const prev = stateRef.current.auth;
             dispatch({ type: "auth_status", status: m.status });
             // 刚配好第一把第三方 key → 自动选中这家的模型(判断见 pickAutoModel)
@@ -1163,9 +1125,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           case "session_error":
             dispatch({ type: "append", id: m.sessionId, item: { kind: "system", text: i18n.t("错误: {{err}}", { err: m.error }), ts: Date.now() } });
             dispatch({ type: "patch", id: m.sessionId, patch: { status: "closed", loadingHistory: false } });
-            // 会话整个塌了,不会再有 result 来消费这个标记 —— 留着的话下一轮真报错时会被错当成额度问题。
-            // ponytail: 这条路(进程直接死)不做自动续跑,会话得先重开;额度用尽的常态是 result 收尾,走上面那条。
-            quotaBlocked.delete(m.sessionId);
             break;
           // sidecar 那轮已经没了(重建 query / 打断兜底),但不会再有 result 来解锁 —— 手动放闸,
           // 否则 status 永远卡在运行中:打断点了没反应、待发队列也永远发不出去
@@ -1288,6 +1247,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       dispatch({ type: "enqueue_pending", id, item: { pid: String(nextTs(id)), ...item } });
       return true;
     },
+    cancelQueued(id, pid) { send({ type: "cancel_queued", sessionId: id, pid }); },
+    setAutoResume(on) { send({ type: "set_auto_resume", on }); },
     cancelPending(id, pid) {
       dispatch({ type: "remove_pending", id, pid });
     },
