@@ -156,6 +156,7 @@ function sshDial(ws, sess, id, target, port) {
 }
 // 在线编辑远端文件:复用会话的 master 连接,不新开认证。read 回 {path 绝对路径, content};write 先写 .cc-new 再覆盖,上传中断不会截断原文件
 const SSH_EDIT_MAX = 2 << 20;
+const SSH_IMG_MAX = 8 << 20; // 聊天里内联显示远程图片(read + bin)的上限
 // stat:路径在不在(给 hover 菜单判断"这是不是服务器上的文件");write 带 expect = 读时的 cksum,对不上说明被别人改过,
 // 除非 force;backup=true 时先 cp -p 一份 .cc-bak(每个编辑窗口第一次保存才备份,改坏了能找回原样)。
 function sshFile(sid, op, p, opts, cb) {
@@ -163,20 +164,21 @@ function sshFile(sid, op, p, opts, cb) {
   if (ssh?.status !== "connected") return cb(tr("SSH 未连接,先在会话里重连"));
   const cd = ssh.cwd ? `cd ${shQuote(ssh.cwd)} 2>/dev/null; ` : "";
   const resolve = cd + `p=${shQuote(p)}; case "$p" in "~") p=$HOME;; "~/"*) p=$HOME/\${p#"~/"};; esac; d=$(dirname -- "$p"); b=$(basename -- "$p"); abs="$(cd "$d" 2>/dev/null && pwd -P)/$b"; `;
+  const max = opts.bin ? SSH_IMG_MAX : SSH_EDIT_MAX;
   const script = op === "stat" ? resolve + `[ -f "$abs" ] && printf '%s' "$abs"; exit 0`
     : op === "read" ? resolve +
-      `[ -f "$abs" ] || { echo NOTFILE:"$abs" >&2; exit 2; }; [ "$(wc -c < "$abs")" -le ${SSH_EDIT_MAX} ] || { echo TOOBIG >&2; exit 3; }; printf '%s\\0%s\\0' "$abs" "$(cksum < "$abs")"; cat -- "$abs"`
+      `[ -f "$abs" ] || { echo NOTFILE:"$abs" >&2; exit 2; }; [ "$(wc -c < "$abs")" -le ${max} ] || { echo TOOBIG >&2; exit 3; }; printf '%s\\0%s\\0' "$abs" "$(cksum < "$abs")"; cat -- "$abs"`
     : `abs=${shQuote(p)}; ` +
       (opts.force || !opts.expect ? "" : `[ "$(cksum < "$abs")" = ${shQuote(opts.expect)} ] || { echo CHANGED >&2; exit 4; }; `) +
       (opts.backup ? `cp -p "$abs" "$abs.cc-bak" || exit 5; ` : "") +
       `cat > "$abs.cc-new" && cat "$abs.cc-new" > "$abs" && rm -f "$abs.cc-new" && cksum < "$abs"`;
-  const cp = execFile("ssh", sshCtl(sid, ssh, [ssh.target, script]), { timeout: 30000, maxBuffer: SSH_EDIT_MAX * 3, env: safeEnv(), encoding: "buffer" }, (err, so, se) => {
+  const cp = execFile("ssh", sshCtl(sid, ssh, [ssh.target, script]), { timeout: 30000, maxBuffer: max * 3, env: safeEnv(), encoding: "buffer" }, (err, so, se) => {
     const msg = String(se || "").trim();
-    if (err) return cb(msg.startsWith("NOTFILE:") ? tr("不是文件: {{path}}", { path: msg.slice(8) }) : msg === "TOOBIG" ? tr("文件超过 2MB,不在线编辑") : msg === "CHANGED" ? "CHANGED" : msg || err.message);
+    if (err) return cb(msg.startsWith("NOTFILE:") ? tr("不是文件: {{path}}", { path: msg.slice(8) }) : msg === "TOOBIG" ? (opts.bin ? tr("文件超过 8MB,不内联显示") : tr("文件超过 2MB,不在线编辑")) : msg === "CHANGED" ? "CHANGED" : msg || err.message);
     if (op === "stat") return cb(null, { exists: so.length > 0, path: so.toString() });
     if (op === "write") return cb(null, { sum: so.toString().trim() });
     const a = so.indexOf(0), b = so.indexOf(0, a + 1);
-    cb(null, { path: so.subarray(0, a).toString(), sum: so.subarray(a + 1, b).toString(), content: so.subarray(b + 1).toString("utf8") });
+    cb(null, { path: so.subarray(0, a).toString(), sum: so.subarray(a + 1, b).toString(), content: so.subarray(b + 1).toString(opts.bin ? "base64" : "utf8") });
   });
   cp.stdin.on("error", () => {}); // 对端先断时写 stdin 会 EPIPE,错误已由上面的回调报告
   cp.stdin.end(op === "write" ? Buffer.from(opts.content, "utf8") : undefined);
@@ -1211,8 +1213,13 @@ const EN_DICT = {
   "SSH 未连接,先在会话里重连": "SSH not connected, reconnect in the session first",
   "不是文件: {{path}}": "Not a file: {{path}}",
   "文件超过 2MB,不在线编辑": "File is over 2MB, not editable online",
+  "文件超过 8MB,不内联显示": "File is over 8MB, not shown inline",
   "📁 已将 agent 工作目录切到 {{target}}(在该目录重开上下文,之前的对话记忆不带过来)": "📁 Switched agent working directory to {{target}} (context restarts there, previous memory is not carried over)",
   "📁 已将 agent 工作目录设为 {{target}}": "📁 Set agent working directory to {{target}}",
+  "项目目录必须是已存在的绝对路径: {{path}}": "Project directory must be an existing absolute path: {{path}}",
+  "会话正在工作,等这一轮结束再选目录": "The session is busy. Pick a directory after this turn ends",
+  "📁 已绑定项目目录 {{dir}}(在该目录重开上下文,之前的对话记忆不带过来)": "📁 Bound to project directory {{dir}} (context restarts there, previous memory is not carried over)",
+  "📁 已绑定项目目录 {{dir}}": "📁 Bound to project directory {{dir}}",
   // ---- 会话错误 ----
   "暂无可汇总的改动小结": "No changes to summarize",
   "会话不存在或已被删除,请新建会话重试": "Session doesn't exist or was deleted; create a new one and retry",
@@ -2871,7 +2878,7 @@ wss.on("connection", (ws) => {
         send(ws, { type: "msg_queue", sessionId: entry.id, items: (s?.msgQueue || []).map((x) => ({ pid: x.pid, text: x.text, at: x.at })) }); // 重连要看到还压着的待发(含定时)
         // 别端(电脑前端本地队列)的镜像只补给手机:m.limit 是手机端的标记(见上面 buildMobileHistory)。
         // 桌面自己就是这份快照的来源,补给它会把它自己排的又显示一遍(本地 pending + 收回来的镜像)。
-        if (m.limit && peerPendingSnap.has(entry.id)) send(ws, { type: "peer_pending", sessionId: entry.id, items: peerPendingSnap.get(entry.id) });
+        if (m.limit) send(ws, { type: "peer_pending", sessionId: entry.id, items: peerPendingSnap.get(entry.id) ?? [] }); // 没快照也发空表:sidecar 重启后手机还留着旧的「其他端排队」,得让它清掉
         send(ws, { type: "perm_mode", sessionId: entry.id, mode: s?.permMode || entry.permMode || "default" });
         // 后台任务电平只在变化时才发:任务起了之后才打开会话(或手机断线重连)的端,不补就一直不知道有任务在跑
         send(ws, { type: "bg_tasks", sessionId: entry.id, tasks: s ? s.bgTrack.list(s.bgTasks) : [] });
@@ -3245,7 +3252,7 @@ wss.on("connection", (ws) => {
       case "ssh_file_write": { // 编辑窗口 / hover 菜单各自开短连接来调,reqId 原样带回
         const op = m.type.slice(9), w = op === "write";
         if (w && !String(m.path).startsWith("/")) { send(ws, { type: m.type, reqId: m.reqId, ok: false, error: "path must be absolute" }); break; }
-        sshFile(m.sessionId, op, String(m.path), { content: String(m.content ?? ""), expect: m.expect, backup: !!m.backup, force: !!m.force }, (error, r) =>
+        sshFile(m.sessionId, op, String(m.path), { content: String(m.content ?? ""), expect: m.expect, backup: !!m.backup, force: !!m.force, bin: !!m.bin }, (error, r) =>
           send(ws, { type: m.type, reqId: m.reqId, ok: !error, error: error || undefined, ...r }));
         break;
       }
@@ -3285,6 +3292,36 @@ wss.on("connection", (ws) => {
         execFile("ssh", args, { timeout: 15000, env: safeEnv() }, (err, stdout, stderr) => {
           send(ws, { type: "ssh_host_test", id: h.id, ok: !err && /ok/.test(stdout || ""),
             detail: err ? sshErrHint(stderr || err.message || "", h.keyPath) : "" });
+        });
+        break;
+      }
+      // 闲聊会话挂上项目目录 = 变成普通项目会话。agent 的 cwd 只能靠重启 query 改,
+      // 而 SDK 按目录存 transcript,跨目录接不上:已有历史的会话在新目录重开上下文(前端时间线照留,同 !cd)。
+      case "casual_to_project": {
+        const idx = loadIndex();
+        const entry = idx.find((e) => e.id === m.sessionId);
+        const dir = String(m.cwd ?? "").trim();
+        const fail = (error) => send(ws, { type: "session_error", sessionId: m.sessionId, error });
+        if (!entry?.casual) break;
+        if (!path.isAbsolute(dir) || !fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) { fail(tr("项目目录必须是已存在的绝对路径: {{path}}", { path: dir })); break; }
+        const sess = sessions.get(m.sessionId);
+        if (sess?.running) { fail(tr("会话正在工作,等这一轮结束再选目录")); break; }
+        const hadHistory = !!entry.sdkSessionId || !!sess?.hadUserTurn;
+        const tmp = entry.cwd;
+        delete entry.casual;
+        entry.cwd = dir;
+        entry.sdkSessionId = null;
+        if (entry.title === tr("闲聊")) entry.title = dir.split("/").filter(Boolean).pop() || entry.title;
+        saveIndex(idx); // 先落盘:spawnAgent 按 index 里的 casual 决定要不要塞闲聊提示
+        if (sess) sess.termCwd = dir;
+        (sess ? restartAgentCwd(ws, sess, m.sessionId, dir) : Promise.resolve()).then(() => {
+          if (tmp && tmp.startsWith(path.join(DATA_DIR, "casual") + path.sep)) { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
+          if (hadHistory) broadcast({ type: "session_ctx", sessionId: m.sessionId, tokens: 0, reset: true });
+          broadcast({ type: "session_converted", sessionId: m.sessionId, cwd: dir, title: entry.title });
+          broadcast({ type: "system_note", sessionId: m.sessionId, text: hadHistory
+            ? tr("📁 已绑定项目目录 {{dir}}(在该目录重开上下文,之前的对话记忆不带过来)", { dir })
+            : tr("📁 已绑定项目目录 {{dir}}", { dir }) });
+          broadcastIndex();
         });
         break;
       }

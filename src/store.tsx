@@ -803,6 +803,7 @@ interface Api {
   sshReconnect: (id: string) => void;
   sshClose: (id: string) => void;
   configureSsh: (id: string, config: { host: string; username?: string; port?: string; keyPath?: string }) => void;
+  bindProjectDir: (id: string, cwd: string) => void; // 闲聊会话挂上项目目录,变成项目会话
   searchMessages: (query: string, sessionId?: string, kind?: "all" | "user" | "agent") => void;
   requestAuthStatus: () => void;
   syncUiLang: (lang: string) => void; // 语言切换后同步给 sidecar
@@ -1171,6 +1172,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           case "turn_ended":
             dispatch({ type: "patch", id: m.sessionId, patch: { status: "idle", bgWait: false, bgTasks: [] } });
             break;
+          case "session_converted":
+            dispatch({ type: "patch", id: m.sessionId, patch: { casual: false, cwd: m.cwd, termCwd: m.cwd, title: m.title } });
+            break;
           case "session_closed":
             dispatch({ type: "patch", id: m.sessionId, patch: { status: "closed" } });
             break;
@@ -1365,6 +1369,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     sshReconnect(id) { send({ type: "ssh_reconnect", sessionId: id }); },
     sshClose(id) { send({ type: "ssh_close", sessionId: id }); },
     configureSsh(id, config) { send({ type: "ssh_configure", sessionId: id, ...config }); },
+    bindProjectDir(id, cwd) { send({ type: "casual_to_project", sessionId: id, cwd }); },
     searchMessages(query, sessionId, kind) { send({ type: "search_messages", query, sessionId, kind }); },
     requestAuthStatus() { send({ type: "auth_status" }); },
     syncUiLang(lang) { send({ type: "set_lang", lang }); }, // 语言切换后让 sidecar 同步出消息
@@ -1495,6 +1500,37 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       dispatch({ type: "append", id: s.id, item: { kind: "system", ts: Date.now(), text: i18n.t("已排到 {{time}} 定时回查,这期间会话空闲,可以继续聊别的", { time }) } });
     }
   }, [state.sessions]);
+
+  // 带定时的待发(额度续跑、定时回查)落 localStorage:队列本身只在前端内存,重启 ChatCode 就丢 ——
+  // 01:34 排了 02:21 的「继续」,01:47 重启,额度恢复了却没人发。只存纯文本项(图片 base64 太大);
+  // 会话还没出现在 state 里(重启后只开了一部分)的条目原样保留,等它出现再恢复;超 12h 的当过期丢掉。
+  // 恢复那一拍不写盘:dispatch 还没落进 state,此刻写会把刚恢复的又擦掉。
+  const timedRestored = useRef(new Set<string>());
+  useEffect(() => {
+    const KEY = "ChatCode-timed-pending", stale = Date.now() - 12 * 3600_000;
+    let saved: Record<string, import("./types").PendingMsg[]> = {};
+    try { saved = JSON.parse(localStorage.getItem(KEY) || "{}"); } catch {}
+    let restoring = false;
+    for (const s of Object.values(state.sessions)) {
+      if (timedRestored.current.has(s.id)) continue;
+      timedRestored.current.add(s.id);
+      for (const p of saved[s.id] ?? []) {
+        if (p.at && p.at > stale && !s.pending?.some((x) => x.pid === p.pid)) { dispatch({ type: "enqueue_pending", id: s.id, item: p }); restoring = true; }
+      }
+    }
+    if (restoring) return;
+    const next: Record<string, import("./types").PendingMsg[]> = {};
+    for (const [id, items] of Object.entries(saved)) {
+      const keep = items.filter((p) => p.at && p.at > stale);
+      if (keep.length && !state.sessions[id]) next[id] = keep;
+    }
+    for (const s of Object.values(state.sessions)) {
+      if (!timedRestored.current.has(s.id)) continue;
+      const items = (s.pending ?? []).filter((p) => p.at && !p.imgs && p.blocks.every((b) => b.type === "text"));
+      if (items.length) next[s.id] = items;
+    }
+    try { localStorage.setItem(KEY, JSON.stringify(next)); } catch {}
+  }, [state.sessions]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 把本机待发队列镜像广播给别端(手机/另一台电脑)只读显示。本机队列是纯前端 pending,
   // 不进 sidecar,不广播的话别端根本不知道 —— 就是「手机看不到 PC 排队」那个问题。

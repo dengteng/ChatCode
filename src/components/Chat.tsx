@@ -3,8 +3,9 @@ import { GitFork, GitBranch, ChevronRight, ChevronDown, Folder, Server, Puzzle, 
 import { createPortal } from "react-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { rawHtml } from "../lib/mdhtml";
+import { rawHtml, isImg, dataUrl } from "../lib/mdhtml";
 import { invoke } from "@tauri-apps/api/core";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { openPath, openUrl, revealPath } from "../native";
 import type { ApiRetry, PermissionSuggestion, ResumeChoice, ResumePrompt, Session, TimelineItem } from "../types";
 import { modelDisplayName, shortModelName } from "../types";
@@ -547,6 +548,27 @@ function TableBlock({ children }: { children?: ReactNode }) {
   );
 }
 
+// 回复里的 ![](/tmp/x.png):webview 把 /tmp/x.png 当成 app 自己的站内路径,必然破图。
+// 本地路径(绝对 / 相对 cwd)读盘转 data URL;SSH 会话先读远端(sidecar 的 ssh_file_read + bin),
+// 远端没有再试本机。都读不到(文件已删、超 8MB)保持原 src。
+function LocalImg({ src, alt, cwd }: { src?: string; alt?: string; cwd: string }) {
+  const ssh = useContext(SshCtx);
+  const [url, setUrl] = useState<string>();
+  const path = src && !/^(https?:|data:|blob:|asset:|\/\/)/i.test(src) && isImg(src.split(/[?#]/)[0])
+    ? decodeURI(src.replace(/^file:\/\//, "").split(/[?#]/)[0]) : null;
+  const sid = ssh?.sid;
+  useEffect(() => {
+    if (!path) return;
+    let alive = true;
+    const abs = path.startsWith("/") ? path : `${cwd.replace(/\/$/, "")}/${path}`;
+    const local = () => invoke<string>("read_file_b64", { path: abs }).then((b) => alive && setUrl(dataUrl(abs, b))).catch(() => {});
+    if (sid) remoteCall<{ content: string }>({ type: "ssh_file_read", sessionId: sid, path, bin: true }).then((r) => alive && setUrl(dataUrl(path, r.content)), local);
+    else local();
+    return () => { alive = false; };
+  }, [path, cwd, sid]);
+  return <img src={url ?? src} alt={alt} />;
+}
+
 // 链接走系统浏览器,别让 webview 自己导航到外链(会把整个 app 界面顶掉)。code/链接里的路径也做 hover 操作。
 function makeMdComponents(cwd: string) {
   return {
@@ -566,7 +588,34 @@ function makeMdComponents(cwd: string) {
       return <code><Linkify text={text} cwd={cwd} /></code>;
     },
     pre: ({ children }: { children?: ReactNode }) => <CodeBlock>{children}</CodeBlock>,
+    img: ({ src, alt }: { src?: string; alt?: string }) => <LocalImg src={src} alt={alt} cwd={cwd} />,
   };
+}
+
+// 下一步建议 chips。左键直接发;右键把 chip 加入/移出多选,选过之后左键也改成切换,
+// 「发送所选」把按选择顺序编号的多条合成一条消息发出。
+function NextChips({ steps, past, withCtx, send }: { steps: string[]; past: boolean; withCtx: (s: string) => string; send: (text: string) => void }) {
+  const { t } = useTranslation();
+  const [sel, setSel] = useState<number[]>([]);
+  const toggle = (i: number) => setSel((a) => a.includes(i) ? a.filter((x) => x !== i) : [...a, i]);
+  const submit = () => {
+    const picked = sel.map((i) => steps[i]).filter(Boolean);
+    if (!picked.length) return;
+    send(withCtx(picked.length === 1 ? picked[0] : `${t("请依次完成下面几件事：")}\n${picked.map((s, i) => `${i + 1}. ${s}`).join("\n")}`));
+    setSel([]);
+  };
+  return <div className={`next-chips${past ? " past" : ""}`}>
+    {steps.map((s, i) => (
+      <button key={i} className={`next-chip${sel.includes(i) ? " sel" : ""}`}
+        title={sel.length ? t("点击切换选中") : past ? t("接着那轮发送：{{text}}（右键多选）", { text: s }) : t("发送：{{text}}（右键多选）", { text: s })}
+        onContextMenu={(e) => { e.preventDefault(); toggle(i); }}
+        onMouseDown={(e) => { if (e.button !== 0) return; e.preventDefault(); if (sel.length) toggle(i); else send(withCtx(s)); }}>{sel.includes(i) && <Check size={11} />}{s}</button>
+    ))}
+    {sel.length > 0 && <>
+      <button className="next-chip go" onMouseDown={pick(submit)}>{t("发送所选 ({{n}})", { n: sel.length })}</button>
+      <button className="next-chip" onMouseDown={pick(() => setSel([]))}>{t("取消")}</button>
+    </>}
+  </div>;
 }
 
 // 菜单项:只认左键,且 preventDefault 掉默认的焦点转移(见 SSH 菜单处的注释)
@@ -602,7 +651,7 @@ const scrollMem = new Map<string, ScrollPos>();
 
 export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { session: Session; onToggleInfo: (tab?: "project" | "branches" | "files") => void; onShowTurn: (anchor: number) => void; onOpenSettings: () => void }) {
   const { t } = useTranslation();
-  const { state, respondPermission, sshReconnect, sshClose, configureSsh, chooseResume, requestGitInfo, runTerminal, listSshHosts, sendMessage, enqueuePending, loadOlderHistory } = useStore();
+  const { state, respondPermission, sshReconnect, sshClose, configureSsh, chooseResume, bindProjectDir, requestGitInfo, runTerminal, listSshHosts, sendMessage, enqueuePending, loadOlderHistory } = useStore();
   const bottomRef = useRef<HTMLDivElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   const stick = useRef(true); // 是否跟随底部:运行中往上翻历史时不该被新消息拽回去
@@ -615,6 +664,7 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
   const [showCommit, setShowCommit] = useState(false); // 顶栏 commit 弹窗
   const [showGitMap, setShowGitMap] = useState(false); // 顶栏 关联 Git 仓库弹窗(本地非 git 目录时)
   const [sshPick, setSshPick] = useState(false); // 目录栏 ▾:本地 / SSH 主机切换菜单
+  const [bindDir, setBindDir] = useState<string | null>(null); // 闲聊会话选了目录、待确认(有历史会重开上下文)
   const [pushing, setPushing] = useState(false); // 顶栏 push/pull 进行中:禁二次点击 + 菊花
   const [committing, setCommitting] = useState(false); // 顶栏 commit 进行中:同上,和 push 一套观感
   const [showJump, setShowJump] = useState(false); // 往上滚一定距离后,右下角显示"回到底部"
@@ -865,9 +915,6 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
 
   const doneCount = session.todos.filter((t) => t.status === "completed").length;
   const parent = session.inheritFrom ? state.index.find((e) => e.id === session.inheritFrom) : null;
-  // 顶栏这一行确实一个字都没有(闲聊会话没目录/没分支/没「项目详情」,也没继承标签和任务进度)。
-  // 此时顶栏既不该占位、也不该画渐变托底 —— 具体两条规则在 styles.css 的 .chat.bare-top 下。
-  const bareTop = session.casual && !parent && session.todos.length === 0;
   const git = state.git[session.id];
   const branch = git?.local?.find((b) => b.name === git.current);
   // 工作区有未提交内容(含未跟踪文件)。unborn 分支和正常分支两条渲染路径共用同一个判据。
@@ -888,11 +935,20 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
   const sshStateLabel = sshState === "connected" ? t("已连接") : sshState === "connecting" ? t("连接中…") : sshState === "error" ? t("连接失败") : t("未连接");
   // 远端命令跑过之后 termCwd 会变成 "user@host:/path";还没跑过时它仍是本地路径,别拿来当远端目录显示
   const sshLabel = session.ssh?.host ?? "";
+  // 闲聊会话挂项目目录:弹原生选目录窗;已有对话的会话换目录要重开上下文,先确认
+  const pickProjectDir = async () => {
+    setSshPick(false);
+    try {
+      const p = await invoke<string | null>("choose_directory");
+      if (!p) return;
+      if (session.timeline.some((x) => x.kind === "user")) setBindDir(p); else bindProjectDir(session.id, p);
+    } catch { /* 取消选择 */ }
+  };
   const sshPath = session.termCwd?.startsWith(`${sshLabel}:`) ? session.termCwd : `${sshLabel}:~`;
 
   return (
     <SshCtx.Provider value={sshCtx}>
-    <div className={`chat ${bareTop ? "bare-top" : ""}`}>
+    <div className="chat">
       {/* data-tauri-drag-region:按住顶栏空白处即可拖动整个窗口(Tauri v2 内置手势,只对带该属性的
           元素本身生效)。所以标题/继承标签/任务进度这些"纯展示"元素都挂上,而"项目详情"是可点按钮 —— 不挂,
           点它只触发点击、不拖窗。浏览器模式下这只是个无意义 data 属性,无副作用。 */}
@@ -902,11 +958,16 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
         <div className="topbar-left" data-tauri-drag-region>
           {parent && <span className="inherit-tag" data-tauri-drag-region title={t("继承自 {{title}} 的上下文", { title: parent.title })}><GitFork size={13} /> {t("继承自 {{title}}", { title: parent.title })}</span>}
           {/* 当前工作目录 + 本地/SSH 切换▾,和标题同一行左侧 */}
-          {!session.casual && <div className={`dir-switch ${sshOn ? "ssh" : ""}`}>
+          <div className={`dir-switch ${sshOn ? "ssh" : ""}`}>
           {sshOn
             ? <div className="dir-local ssh-target" title={`SSH ${session.ssh!.host} · ${sshLabel}`}>
                 <span className={`ssh-dot ${sshState === "connected" ? "on" : "off"}`} />
                 <span className="dir-local-path">{sshPath}</span>
+              </div>
+            : session.casual
+            ? <div className="dir-local" title={t("给这个闲聊会话选一个项目目录或服务器")} role="button" tabIndex={0}
+                {...btnPress(() => { listSshHosts(); setSshPick((o) => !o); })}>
+                <span className="dir-ico"><Folder size={14} /></span><span className="dir-local-path">{t("选择项目目录 / 服务器")}</span>
               </div>
             : <div className="dir-local" title={t("点击打开 {{path}}", { path: session.termCwd || session.cwd })} role="button" tabIndex={0}
                 {...btnPress(() => openPath(session.termCwd || session.cwd))}>
@@ -922,10 +983,20 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
               <>
                 <div className="ssh-menu-shade" onMouseDown={() => setSshPick(false)} />
                 <div className="ssh-menu ssh-pick">
-                  <button className={`ssh-pick-item ${sshOn ? "" : "sel"}`} onMouseDown={pick(() => { if (sshOn) sshClose(session.id); setSshPick(false); })}>
-                    <b><Folder size={13} /> {t("本地目录")}</b>
-                    <span className="muted">{session.cwd.replace(/^\/Users\/[^/]+/, "~")}</span>
-                  </button>
+                  {session.casual
+                    ? <>
+                        <button className="ssh-pick-item" disabled={session.status === "running"} onMouseDown={pick(() => { void pickProjectDir(); })}>
+                          <b><Folder size={13} /> {t("选择本地项目目录…")}</b>
+                          <span className="muted">{t("变成项目会话")}</span>
+                        </button>
+                        {sshOn && <button className="ssh-pick-item" onMouseDown={pick(() => { sshClose(session.id); setSshPick(false); })}>
+                          <b>{t("断开 SSH,回到闲聊")}</b>
+                        </button>}
+                      </>
+                    : <button className={`ssh-pick-item ${sshOn ? "" : "sel"}`} onMouseDown={pick(() => { if (sshOn) sshClose(session.id); setSshPick(false); })}>
+                        <b><Folder size={13} /> {t("本地目录")}</b>
+                        <span className="muted">{session.cwd.replace(/^\/Users\/[^/]+/, "~")}</span>
+                      </button>}
                   <div className="ssh-pick-sep" />
                   {state.sshHosts.length === 0
                     ? <div className="ssh-pick-empty">
@@ -950,7 +1021,7 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
               </>
             )}
           </div>
-          </div>}
+          </div>
         </div>
         <div className="topbar-right" data-tauri-drag-region>
           {session.todos.length > 0 && (
@@ -1007,6 +1078,9 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
         {/* 弹窗必须挂在 .branch-line 外面:Radix Portal 只是把 DOM 节点挪到了 body,
             React 的事件冒泡走的仍是组件树 —— 挂在里面的话,点弹窗的「提交」/「取消」/遮罩,
             事件都会冒泡到 .branch-line 的 onClick,把项目详情抽屉一起打开 */}
+        {bindDir && <ConfirmDialog danger={false} title={t("把这个会话绑定到项目目录?")}
+          body={<><code>{bindDir}</code>{t(" —— 之前的对话记忆不会带到新目录(聊天记录仍保留在界面上),在该目录重开上下文。")}</>}
+          confirmLabel={t("绑定")} onConfirm={() => { bindProjectDir(session.id, bindDir); setBindDir(null); }} onCancel={() => setBindDir(null)} />}
         {showCommit && <CommitDialog scope={session.cwd} sessionId={session.id} onSubmit={(message) => { setCommitting(true); runTerminal(session.id, `git add -A && git commit -m '${message.replace(/'/g, "'\\''")}'`); setShowCommit(false); }} onCancel={() => setShowCommit(false)} />}
         {/* 关联已有远程仓库(不动工作区文件)。关键:光 init+remote add+fetch 不会建立"分支跟踪(upstream)" ——
             git init 造出的本地分支和远程无血缘,之后 rebase/checkout/fetch 都补不上跟踪。所以这里 fetch 后:
@@ -1177,12 +1251,7 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
                           const head = [q && t("我当时问：{{q}}", { q }), a && t("你当时答：{{a}}", { a })].filter(Boolean).join("；");
                           return head ? `${t("（承接前面那一轮 —— {{head}}）", { head })}\n\n${s}` : s;
                         };
-                        return <div className={`next-chips${past ? " past" : ""}`}>
-                          {steps.map((s, i) => (
-                            <button key={i} className="next-chip" title={past ? t("接着那轮发送：{{text}}", { text: s }) : t("发送：{{text}}", { text: s })}
-                              onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); sendChip(withCtx(s)); } }}>{s}</button>
-                          ))}
-                        </div>;
+                        return <NextChips steps={steps} past={past} withCtx={withCtx} send={sendChip} />;
                       })()}
                       {/* 复制整条回复:和用户气泡下方那排同一套样式(.msg-redo-row),只是靠右对齐到气泡右下角。
                           说明文案走 data-tip 而非 title:原生 tooltip 在 WKWebView 里要悬停一秒多才弹、还不跟主题走,

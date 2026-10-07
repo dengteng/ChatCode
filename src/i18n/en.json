@@ -647,8 +647,11 @@
   "重试:重新发起这条消息": "Retry: resend this message",
   "编辑:回填到输入框": "Edit: fill back into the input",
   "复制内容": "Copy content",
-  "发送：{{text}}": "Send: {{text}}",
-  "接着那轮发送：{{text}}": "Send, continuing that turn: {{text}}",
+  "发送：{{text}}（右键多选）": "Send: {{text}} (right-click to multi-select)",
+  "接着那轮发送：{{text}}（右键多选）": "Send, continuing that turn: {{text}} (right-click to multi-select)",
+  "点击切换选中": "Click to toggle selection",
+  "请依次完成下面几件事：": "Please do these in order:",
+  "发送所选 ({{n}})": "Send selected ({{n}})",
   "我当时问：{{q}}": "I asked: {{q}}",
   "你当时答：{{a}}": "you replied: {{a}}",
   "（承接前面那一轮 —— {{head}}）": "(Continuing that earlier turn — {{head}})",
@@ -865,5 +868,13 @@
   "已批准方案，切到「逐条审批」": "Plan approved; switched to “Review each step”",
   "正在加载更早消息…": "Loading earlier messages…",
   "> 只含已加载的最近部分,更早还有 {{n}} 轮未加载(在对话顶部点「加载更早消息」后再导出可包含)": "> Only the loaded recent part is included; {{n}} earlier rounds are not loaded yet (click “Load earlier messages” at the top of the conversation, then export again to include them)",
-  "回到最新消息（后面还有 {{n}} 轮）": "Back to latest ({{n}} newer rounds)"
+  "回到最新消息（后面还有 {{n}} 轮）": "Back to latest ({{n}} newer rounds)",
+  "给这个闲聊会话选一个项目目录或服务器": "Pick a project directory or server for this chat",
+  "选择项目目录 / 服务器": "Pick project dir / server",
+  "选择本地项目目录…": "Pick a local project directory…",
+  "变成项目会话": "Turns this into a project session",
+  "断开 SSH,回到闲聊": "Disconnect SSH, back to chat",
+  "把这个会话绑定到项目目录?": "Bind this session to a project directory?",
+  " —— 之前的对话记忆不会带到新目录(聊天记录仍保留在界面上),在该目录重开上下文。": " — previous memory is not carried over (the chat stays on screen); context restarts in that directory.",
+  "绑定": "Bind"
 }
