@@ -86,6 +86,12 @@ assert.strictEqual(ds.ANTHROPIC_MODEL, "deepseek-v4-pro", "传给 CLI 的必须�
 for (const k of ["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "DISABLE_TELEMETRY", "DISABLE_ERROR_REPORTING", "DISABLE_AUTOUPDATER"])
   assert.strictEqual(ds[k], "1", `${k} 没关`);
 console.log("✓ 第三方会话已关掉遥测/统计/自动更新");
+// 子 agent 用别名(haiku/sonnet/opus/fable)时,第三方端点上没有 claude-* 模型:四档都得映射到真实 id
+assert.strictEqual(ds.ANTHROPIC_DEFAULT_SONNET_MODEL, "deepseek-v4-pro");
+assert.strictEqual(ds.ANTHROPIC_DEFAULT_OPUS_MODEL, "deepseek-v4-pro");
+assert.strictEqual(ds.ANTHROPIC_DEFAULT_FABLE_MODEL, "deepseek-v4-pro");
+assert.strictEqual(ds.ANTHROPIC_DEFAULT_HAIKU_MODEL, ds.ANTHROPIC_SMALL_FAST_MODEL, "haiku 档走同家便宜模型,和后台小任务一致");
+console.log("✓ 第三方会话的子 agent 别名都映射到真实模型");
 
 // 3. claude 会话:什么都不注
 assert.deepStrictEqual(envForModel("default", keys), {});

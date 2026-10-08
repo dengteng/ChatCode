@@ -343,6 +343,12 @@ export function envForModel(modelValue, settings) {
     ANTHROPIC_AUTH_TOKEN: token,
     ANTHROPIC_MODEL: model,
     ANTHROPIC_SMALL_FAST_MODEL: def.smallFast || model, // 背景小任务走同家便宜模型,别打 claude haiku(会 404)
+    // 子 agent 带别名(haiku/sonnet/opus/fable)时,CLI 按这几个变量换成真实 id;不设就去打第三方端点上
+    // 根本没有的 claude-* 模型 → 404,子 agent 整个挂掉。haiku 档 = 同家便宜模型,其余档 = 主模型。
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: def.smallFast || model,
+    ANTHROPIC_DEFAULT_SONNET_MODEL: model,
+    ANTHROPIC_DEFAULT_OPUS_MODEL: model,
+    ANTHROPIC_DEFAULT_FABLE_MODEL: model,
     // CLI 起来还会打遥测/统计/自动更新检查,全是 Anthropic 的域名。走第三方 provider 时这些请求
     // 一没用二打不通(国内直连要么慢要么超时),每次起会话白等十几秒,看起来像 ChatCode 卡死。
     // 只在非 claude 会话关(本函数在 claude 时已提前 return),claude 用户该走的照走。

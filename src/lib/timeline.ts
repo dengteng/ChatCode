@@ -49,7 +49,7 @@ export function failedEdits(items: TimelineItem[]) {
 // shell 有两种启动写法:主动开后台回 "running in background with ID: x. Output …";
 // 前台命令跑超时被 SDK 挪去后台回 "moved to the background (ID: x). Output …"。
 // 后者只认前一种的话,长命令超时转后台那轮会被当成已结束 —— 输入框还在等、气泡却是完成态。
-const BG_START = /(?:running in background with ID:\s*|moved to the background \(ID:\s*)([\w-]+)\)?\.\s*Output is being written to:\s*(\S+?)\.?(?=\s|$)|Async agent launched[\s\S]*?agentId:\s*([\w-]+)|Workflow launched in background\. Task ID:\s*([\w-]+)(?:\s*\nSummary:\s*([^\n]+))?/g;
+const BG_START = /(?:running in background with ID:\s*|moved to the background \(ID:\s*)([\w-]+)\)?\.\s*Output is being written to:\s*(\S+?)\.?(?=\s|$)|Async agent launched[\s\S]*?agentId:\s*([\w-]+)|Workflow launched in background\. Task ID:\s*([\w-]+)(?:\s*\nSummary:\s*([^\n]+))?|Monitor started \(task\s+([\w-]+)/g;
 export type BgTask = { id: string; kind: "shell" | "agent" | "workflow";title: string; body: string; out?: string; ts?: number };
 // 按顺序列出这些条目里启动过的后台任务(不判是否已了结)。
 type ToolItem = Extract<TimelineItem, { kind: "tool" }>;
@@ -64,6 +64,8 @@ function bgStarts(items: TimelineItem[], t: T, onTool?: (it: ToolItem, found: Bg
     // ts = 启动它的那次工具调用的时间,给 bar 上的"已跑 Xmin"当起点(后台任务本身不回时间)
     for (const m of res.matchAll(BG_START)) found.push(m[1]
       ? { id: m[1], kind: "shell", title: String(it.input?.description || cmd.split("\n")[0] || t("后台命令")), body: cmd, out: m[2], ts: it.ts }
+      // Monitor 工具:回 "Monitor started (task x, …)",没有输出文件;它是 shell 一类的长跑任务,标题取它的 description
+      : m[6] ? { id: m[6], kind: "shell", title: String(it.input?.description || cmd.split("\n")[0] || t("后台命令")), body: cmd, ts: it.ts }
       : m[3] ? { id: m[3], kind: "agent", title: String(it.input?.description || it.input?.subagent_type || t("子 agent")), body: String(it.input?.prompt ?? ""), ts: it.ts }
       // Workflow:回 "Workflow launched in background. Task ID: x\nSummary: …",Summary 是它自己写的一句话目标
       : { id: m[4], kind: "workflow", title: m[5]?.trim() || t("工作流"), body: "", ts: it.ts });

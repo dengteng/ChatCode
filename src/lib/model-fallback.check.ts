@@ -16,6 +16,7 @@ eq(shortModelName("claude-opus-4-8"), "Opus 4.8", "opus-4-8");
 eq(shortModelName("claude-fable-5-1"), "Fable 5.1", "fable-5-1");
 eq(shortModelName("claude-opus-5[1m]"), "Opus 5", "带 [1m] 后缀");
 eq(shortModelName("claude-haiku-4-5-20251001"), "Haiku 4.5", "日期戳不算版本");
+eq(shortModelName("claude-haiku-5-5"), "Haiku 5.5", "Haiku 5.5 没有日期戳,5-5 两段都是版本");
 eq(shortModelName("deepseek-v4-pro"), "deepseek-v4-pro", "认不出的原样返回");
 
 // 回退块必须留在 agent 回合里:它是那轮回复的一部分,单独成组就会冒出一张没正文的空卡

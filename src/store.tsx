@@ -830,6 +830,7 @@ export function fetchBlob(key: string, mediaType: string, full: boolean): Promis
   return p;
 }
 
+let switchPerf = null as { id: string; t0: number; frame: number; hist: number; lag: number } | null; // 见 StoreProvider 里的切会话计时
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initial);
   const wsRef = useRef<WebSocket | null>(null);
@@ -1062,6 +1063,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             for (const msg of m.messages) handleSdkMessage((x) => acts.push(x), m.sessionId, msg, false, stateRef);
             acts.push({ type: "patch", id: m.sessionId, patch: { histMore: m.more ?? null } });
             dispatch({ type: "batch", id: m.sessionId, actions: acts });
+            const sp = switchPerf;
+            if (sp && sp.id === m.sessionId && !sp.hist) sp.hist = performance.now() - sp.t0;
           }
             dispatch({ type: "patch", id: m.sessionId, patch: { loadingHistory: false } }); // 回放完毕,撤下"加载中"
             break;
@@ -1414,6 +1417,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(iv);
   }, [hasTimedPending]);
 
+  // 切会话计时:点击→首帧、→历史到达、期间主线程最长卡顿,一行写进 sidecar.log([perf] 切会话)。
+  // 用来查"切过去输入框点不动"。WKWebView 没有 longtask API,卡顿用 50ms 定时器的迟到量估。
+  useEffect(() => {
+    const id = state.activeId;
+    if (!id) return;
+    const p = { id, t0: performance.now(), frame: 0, hist: 0, lag: 0 };
+    switchPerf = p;
+    requestAnimationFrame(() => requestAnimationFrame(() => { p.frame = performance.now() - p.t0; }));
+    let last = performance.now();
+    const iv = setInterval(() => { const n = performance.now(); p.lag = Math.max(p.lag, n - last - 50); last = n; }, 50);
+    const done = setTimeout(() => {
+      clearInterval(iv);
+      const s = stateRef.current.sessions[id];
+      send({ type: "perf_log", sessionId: id, frame: Math.round(p.frame), hist: Math.round(p.hist), lag: Math.round(p.lag), items: s?.timeline.length ?? 0, compacting: !!s?.timeline.some((t) => t.kind === "compact" && t.running) });
+    }, 6000);
+    return () => { clearInterval(iv); clearTimeout(done); };
+  }, [state.activeId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // 待发队列自动出队:某会话变空闲(agent 完成上一轮)、没有后台任务、且上一轮已彻底了结(含后台续跑)时,发出队首。
   // bgWait = 上一轮还挂着后台任务,轮次未完全了结 —— 不能放队列出去,否则会在后台任务续跑前把下一条消息切进来。
   // 压缩上下文期间 status 也是 idle,同样要按住:压到一半插进新一轮,压缩就白做了。
@@ -1439,7 +1460,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // 定时回查:本次启动后真正跑完的一轮(freshDone)末尾带「定时回查」行 → 排一条到点自动发的定时消息。
   // 放 effect 不放 result 分支:result 到达时 stateRef 里可能还没有这一轮最后的正文。
   // 按「会话 + 最后一段正文的 ts」去重:用户取消后不会再被排回来;历史 reopen 的轮次 freshDone 为假,不会补排。
-  // ponytail: 待发队列只在前端内存,重启 ChatCode 定时回查就丢了(同额度自动续跑);要持久化再挪进 sidecar。
+  // 排给 sidecar 而不是前端待发队列:前端队列在内存里,关窗口/重启就丢(见 sidecar 的 timed-queue.json)。
   useEffect(() => {
     for (const s of Object.values(state.sessions)) {
       if (!s.freshDone || s.status !== "idle" || s.bgWait) continue;
@@ -1453,11 +1474,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const r = recheckOf(turn);
       if (!r) continue;
       const time = new Date(r.at).toLocaleString();
-      if ((s.pending?.length ?? 0) >= PENDING_MAX) {
+      // 排进 sidecar 的 msgQueue(落盘,关窗口/重启照样到点发)。上限 3 条,和 sidecar 的 MSG_QUEUE_MAX 一致
+      if ((s.peerQueue?.length ?? 0) >= 3) {
         dispatch({ type: "append", id: s.id, item: { kind: "system", ts: Date.now(), text: i18n.t("待发队列已满,没排上 {{time}} 的定时回查", { time }) } });
         continue;
       }
-      dispatch({ type: "enqueue_pending", id: s.id, item: { pid: `recheck-${r.at}`, text: r.text, blocks: [{ type: "text", text: r.text }], at: r.at } });
+      if (!send({ type: "user_message", sessionId: s.id, content: [{ type: "text", text: r.text }], at: r.at })) continue;
       dispatch({ type: "append", id: s.id, item: { kind: "system", ts: Date.now(), text: i18n.t("已排到 {{time}} 定时回查,这期间会话空闲,可以继续聊别的", { time }) } });
     }
   }, [state.sessions]);

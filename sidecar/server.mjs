@@ -1343,7 +1343,7 @@ async function authStatus() {
 // 后端给账户开了就能直接用;没开则选中后 SDK 报错——和 CLI 里 `claude --model claude-opus-5` 同理。
 // SDK 的 supportedModels 没上报、或还没问到时的兜底表。首装第一次用(缓存也空)时,菜单至少有这几个。
 // 与 SDK 上报重复的会在下面按 key 去重,不会出现两份。
-// 手工表的档位:supportedModels 没上报时菜单照样能切 effort(haiku 不支持 effort,不写)
+// 手工表的档位:supportedModels 没上报时菜单照样能切 effort(Haiku 4.5 不支持 effort,不写;Haiku 5.5 起五档都支持)
 const EFFORT_ALL = ["low", "medium", "high", "xhigh", "max"];
 const CLAUDE_MANUAL_MODELS = [
   { value: "claude-fable-5-1", model: "claude-fable-5-1", displayName: "Fable 5.1", description: "claude-fable-5-1 · 手动指定", provider: "claude", contextWindow: 1_000_000, supportedEffortLevels: EFFORT_ALL },
@@ -1351,6 +1351,7 @@ const CLAUDE_MANUAL_MODELS = [
   { value: "claude-opus-5", model: "claude-opus-5", displayName: "Opus 5", description: "claude-opus-5 · 手动指定", provider: "claude", contextWindow: 1_000_000, supportedEffortLevels: EFFORT_ALL },
   { value: "claude-sonnet-5", model: "claude-sonnet-5", displayName: "Sonnet 5", description: "claude-sonnet-5 · 手动指定", provider: "claude", supportedEffortLevels: EFFORT_ALL },
   { value: "claude-opus-4-8", model: "claude-opus-4-8", displayName: "Opus 4.8", description: "claude-opus-4-8 · 手动指定", provider: "claude", supportedEffortLevels: EFFORT_ALL },
+  { value: "claude-haiku-5-5", model: "claude-haiku-5-5", displayName: "Haiku 5.5", description: "claude-haiku-5-5 · 手动指定", provider: "claude", contextWindow: 1_000_000, supportedEffortLevels: EFFORT_ALL },
   { value: "claude-haiku-4-5-20251001", model: "claude-haiku-4-5-20251001", displayName: "Haiku 4.5", description: "claude-haiku-4-5 · 手动指定", provider: "claude" },
 ];
 const modelKey = (m) => m?.value || m?.resolvedModel || m?.model;
@@ -2253,6 +2254,8 @@ function enqueueMsg(ws, sess, m) {
     send(ws, { type: "system_note", sessionId: m.sessionId, text: tr("待发已满(最多 {{n}} 条)", { n: MSG_QUEUE_MAX }) });
     return;
   }
+  // 同一时刻同一句话排了两次(两个窗口都发了定时回查)只留一条
+  if (m.at && sess.msgQueue.some((x) => x.at === m.at && x.text === queueText(m.content))) return;
   // pid 由 sidecar 发,两端都拿这个来取消 —— 手机自己编的 id 换台设备就对不上了
   sess.msgQueue.push({ pid: `${Date.now()}-${sess.msgQueue.length}`, text: queueText(m.content), at: m.at || undefined, ws, m });
   broadcastMsgQueue(m.sessionId, sess);
@@ -3086,7 +3089,7 @@ wss.on("connection", (ws) => {
           broadcast({ type: "system_note", sessionId: m.sessionId, text: tr("🔀 已切换到 {{label}}(换 provider 会开启全新对话)", { label }) });
           restartAgentCwd(ws, sess, m.sessionId, sess.agentCwd);
         } else {
-          // 换模型后 CLI 可能降档(haiku 不支持 effort),等它切完再读回实际档位
+          // 换模型后 CLI 可能降档(Haiku 4.5 不支持 effort),等它切完再读回实际档位
           sess?.q?.setModel?.(m.model === "default" ? undefined : modelArg(m.model))?.then?.(() => syncEffort(sess, m.sessionId), () => {});
         }
         break;
@@ -3139,6 +3142,11 @@ wss.on("connection", (ws) => {
         // 重开大会话时的恢复方式:ask(默认,弹卡片问)/ summary / full。「全新对话」不收 —— 会丢旧上下文。
         saveSettings({ ...loadSettings(), resumeMode: m.mode === "summary" || m.mode === "full" ? m.mode : "ask" });
         authStatus().then((status) => send(ws, { type: "auth_status", status }));
+        break;
+      }
+      case "perf_log": { // 前端切会话计时(见 store.tsx 的 switchPerf),只落日志
+        const n = (v) => (Number.isFinite(v) ? Math.round(v) : -1);
+        console.log(`[perf] 切会话 ${String(m.sessionId).slice(0, 8)} 首帧=${n(m.frame)}ms 历史到达=${n(m.hist)}ms 主线程最长卡顿=${n(m.lag)}ms 条目=${n(m.items)}${m.compacting ? " 压缩中" : ""}`);
         break;
       }
       case "set_auto_resume": {

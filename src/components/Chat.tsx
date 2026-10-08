@@ -633,13 +633,18 @@ const pick = (fn: () => void) => (e: React.MouseEvent) => { if (e.button !== 0) 
 // 拽回去又让跟随重新亮起,下一块流式内容再拽一次,看着就是气泡不停上下抖。
 // mark:通知调用方"接下来这一下 scrollTop 是我们自己写的",别把它当成用户在滚(见 markProg)。
 const pokeRepaint = (el: HTMLElement, top: () => number, ok: () => boolean = () => true, mark: () => void = () => {}) => {
+  // 滚 1px 会让整条时间线(尤其贴底的最后一个气泡)跟着位移一帧,看着就是"抖一下"。
+  // 同帧给容器反向挪 1px 抵消:滚动位置照变(重绘要的是它),画面不动。每个出口都要清掉 transform。
+  const unshift = () => { el.style.transform = ""; };
   let raf = requestAnimationFrame(() => {
     if (!ok()) return;
     mark();
-    el.scrollTop += el.scrollTop > 0 ? -1 : 1;
-    raf = requestAnimationFrame(() => { if (!ok()) return; mark(); el.scrollTop = top(); });
+    const d = el.scrollTop > 0 ? -1 : 1;
+    el.scrollTop += d;
+    el.style.transform = `translateY(${d}px)`;
+    raf = requestAnimationFrame(() => { unshift(); if (!ok()) return; mark(); el.scrollTop = top(); });
   });
-  return () => cancelAnimationFrame(raf);
+  return () => { cancelAnimationFrame(raf); unshift(); };
 };
 
 // 每个会话的浏览位置。只活在内存里 —— 关掉 ChatCode 就忘,重开一律回到最新消息。
@@ -1682,7 +1687,8 @@ function BgTasksBar({ tasks }: { tasks: BgTask[] }) {
   // 实时计时。没它的时候这条只有一个脉冲点,而气泡底下还挂着已结算那轮的"本轮耗时",
   // 一个几分钟的构建看着就像卡死了 —— 其实电平一清(SDK 的 background_tasks_changed)0.2s 内就续跑。
   const now = useNow(true);
-  const since = Math.min(...tasks.map((t) => t.ts ?? now));
+  const born = useRef(Date.now()); // 找不到启动记录的任务没有 ts:退回「这条 bar 出现的时刻」,别拿 now 当起点(那样永远显示已跑 0s)
+  const since = Math.min(...tasks.map((t) => t.ts ?? born.current));
   // 折叠着也读输出,把进度顶到 bar 上 —— 拉几个 G 的镜像时,只有一个"已跑 3min"跟卡死没区别。
   // ponytail: 只跟第一个有输出文件的 shell 任务。同时跑两条命令时另一条的进度得点开看,
   //           合并多路进度要嘛串味要嘛占两行,不值当。

@@ -125,6 +125,10 @@ const t = ((k: string, p?: any) => (p ? `${k}:${JSON.stringify(p)}` : k)) as any
   const wf = it({ kind: "tool", name: "Workflow", ts: 7, input: { script: "…" },
     result: "Workflow launched in background. Task ID: wwgpmhwtt\nSummary: 电视品牌技术目录：9 批 18 个品牌\nTranscript dir: /tmp/wf" });
   eq(liveBgTasks([wf], ["wwgpmhwtt"], t).map((k) => [k.kind, k.title]), [["workflow", "电视品牌技术目录：9 批 18 个品牌"]], "Workflow 任务要认出来,标题取 Summary");
+  // Monitor 的启动句式漏认时,bar 上永远是占位 + 「已跑 0s」(占位没有 ts)。句子是 jddb 会话日志里的原样回包
+  const mon = it({ kind: "tool", name: "Monitor", ts: 9, input: { description: "能效备案查询进度/结束", command: "tail -f /tmp/x.log" },
+    result: "Monitor started (task bz7kfgxzo, expires in 30m unless the source ends first; you get one notice at expiry). You will be notified on each event." });
+  eq(liveBgTasks([mon], ["bz7kfgxzo"], t).map((k) => [k.title, k.ts]), [["能效备案查询进度/结束", 9]], "Monitor 任务要认出来,带启动时刻");
 }
 
 // ---------- nextSteps:末尾那行「本轮建议」 ----------
