@@ -2046,6 +2046,7 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
    挂在 .branches-tab 而不是 :root:配色方案(--accent)是在下层元素上覆盖的,
    写进 :root 会当场按默认蓝算死,换 palette 也不跟着走。 */
 .branches-tab { display: flex; flex-direction: column; gap: 10px; scrollbar-width: none;
+  overflow-x: hidden; /* 内容偶尔比抽屉宽(远端 tab 定宽),横滑一带就整页左移、左边被裁;锁死横向 */
   --wire-w: 2px;
   --wire-c: color-mix(in srgb, var(--accent) 26%, var(--border));
   --wire-c-strong: color-mix(in srgb, var(--accent) 75%, var(--border)); }
@@ -2073,7 +2074,7 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
    ponytail: 滚动后主干仍按渲染时量的位置画,和滚走的 chip 会错开 —— 第一格永远是当前分支,不滚就对得上。
    align-items:center 是给「新建」虚线框留的:它两行高,默认 stretch 会把旁边的 chip 一起拉长 */
 .brz-band { display: flex; flex-wrap: nowrap; align-items: center; justify-content: flex-start; gap: 5px; margin-bottom: 2px;
-  overflow-x: auto; scrollbar-width: none; }
+  overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
 .brz-band::-webkit-scrollbar { display: none; }
 /* width:auto 必须写:.brz-tag 基础样式是 width:100%(为原来那张整行宽的映射图定的),
    放进这排 flex 里会让每个 chip 都撑满整行、一行只站得下一个。
