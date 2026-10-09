@@ -8,7 +8,19 @@
 //   4. 远程模型清单能加模型、但注不进 baseUrl(否则等于把 API Key 的去向交给一个远端 JSON)。
 import assert from "node:assert";
 import fs from "node:fs";
-import { envForModel, resolvedProvider, endpointsOf, variantsOf, isCnMachine, sanitizeCatalogModels, PROVIDERS } from "./providers.mjs";
+import { envForModel, resolvedProvider, endpointsOf, variantsOf, isCnMachine, sanitizeCatalogModels, collabOpts, PROVIDERS } from "./providers.mjs";
+
+// 协作模式:默认 Sonnet 主持 + Opus 顾问 + Haiku 子 agent;第三方 provider 与关闭开关时一律不插手
+let c = collabOpts("default", {});
+assert.strictEqual(c.main, "sonnet"); assert.strictEqual(c.settings.advisorModel, "opus");
+assert.strictEqual(c.env.CLAUDE_CODE_SUBAGENT_MODEL, "claude-haiku-5-5");
+c = collabOpts("opus", {});
+assert.strictEqual(c.main, "opus"); assert.strictEqual(c.settings, undefined, "主模型已是 Opus,不再挂 Opus 顾问");
+assert.strictEqual(collabOpts("claude-fable-5-1", {}).settings, undefined);
+assert.strictEqual(collabOpts("claude-sonnet-4-6", {}).settings.advisorModel, "opus");
+assert.deepStrictEqual(collabOpts("deepseek/deepseek-v4-pro", {}), { env: {} }, "第三方不插手");
+assert.deepStrictEqual(collabOpts("default", { collab: false }), { env: {} }, "开关关了不插手");
+console.log("✓ 协作模式就位");
 
 const keys = { providerKeys: { glm: "k", deepseek: "k" } };
 
@@ -208,5 +220,6 @@ assert.strictEqual(isCnMachine("Asia/Taipei", "zh_TW.UTF-8"), false, "港澳台�
 assert.strictEqual(isCnMachine("Asia/Hong_Kong", "zh-Hant"), false);
 assert.strictEqual(isCnMachine("", ""), false, "探不到时区/语言就按国际站,不瞎猜");
 console.log("✓ 国内环境判定就位");
+
 
 console.log("all ok");

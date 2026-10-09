@@ -749,6 +749,7 @@ interface Api {
   enqueuePending: (id: string, item: { blocks: any[]; text: string; html?: string; imgs?: Record<string, { media_type: string; data: string }>; at?: number }) => boolean;
   cancelPending: (id: string, pid: string) => void;
   cancelQueued: (id: string, pid: string) => void; // 取消 sidecar 队列里的待发(额度续跑 / 手机排的)
+  setCollab: (on: boolean) => void; // 协作模式开关(存 sidecar,对之后新起的会话生效)
   setAutoResume: (on: boolean) => void; // 额度恢复时自动接着跑(存 sidecar)
   respondPermission: (id: string, requestId: string, behavior: "allow" | "deny", message?: string, remember?: RememberChoice) => void;
   interrupt: (id: string) => void;
@@ -1252,6 +1253,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     },
     cancelQueued(id, pid) { send({ type: "cancel_queued", sessionId: id, pid }); },
     setAutoResume(on) { send({ type: "set_auto_resume", on }); },
+    setCollab(on) { send({ type: "set_collab", on }); },
     cancelPending(id, pid) {
       dispatch({ type: "remove_pending", id, pid });
     },

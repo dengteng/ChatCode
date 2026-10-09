@@ -821,6 +821,8 @@
   "继续": "Continue",
   "额度用尽后自动继续": "Auto-continue after usage limit",
   "额度恢复时自动接着跑": "Resume automatically when the limit resets",
+  "协作模式": "Collaboration mode",
+  "Sonnet 主持写代码,Opus 当顾问(只在计划、卡住、收尾时被叫),子 agent 用 Haiku 去探索。只对 Claude 生效,对新起的会话生效;选了 Opus/Fable 当主模型时不挂 Opus 顾问": "Sonnet leads and writes code, Opus advises (called only when planning, stuck or finishing), sub-agents use Haiku to explore. Claude only; applies to new sessions. No Opus advisor when Opus/Fable is the main model.",
   "被中断的那一轮自动补发「继续」": "The interrupted turn gets a “Continue” sent for it",
   "模型列表": "Model list",
   "远程模型清单": "Remote model catalog",

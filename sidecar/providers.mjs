@@ -387,3 +387,20 @@ export function isCnMachine(tz, lang) {
   // 那边直连国际站没问题,且各家国内站未必受理当地账号。
   return /^zh(-cn|-hans)?(\.|$)/.test(String(lang || "").replace(/_/g, "-").toLowerCase());
 }
+
+// 协作模式(设置 collab,默认开):Sonnet 主持写代码,Opus 当顾问(服务端 advisor 工具,CLI 的
+// --advisor,只在计划/卡住/收尾时被叫),子 agent 一律 Haiku 去探索。只对 Claude provider 生效;
+// 用户显式选了 Opus/Fable 当主模型就不再挂 Opus 顾问(自己咨询自己)。
+// 子 agent 走 env CLAUDE_CODE_SUBAGENT_MODEL(CLI 没有 --subagents 参数,这是它的等价物),优先级高于 Agent 工具参数和 agent 定义。
+// ponytail: 子 agent 写死 claude-haiku-5-5(别名 haiku 在当前 CLI 里还指向 4.5);账号没开通会 404,关掉开关即可。
+export const COLLAB = { main: "sonnet", advisor: "opus", sub: "claude-haiku-5-5" };
+export const collabOn = (savedModel, settings) => settings.collab !== false && providerOf(savedModel) === "claude";
+export function collabOpts(savedModel, settings) {
+  if (!collabOn(savedModel, settings)) return { env: {} };
+  const main = !savedModel || savedModel === "default" ? COLLAB.main : modelArg(savedModel);
+  return {
+    main,
+    env: { CLAUDE_CODE_SUBAGENT_MODEL: COLLAB.sub },
+    settings: /opus|fable/i.test(main) ? undefined : { advisorModel: COLLAB.advisor },
+  };
+}

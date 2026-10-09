@@ -337,6 +337,7 @@ export interface AuthStatus {
   github: { installed: boolean; loggedIn: boolean; account?: string; detail?: string };
   providers?: Record<string, ProviderState>;
   cnEndpoint?: boolean;           // 国内节点总开关
+  collab?: boolean;               // 协作模式:Sonnet 主持 + Opus 顾问 + Haiku 子 agent(缺 = 开)
   autoResume?: boolean;           // 额度用尽后恢复时自动补发「继续」(sidecar 排,默认关)
   resumeMode?: ResumeMode;        // 重开大会话的恢复方式(缺 = ask)
   catalogAt?: number;             // 远程模型清单上次拉成功的时刻(0/缺 = 还没拉到过)

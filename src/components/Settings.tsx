@@ -313,7 +313,7 @@ const PROVIDER_META: { id: string; ini: string; cls: string }[] = [
 // 账号:Claude 登录 + 各第三方 LLM(key + baseUrl/模型可编辑)
 function AccountTab() {
   const { t } = useTranslation();
-  const { state, authAction, setCnEndpoint, refreshModelCatalog, requestHomeModels, setAutoResume } = useStore();
+  const { state, authAction, setCnEndpoint, refreshModelCatalog, requestHomeModels, setAutoResume, setCollab } = useStore();
   useEffect(() => { requestHomeModels(); }, []); // 默认模型下拉要列表;首页没打开过时 homeModels 是空的
   const c = state.auth?.claude;
   const provs = state.auth?.providers ?? {};
@@ -321,6 +321,7 @@ function AccountTab() {
   const cnList = Object.values(provs).filter((p) => p.cnAvailable || p.baseUrlCN).map((p) => p.label);
   const [edit, setEdit] = useState<{ id: string; mode: "key" | "config" } | null>(null);
   const autoResume = !!state.auth?.autoResume;
+  const collab = state.auth?.collab !== false;
   if (edit) return <ProviderEditPage id={edit.id} mode={edit.mode} onDone={() => setEdit(null)} />;
   return (
     <section className="settings-section">
@@ -344,6 +345,17 @@ function AccountTab() {
 
       <h4>{t("新会话默认")}</h4>
       <DefaultModelRow />
+      <div className="provider-row setting-row">
+        <div className="provider-id"><div>
+          <b>{t("协作模式")}</b>
+          <div className="muted">{t("Sonnet 主持写代码,Opus 当顾问(只在计划、卡住、收尾时被叫),子 agent 用 Haiku 去探索。只对 Claude 生效,对新起的会话生效;选了 Opus/Fable 当主模型时不挂 Opus 顾问")}</div>
+        </div></div>
+        <div className="provider-actions">
+          <button type="button" role="switch" aria-checked={collab} aria-label={t("协作模式")}
+            className={`ext-switch${collab ? " on" : ""}`}
+            {...btnPress(() => setCollab(!collab))} />
+        </div>
+      </div>
 
       <h4>{t("重开会话时的压缩方式")}</h4>
       <ResumeModeRow />

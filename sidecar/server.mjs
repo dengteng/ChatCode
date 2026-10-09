@@ -2,7 +2,7 @@
 // 前端(浏览器/Tauri webview)连 ws://127.0.0.1:8975,每个 session 独立跑一个 SDK query,天然支持并行任务。
 import { WebSocketServer } from "ws";
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { PROVIDERS, providerOf, modelArg, envForModel, extraModels, resolvedProvider, endpointsOf, variantsOf, setProxyPort, isCnMachine, sanitizeCatalogModels } from "./providers.mjs";
+import { PROVIDERS, providerOf, modelArg, envForModel, COLLAB, collabOn, collabOpts, extraModels, resolvedProvider, endpointsOf, variantsOf, setProxyPort, isCnMachine, sanitizeCatalogModels } from "./providers.mjs";
 import { accumulate, emptySpend, priceTable, ledgerAdd, ledgerStats } from "./spend.mjs";
 import { startProxy } from "./openai-proxy.mjs";
 import { capToolResults } from "./logcap.mjs";
@@ -1180,6 +1180,7 @@ setTimeout(() => { refreshCatalog().catch(() => {}); }, 4000);
 // 语言由前端连上后 set_lang 同步,落 settings.json 持久化 —— 重启后首条消息就本地化,不依赖前端先到。
 let LANG = loadSettings().lang === "en" ? "en" : "zh";
 const EN_DICT = {
+  "Sonnet 5.5 主持 · Opus 顾问 · Haiku 子 agent": "Sonnet 5.5 leads · Opus advises · Haiku sub-agents",
   // ---- system_note ----
   "🧹 上下文已清空,开始全新对话": "🧹 Context cleared, starting a fresh conversation",
   "⚠️ 原对话上下文无法恢复,已在当前目录开启全新上下文继续": "⚠️ Couldn't restore the previous conversation, started fresh in the current directory",
@@ -1336,7 +1337,7 @@ async function authStatus() {
   // 让「立即刷新」这个按钮有个可对照的状态,而不是点完只看见一句 toast。
   return { claude, github, providers, cnEndpoint: !!settings.cnEndpoint, catalogAt: settings.modelCatalogAt || 0,
     resumeMode: settings.resumeMode === "summary" || settings.resumeMode === "full" ? settings.resumeMode : "ask",
-    autoResume: settings.autoResume === true };
+    autoResume: settings.autoResume === true, collab: settings.collab !== false };
 }
 
 // 新发布但 SDK supportedModels 还没上报(后端按账户放量,菜单里看不到)的 Claude 模型手动补进来。
@@ -1420,7 +1421,7 @@ async function reportModels(ws, sessionId, q) {
   // 广播而非单播:改 settings/key 或重开会话时,所有客户端(桌面/手机)的该会话列表都同步更新,
   // 不再只发给触发的那个连接 —— 否则别的端一直用旧快照(kimi 新增模型选了却显示旧窗口)。
   broadcast({ type: "models", sessionId, models: dedupeModels([...merged, ...manual, ...extraModels(loadSettings())]).map((m) => ({
-    ...m, description: localizeModelDesc(m.description),
+    ...m, description: m.value === "default" && collabOn("default", loadSettings()) ? tr("Sonnet 5.5 主持 · Opus 顾问 · Haiku 子 agent") : localizeModelDesc(m.description),
     // OpenAI 走转译代理,effort 被翻成 reasoning_effort(只有三档);其他第三方不认 effort,不给档位
     ...(m.provider === "openai" && !m.supportedEffortLevels ? { supportedEffortLevels: ["low", "medium", "high"] } : {}),
   })) });
@@ -2082,6 +2083,7 @@ function spawnAgent(ws, sess, { id, resume }) {
   // 非 Claude provider(如 DeepSeek):注入 ANTHROPIC_BASE_URL/AUTH_TOKEN/MODEL,复用 Claude Code CLI 走它的兼容 API。
   // env 会整体替换 process.env(SDK 不自动合并),必须自己摊平。model 传去掉前缀的真实 id。
   const provEnv = envForModel(savedModel, loadSettings());
+  const collab = collabOpts(savedModel, loadSettings());
   const q = query({
     prompt: queue,
     options: {
@@ -2090,9 +2092,10 @@ function spawnAgent(ws, sess, { id, resume }) {
       // 保留 Claude Code 默认系统提示,仅追加「每轮留一句小结」的约定,供 commit 汇总用(不额外多跑一次 LLM)
       systemPrompt: { type: "preset", preset: "claude_code", append: sysAppend },
       ...(CLAUDE_BIN ? { pathToClaudeCodeExecutable: CLAUDE_BIN } : {}), // 打包版必须显式给
-      env: agentEnv(provEnv), // 始终显式给:不给的话 SDK 用整份 process.env,ChatCode 自己的令牌就漏给 agent 了
+      env: agentEnv({ ...provEnv, ...collab.env }), // 始终显式给:不给的话 SDK 用整份 process.env,ChatCode 自己的令牌就漏给 agent 了
       ...(resume ? { resume } : {}),
-      ...(savedModel && savedModel !== "default" ? { model: modelArg(savedModel) } : {}),
+      ...(collab.main ? { model: collab.main } : savedModel && savedModel !== "default" ? { model: modelArg(savedModel) } : {}),
+      ...(collab.settings ? { settings: collab.settings } : {}),
       // 权限模式跟模型同理:进 options 才能"启动即生效"。启动后补 setPermissionMode 会在 CLI
       // 就绪前被静默吞掉 —— 重开会话就悄悄退回逐条审批,用户以为档位还在。
       ...(idxEntry?.permMode && idxEntry.permMode !== "default" ? { permissionMode: idxEntry.permMode } : {}),
@@ -3090,7 +3093,7 @@ wss.on("connection", (ws) => {
           restartAgentCwd(ws, sess, m.sessionId, sess.agentCwd);
         } else {
           // 换模型后 CLI 可能降档(Haiku 4.5 不支持 effort),等它切完再读回实际档位
-          sess?.q?.setModel?.(m.model === "default" ? undefined : modelArg(m.model))?.then?.(() => syncEffort(sess, m.sessionId), () => {});
+          sess?.q?.setModel?.(m.model === "default" ? (collabOn(m.model, loadSettings()) ? COLLAB.main : undefined) : modelArg(m.model))?.then?.(() => syncEffort(sess, m.sessionId), () => {});
         }
         break;
       }
@@ -3147,6 +3150,11 @@ wss.on("connection", (ws) => {
       case "perf_log": { // 前端切会话计时(见 store.tsx 的 switchPerf),只落日志
         const n = (v) => (Number.isFinite(v) ? Math.round(v) : -1);
         console.log(`[perf] 切会话 ${String(m.sessionId).slice(0, 8)} 首帧=${n(m.frame)}ms 历史到达=${n(m.hist)}ms 主线程最长卡顿=${n(m.lag)}ms 条目=${n(m.items)}${m.compacting ? " 压缩中" : ""}`);
+        break;
+      }
+      case "set_collab": { // 协作模式开关:对之后新起/重启的会话生效,正在跑的 CLI 进程不动
+        saveSettings({ ...loadSettings(), collab: m.on === true });
+        authStatus().then((status) => send(ws, { type: "auth_status", status }));
         break;
       }
       case "set_auto_resume": {
