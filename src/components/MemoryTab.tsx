@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Brain, RefreshCw, Pencil, FolderOpen, TriangleAlert, ChevronRight, ChevronDown, LoaderCircle } from "lucide-react";
+import { Brain, RefreshCw, Pencil, FolderOpen, TriangleAlert, ChevronRight, ChevronDown, LoaderCircle, Cloud } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { rawHtml } from "../lib/mdhtml";
 import { revealPath } from "../native";
-import { scanMemories, type MemoryEntry, type MemoryScan, type MemoryType } from "../memory";
+import { scanMemories, defaultSyncName, syncMemoryTo, type MemoryEntry, type MemoryScan, type MemoryType } from "../memory";
 import { openEditorWindow } from "../popout";
 import { useTranslation } from "react-i18next";
 import { btnPress } from "../lib/utils";
@@ -64,6 +65,8 @@ export function MemoryTab({ cwd, highlight }: { cwd: string; highlight?: string 
         <button className="mem-refresh" title={t("重新扫描")} {...btnPress(load)}><RefreshCw size={13} /></button>
       </div>
 
+      <MemorySync cwd={cwd} scan={scan} onDone={load} />
+
       {total === 0 && <div className="muted mem-empty">{t("这个项目还没有记忆。agent 在对话里记下的事实会出现在这里。")}</div>}
 
       {/* 索引漂移告警 */}
@@ -105,6 +108,51 @@ export function MemoryTab({ cwd, highlight }: { cwd: string; highlight?: string 
           <button className="mem-note-edit" {...btnPress(() => openEditorWindow(`/MEMORY.md`, "MEMORY.md"))}><Pencil size={12} /> {t("编辑 MEMORY.md 索引")}</button>
         </section>
       )}
+    </div>
+  );
+}
+
+// 跨电脑同步:把本项目记忆改存到同步盘里的 <根目录>/<项目名>(写 Claude Code 原生的 autoMemoryDirectory)。
+// 根目录每台电脑各记各的(localStorage);项目名默认取 git 仓库名,两台电脑填同一个名字就共用一份记忆。
+const SYNC_ROOT_KEY = "ChatCode-memory-sync-root";
+function MemorySync({ cwd, scan, onDone }: { cwd: string; scan: MemoryScan; onDone: () => void }) {
+  const { t } = useTranslation();
+  const [editing, setEditing] = useState(false);
+  const [root, setRoot] = useState(() => localStorage.getItem(SYNC_ROOT_KEY) ?? "");
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  if (scan.custom) return (
+    <div className="mem-sync muted" title={scan.dir}>
+      <Cloud size={12} /> {t("已同步到")} <span className="mem-sync-path" onClick={() => revealPath(scan.dir)}>{scan.dir}</span>
+    </div>
+  );
+  if (!editing) return (
+    <div className="mem-sync muted">
+      <button className="mem-sync-btn" {...btnPress(async () => { setName(await defaultSyncName(cwd)); setEditing(true); })}><Cloud size={12} /> {t("跨电脑同步…")}</button>
+    </div>
+  );
+  const pick = async () => { try { const p = await invoke<string | null>("choose_directory"); if (p) setRoot(p); } catch { /* 取消选择 */ } };
+  const go = async () => {
+    setBusy(true); setErr("");
+    try {
+      await syncMemoryTo(cwd, root, name.trim());
+      localStorage.setItem(SYNC_ROOT_KEY, root);
+      setEditing(false); onDone();
+    } catch (e) { setErr(String((e as Error)?.message ?? e)); }
+    setBusy(false);
+  };
+  return (
+    <div className="mem-sync-form">
+      <div className="muted">{t("记忆改存到同步盘里的文件夹(Obsidian 库、iCloud、Dropbox 等),由同步盘负责传到其他电脑。其他电脑填同一个项目名即可共用。")}</div>
+      <label>{t("根目录")}<button className="mem-sync-btn" {...btnPress(pick)}><FolderOpen size={12} /> {root || t("选择…")}</button></label>
+      <label>{t("项目名")}<input value={name} onChange={(e) => setName(e.target.value)} /></label>
+      {err && <div className="mem-sync-err">{err}</div>}
+      <div className="mem-sync-actions">
+        <button className="mem-sync-btn" {...btnPress(() => setEditing(false))}>{t("取消")}</button>
+        <button className="mem-sync-btn primary" disabled={busy || !root || !/^[^/\\]+$/.test(name.trim())} {...btnPress(go)}>{busy ? t("迁移中…") : t("迁移并同步")}</button>
+      </div>
     </div>
   );
 }

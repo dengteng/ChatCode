@@ -233,7 +233,14 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 .empty-dir-pick-group { position: relative; display: inline-flex; gap: 8px; }
 /* .palette 默认 left/right:16px(贴输入框两侧),挂到这个窄父级上要改成从左沿起、按内容定宽 */
 .empty-hist-menu { left: 0; right: auto; width: min(420px, 86vw); }
+/* 条目文字区得能收缩:flex 子项默认 min-width:auto,nowrap 的 lastUser 会把它撑到整句宽,
+   .palette-scroll 就冒出横向滚动条,条目内容也被推出弹窗。 */
+.empty-hist-menu .palette-item > div { flex: 1; min-width: 0; }
 .empty-hist-last { margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 「最近历史」开着就藏起品牌区:BrandIntro 进场动画那 3 秒里 logo 是 WebKit 合成层,
+   会夹在弹窗背景和 overflow:auto 滚动层之间 —— 弹窗底被 logo 压住、字却盖在 logo 上。
+   z-index / 层级都管不住合成层的绘制顺序,干脆不画它;弹窗本来就把这块挡住了,看不出差别。 */
+.empty-wrap:has(.empty-hist-menu) .brand { visibility: hidden; }
 .empty-model { position: relative; margin-left: auto; }
 .empty-model .model-switch { padding: 4px 8px; border-radius: 999px; }
 .empty-model .model-switch:hover { background: var(--panel); }
@@ -764,7 +771,7 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 .palette { position: absolute; bottom: 100%; left: 16px; right: 16px; margin-bottom: 6px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; box-shadow: 0 -6px 24px rgba(0,0,0,.4); display: flex; flex-direction: column; }
 /* 自定义背景主题下 --panel 透明度随图走(可低到很透),浮层看穿底下消息;改用弹窗级不透明度 */
 [data-palette="custom"] .palette { background: var(--custom-dialog); }
-.palette-scroll { max-height: 42vh; overflow-y: auto; }
+.palette-scroll { max-height: 42vh; overflow-y: auto; overflow-x: hidden; }
 .palette-item { padding: 7px 12px; cursor: pointer; display: flex; gap: 10px; }
 .palette-item.sel { background: color-mix(in srgb, var(--accent) 16%, var(--panel)); }
 .palette-hint { padding: 5px 12px; font-size: 11px; color: var(--muted); border-top: 1px solid var(--border); }
@@ -1518,6 +1525,18 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 .mem-head-l { display: flex; align-items: center; gap: 6px; font-size: 14px; }
 .mem-refresh { display: inline-flex; padding: 5px; border: 1px solid var(--border); border-radius: 7px; background: none; color: var(--muted); cursor: pointer; }
 .mem-refresh:hover { color: var(--text); border-color: var(--accent); }
+.mem-sync { display: flex; align-items: center; gap: 5px; font-size: 12px; margin-bottom: 10px; min-width: 0; }
+.mem-sync-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.mem-sync-path:hover { color: var(--text); text-decoration: underline; }
+.mem-sync-btn { display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; font-size: 12px; border: 1px solid var(--border); border-radius: 7px; background: none; color: var(--muted); cursor: pointer; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mem-sync-btn:hover:not(:disabled) { color: var(--text); border-color: var(--accent); }
+.mem-sync-btn.primary { color: var(--accent); border-color: var(--accent); }
+.mem-sync-btn:disabled { opacity: .5; cursor: default; }
+.mem-sync-form { display: flex; flex-direction: column; gap: 8px; padding: 10px 11px; margin-bottom: 12px; font-size: 12px; border: 1px solid var(--border); border-radius: 9px; }
+.mem-sync-form label { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.mem-sync-form input { flex: 1; min-width: 0; padding: 4px 7px; font-size: 12px; border: 1px solid var(--border); border-radius: 6px; background: none; color: var(--text); }
+.mem-sync-err { color: #d14b4b; }
+.mem-sync-actions { display: flex; justify-content: flex-end; gap: 6px; }
 .mem-empty { padding: 20px 4px; display: flex; align-items: center; gap: 6px; }
 .mem-drift { display: flex; gap: 8px; padding: 9px 11px; margin-bottom: 12px; border-radius: 9px; font-size: 12px; color: #b5771f; background: color-mix(in srgb, #d08428 12%, transparent); border: 1px solid color-mix(in srgb, #d08428 32%, transparent); }
 .mem-drift svg { flex-shrink: 0; margin-top: 1px; }

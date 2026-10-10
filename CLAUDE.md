@@ -35,12 +35,16 @@
 - 增量靠 `out/.published.json` 记 `mtime:size`，跟着产物走、在 `.gitignore` 里。
   图改了重跑即可，不会全量重传。
 
-## 记忆同步进 Obsidian
-- `node scripts/publish-memory.mjs`（`--dry` 试运行，可带项目目录参数）把
-  `~/.claude/projects/<编码>/memory/*.md` + `MEMORY.md` 镜像到库里 `memory/<项目名>/`。
-- **镜像**不是追加：本地删掉的记忆库里也删 —— 记忆被删多半是因为它错了，
-  留在手机上继续被当真比不同步更糟。内容没变的不写，免得 Fast Note Sync 白推一轮。
+## 项目记忆跨电脑同步
+- 记忆 tab 的「跨电脑同步…」：把记忆并进 `<根目录>/<项目名>/`，再往项目
+  `.claude/settings.local.json` 写 Claude Code 原生的 `autoMemoryDirectory`（`src/memory.ts` 的 `syncMemoryTo`）。
+  ChatCode 和终端里的 `claude` 都读这个设置，记忆直接落进同步盘，传到别的电脑靠同步盘（Obsidian 库 / iCloud / Dropbox）。
+- 根目录每台电脑各存 localStorage；项目名默认取 git origin 仓库名，两台电脑填同一个名字就共用一份。
+- `settings.local.json` 里是本机路径，必须在 `.gitignore` 里，`syncMemoryTo` 会补。
+- 改了位置后 `memoryDirFor` 那条默认路径就不对了：面板走 `resolveMemoryDir`，气泡认引用走 `useCustomMemoryDir`。
 - 记忆文件本身就是带 frontmatter 的 md，正文里的 `[[xxx]]` 正好是 Obsidian 双链，不用转换。
+- 2026-10 以前用软链 + launchd 每小时搬（`jkj-obsidian/link-memory.sh`），launchd 进不了 `~/Downloads` 静默失败，已废弃；
+  `scripts/publish-memory.mjs` 的镜像（库里 `memory/<项目名>/`）也一并删了。
 
 ## 架构速记
 - 前端 Tauri webview（`src/`）连 `ws://127.0.0.1:PORT`（开发 8975 / 打包 8976）。

@@ -165,6 +165,10 @@ const t = ((k: string, p?: any) => (p ? `${k}:${JSON.stringify(p)}` : k)) as any
   eq(usedMemories([read("/Users/me/.claude/projects/p/memory/a.md")]).length, 1, "读记忆文件 = 引用");
   eq(usedMemories([read("/Users/me/.claude/projects/p/memory/MEMORY.md")]).length, 0, "MEMORY.md 是索引,每次都翻,不算引用某条");
   eq(usedMemories([read("/tmp/memory/a.md")]).length, 0, "不在 .claude 下的不算");
+  const V = "/Users/me/Vault/claude-memory/p";
+  eq(usedMemories([read(`${V}/a.md`)], V).map((m) => m.file), ["a.md"], "autoMemoryDirectory 改到库里:目录下的记忆照样算引用");
+  eq(usedMemories([read(`${V}/MEMORY.md`), read(`${V}/sub/b.md`), read(`${V}/c.txt`)], V).length, 0, "库目录里的索引、子目录、非 md 都不算");
+  eq(usedMemories([read(`${V}/a.md`)]).length, 0, "不给目录就不认库里的文件");
   // 同一文件既读又写 = 更新(rank: write/edit > read)
   const both = usedMemories([
     read("/Users/me/.claude/projects/p/memory/a.md"),

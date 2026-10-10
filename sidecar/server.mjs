@@ -1416,11 +1416,18 @@ async function reportModels(ws, sessionId, q) {
       contextWindow: b.contextWindow || m.contextWindow,
     };
   });
+  // 协作模式下 default 实际跑 Sonnet(见 collabOpts)。菜单/模型条必须如实写 Sonnet:
+  // 否则它按 SDK 的解析显示成「Opus 5.5(默认)」,用户点它以为选了 Opus,跑起来却是 Sonnet。
+  // 改写后 default 与 sonnet 行同模型被去重成一条,Opus 不再被并进 default,单独成一行。
+  const collabSonnet = collabOn("default", loadSettings()) ? merged.find((x) => x.value === "sonnet") : null;
+  const shown = collabSonnet // 新对象,别改 merged 里的行:它们可能就是 lastClaudeModels 的缓存对象
+    ? merged.map((x) => x.value === "default" ? { ...x, resolvedModel: collabSonnet.resolvedModel, displayName: collabSonnet.displayName } : x)
+    : merged;
   const have = new Set(base.map(modelKey));
   const manual = CLAUDE_MANUAL_MODELS.filter((m) => !have.has(m.value) && !base.some((b) => modelKey(b) === m.model));
   // 广播而非单播:改 settings/key 或重开会话时,所有客户端(桌面/手机)的该会话列表都同步更新,
   // 不再只发给触发的那个连接 —— 否则别的端一直用旧快照(kimi 新增模型选了却显示旧窗口)。
-  broadcast({ type: "models", sessionId, models: dedupeModels([...merged, ...manual, ...extraModels(loadSettings())]).map((m) => ({
+  broadcast({ type: "models", sessionId, models: dedupeModels([...shown, ...manual, ...extraModels(loadSettings())]).map((m) => ({
     ...m, description: m.value === "default" && collabOn("default", loadSettings()) ? tr("Sonnet 5.5 主持 · Opus 顾问 · Haiku 子 agent") : localizeModelDesc(m.description),
     // OpenAI 走转译代理,effort 被翻成 reasoning_effort(只有三档);其他第三方不认 effort,不给档位
     ...(m.provider === "openai" && !m.supportedEffortLevels ? { supportedEffortLevels: ["low", "medium", "high"] } : {}),

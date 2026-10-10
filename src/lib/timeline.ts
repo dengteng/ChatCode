@@ -116,8 +116,14 @@ export function usedSkillsMcp(items: TimelineItem[]) {
 // 记忆引用:agent 用 Read 读了 ~/.claude/projects/<项目>/memory/ 下的某条记忆文件 = 在本轮回复里"引用"了它。
 // MEMORY.md 是索引(每次都会翻),不算引用某条具体记忆,排除掉。
 const MEMORY_FILE_RE = /\/memory\/([^/]+\.md)$/i;
-export function memoryFileOf(path: unknown): string | null {
-  if (typeof path !== "string" || !path.includes(".claude")) return null;
+// memDir = 项目用 autoMemoryDirectory 改过位置时的记忆目录(如 Obsidian 库里),该目录下的直接子文件也算记忆
+export function memoryFileOf(path: unknown, memDir?: string): string | null {
+  if (typeof path !== "string") return null;
+  if (memDir && path.startsWith(`${memDir}/`)) {
+    const file = path.slice(memDir.length + 1);
+    return file.includes("/") || !/\.md$/i.test(file) || /^MEMORY\.md$/i.test(file) ? null : file;
+  }
+  if (!path.includes(".claude")) return null;
   const m = MEMORY_FILE_RE.exec(path);
   if (!m || /^MEMORY\.md$/i.test(m[1])) return null;
   return m[1];
@@ -136,7 +142,7 @@ export interface MemRef { file: string; title: string; body: string; action: Mem
 // 一轮里对记忆文件的所有动作:Read=引用,Write/Edit=更新。同一文件按"更新 > 引用"合并(既读又写算更新)。
 // Edit 拿不到全文,但 old_string/new_string 就是这次改了什么,收进 edits 给弹窗显示;
 // 本轮先 Read 过的话再把替换套到读到的正文上,body 就是改完后的全文。
-export function usedMemories(items: TimelineItem[]): MemRef[] {
+export function usedMemories(items: TimelineItem[], memDir?: string): MemRef[] {
   const map = new Map<string, MemRef>();
   const rank: Record<MemAction, number> = { read: 0, write: 1, edit: 1 };
   for (const it of items) {
@@ -145,7 +151,7 @@ export function usedMemories(items: TimelineItem[]): MemRef[] {
       : it.name === "Write" ? "write"
       : it.name === "Edit" || it.name === "MultiEdit" ? "edit" : null;
     if (!action) continue;
-    const file = memoryFileOf(it.input?.file_path);
+    const file = memoryFileOf(it.input?.file_path, memDir);
     if (!file) continue;
     const prev = map.get(file);
     if (prev && rank[action] < rank[prev.action]) continue;

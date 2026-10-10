@@ -20,6 +20,7 @@ import {
   stripSummary, summarizeInput, turnCopyText, turnText, usedMemories, usedSkillsMcp, workFeed,
   type BgTask, type FeedLine, type MemRef, type TodoRow, type Turn,
 } from "../lib/timeline";
+import { useCustomMemoryDir } from "../memory";
 import { defaultRuleContent, destinationLabel, suggestionLabel } from "../permissions";
 import { Composer } from "./Composer";
 import { stashBtwDraft } from "./BtwTab";
@@ -1514,7 +1515,8 @@ const AgentTurnCard = memo(function AgentTurnCard({ items, running, showFull, cw
   // 这两个都要把整轮 items 扫一遍(usedMemories 还带正则和字符串清洗),而每张历史卡片每次重渲染都在重扫。
   // items 引用由上面那个 turns memo 保住:timeline 没动的重渲染(跑秒、用量轮询、hover)这里直接跳过。
   const { skills, mcps, activeSkills, activeMcps } = useMemo(() => usedSkillsMcp(items), [items]);
-  const memories = useMemo(() => usedMemories(items), [items]); // 本轮触达的记忆(引用 / 更新)
+  const memDir = useCustomMemoryDir(cwd); // 记忆改存到同步盘时,那个目录下的读写也算记忆引用
+  const memories = useMemo(() => usedMemories(items, memDir), [items, memDir]); // 本轮触达的记忆(引用 / 更新)
   const memRefs = memories.filter((m) => m.action === "read");
   const memUpdates = memories.filter((m) => m.action !== "read");
   const md = useMemo(() => makeMdComponents(cwd), [cwd]); // 稳定 components 身份:否则每次轮询重渲染都换新组件函数,react-markdown 整树重挂,hover 菜单被卸载

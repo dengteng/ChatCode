@@ -876,5 +876,12 @@
   "断开 SSH,回到闲聊": "Disconnect SSH, back to chat",
   "把这个会话绑定到项目目录?": "Bind this session to a project directory?",
   " —— 之前的对话记忆不会带到新目录(聊天记录仍保留在界面上),在该目录重开上下文。": " — previous memory is not carried over (the chat stays on screen); context restarts in that directory.",
-  "绑定": "Bind"
+  "绑定": "Bind",
+  "已同步到": "Synced to",
+  "跨电脑同步…": "Sync across computers…",
+  "记忆改存到同步盘里的文件夹(Obsidian 库、iCloud、Dropbox 等),由同步盘负责传到其他电脑。其他电脑填同一个项目名即可共用。": "Memory moves into a folder on your sync drive (Obsidian vault, iCloud, Dropbox, etc.), which carries it to your other computers. Use the same project name there to share it.",
+  "根目录": "Root folder",
+  "项目名": "Project name",
+  "迁移中…": "Moving…",
+  "迁移并同步": "Move and sync"
 }
