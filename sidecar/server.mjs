@@ -60,14 +60,15 @@ function notifyCfg() {
     topic: process.env.DT_NOTIFY_TOPIC || s.notifyTopic || "chatcode",
   };
 }
-async function pushOverlay(title, body) {
+// urgent=true:手机锁屏时点亮屏幕整屏弹出(全屏通知),只给「需要审批」这种等人拍板的用
+async function pushOverlay(title, body, urgent = false) {
   const { url, key, topic } = notifyCfg();
   if (!url || !key) return; // 未配置:静默 no-op
   try {
     await fetch(`${url}/api/notify`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-notify-key": key },
-      body: JSON.stringify({ topic, title, body: body || tr("点击查看"), overlay: true }),
+      body: JSON.stringify({ topic, title, body: body || tr("点击查看"), overlay: true, ...(urgent ? { urgent: true } : {}) }),
     });
   } catch {}
 }
@@ -1932,7 +1933,7 @@ function showNextPermission(ws, sess, id) {
   broadcast({ type: "permission_request", sessionId: id, ...next }); // 电脑端/手机都弹卡片,任一端都能批准
   broadcastIndex(); // 列表图标转「待审批」
   const title = loadIndex().find((e) => e.id === id)?.title || "会话";
-  pushOverlay(tr("需要审批"), tr("{{title}}：Agent 请求执行 {{tool}}", { title, tool: next.toolName })); // 手机悬浮窗(前台由 App 自行忽略)
+  pushOverlay(tr("需要审批"), tr("{{title}}：Agent 请求执行 {{tool}}", { title, tool: next.toolName }), true); // 手机全屏通知(前台由 App 自行忽略)
 }
 
 function startSession(ws, { id, cwd, resume, compactFirst }) {
