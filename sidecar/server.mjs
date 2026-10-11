@@ -2,7 +2,7 @@
 // 前端(浏览器/Tauri webview)连 ws://127.0.0.1:8975,每个 session 独立跑一个 SDK query,天然支持并行任务。
 import { WebSocketServer } from "ws";
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { PROVIDERS, providerOf, modelArg, envForModel, COLLAB, collabOn, collabOpts, extraModels, resolvedProvider, endpointsOf, variantsOf, setProxyPort, isCnMachine, sanitizeCatalogModels } from "./providers.mjs";
+import { PROVIDERS, providerOf, modelArg, envForModel, COLLAB, collabOn, collabOpts, extraModels, resolvedProvider, endpointsOf, variantsOf, setProxyPort, isCnMachine, sanitizeCatalogModels, capModelFamilies } from "./providers.mjs";
 import { accumulate, emptySpend, priceTable, ledgerAdd, ledgerStats } from "./spend.mjs";
 import { startProxy } from "./openai-proxy.mjs";
 import { capToolResults } from "./logcap.mjs";
@@ -1428,7 +1428,8 @@ async function reportModels(ws, sessionId, q) {
   const manual = CLAUDE_MANUAL_MODELS.filter((m) => !have.has(m.value) && !base.some((b) => modelKey(b) === m.model));
   // 广播而非单播:改 settings/key 或重开会话时,所有客户端(桌面/手机)的该会话列表都同步更新,
   // 不再只发给触发的那个连接 —— 否则别的端一直用旧快照(kimi 新增模型选了却显示旧窗口)。
-  broadcast({ type: "models", sessionId, models: dedupeModels([...shown, ...manual, ...extraModels(loadSettings())]).map((m) => ({
+  const cur = loadIndex().find((e) => e.id === sessionId)?.model;
+  broadcast({ type: "models", sessionId, models: capModelFamilies(dedupeModels([...shown, ...manual, ...extraModels(loadSettings())]), 3, cur ? [cur] : []).map((m) => ({
     ...m, description: m.value === "default" && collabOn("default", loadSettings()) ? tr("Sonnet 5.5 主持 · Opus 顾问 · Haiku 子 agent") : localizeModelDesc(m.description),
     // OpenAI 走转译代理,effort 被翻成 reasoning_effort(只有三档);其他第三方不认 effort,不给档位
     ...(m.provider === "openai" && !m.supportedEffortLevels ? { supportedEffortLevels: ["low", "medium", "high"] } : {}),

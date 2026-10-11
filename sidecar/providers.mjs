@@ -372,6 +372,25 @@ export function extraModels(settings) {
   return out;
 }
 
+// 同系列(opus/sonnet/haiku/fable)只留版本最高的 n 个:SDK 上报的老版本越攒越多,菜单被 4.6/4.7/4.8 挤满。
+// 只认 claude-<系列>-<主>[-<次>] 这种带版本的 id(别名行按 resolvedModel 归到它实际跑的版本);
+// 第三方模型命名五花八门、认不出系列,原样不动。keep:会话正在用的模型,截掉了模型条就只剩裸 id,留着。
+const CLAUDE_VER = /^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?$/;
+export function capModelFamilies(list, n = 3, keep = []) {
+  const idOf = (m) => String(m?.resolvedModel || m?.model || m?.value || "").replace(/\[.*$/, "").replace(/-\d{8}$/, "");
+  const keepIds = new Set(keep.map((k) => idOf({ value: k })));
+  const vers = new Map(); // 系列 → 版本号(主*100+次)降序
+  for (const m of list) {
+    const v = idOf(m).match(CLAUDE_VER);
+    if (v) vers.set(v[1], [...(vers.get(v[1]) || []), +v[2] * 100 + +(v[3] || 0)]);
+  }
+  const top = new Map([...vers].map(([f, a]) => [f, new Set([...new Set(a)].sort((x, y) => y - x).slice(0, n))]));
+  return list.filter((m) => {
+    const v = idOf(m).match(CLAUDE_VER);
+    return !v || keepIds.has(idOf(m)) || top.get(v[1]).has(+v[2] * 100 + +(v[3] || 0));
+  });
+}
+
 // provider 是否走本地代理(openai 传输)
 export function isProxied(providerId) { return PROVIDERS[providerId]?.transport === "openai"; }
 

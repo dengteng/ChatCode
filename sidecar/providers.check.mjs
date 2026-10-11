@@ -8,7 +8,7 @@
 //   4. 远程模型清单能加模型、但注不进 baseUrl(否则等于把 API Key 的去向交给一个远端 JSON)。
 import assert from "node:assert";
 import fs from "node:fs";
-import { envForModel, resolvedProvider, endpointsOf, variantsOf, isCnMachine, sanitizeCatalogModels, collabOpts, PROVIDERS } from "./providers.mjs";
+import { envForModel, resolvedProvider, endpointsOf, variantsOf, isCnMachine, sanitizeCatalogModels, collabOpts, PROVIDERS, capModelFamilies } from "./providers.mjs";
 
 // 协作模式:默认 Sonnet 主持 + Opus 顾问 + Haiku 子 agent;第三方 provider 与关闭开关时一律不插手
 let c = collabOpts("default", {});
@@ -146,13 +146,14 @@ const withCatalog = { ...keys, modelCatalog: { deepseek: evil } };
 const rp = resolvedProvider("deepseek", withCatalog);
 assert.strictEqual(rp.baseUrl, PROVIDERS.deepseek.baseUrl, "清单里那个 attacker 地址不许生效");
 assert.ok(rp.models.some((m) => m.model === "新模型"), "新模型该出现");
-assert.ok(rp.models.some((m) => m.model === "deepseek-v4-flash"), "内置的不能被挤掉");
+// 样本用在架的 deepseek-flash:deepseek-v4-flash 已 hidden 下架,拿它测 hidden 断言会白过
+assert.ok(rp.models.some((m) => m.model === "deepseek-flash"), "内置的不能被挤掉");
 // 同名模型:清单覆盖字段,但没给的字段沿用内置的(整表替换会把 description 抹掉)
-const patched = resolvedProvider("deepseek", { ...keys, modelCatalog: { deepseek: [{ model: "deepseek-v4-flash", contextWindow: 42 }] } })
-  .models.find((m) => m.model === "deepseek-v4-flash");
+const patched = resolvedProvider("deepseek", { ...keys, modelCatalog: { deepseek: [{ model: "deepseek-flash", contextWindow: 42 }] } })
+  .models.find((m) => m.model === "deepseek-flash");
 assert.strictEqual(patched.contextWindow, 42, "清单给的字段要生效");
 // 期望值从内置表现取,不照抄字面量 —— 改一句 description 的文案不该让这条合并断言变红
-const builtinDesc = PROVIDERS.deepseek.models.find((m) => m.model === "deepseek-v4-flash").description;
+const builtinDesc = PROVIDERS.deepseek.models.find((m) => m.model === "deepseek-flash").description;
 assert.strictEqual(patched.description, builtinDesc, "没给的字段沿用内置");
 // 用户手填:逐个模型压过远程和内置,但**不**整表替换 —— 没填到的那些照常跟着清单更新。
 // (整表替换的老做法有个哑巴坑:动过一次模型表的那家从此永久冻结,清单拉到了也不生效,还没提示。)
@@ -169,23 +170,23 @@ assert.strictEqual(pro.displayName, "我改的名字", "手填的字段要压过
 assert.strictEqual(pro.price.in, 9, "没填的字段沿用内置(单价不该被抹掉)");
 assert.ok(names.includes("自建模型"), "手填新增的模型该出现");
 assert.ok(names.includes("新模型"), "手填过之后,远程清单对没填到的模型仍然有效");
-assert.ok(names.includes("deepseek-v4-flash"), "内置的照旧在");
+assert.ok(names.includes("deepseek-flash"), "内置的照旧在");
 assert.strictEqual(withManual.models.find((m) => m.model === "自建模型").value, "deepseek/自建模型", "漏写 value 要补上,否则菜单里选不动");
 // hidden:合并之后"删掉一行"不再等于"不要这个模型",得显式说不
 const hidden = resolvedProvider("deepseek", {
-  ...withCatalog, providerConfig: { deepseek: { models: [{ model: "deepseek-v4-flash", hidden: true }] } },
+  ...withCatalog, providerConfig: { deepseek: { models: [{ model: "deepseek-flash", hidden: true }] } },
 });
-assert.ok(!hidden.models.some((m) => m.model === "deepseek-v4-flash"), "标了 hidden 的模型该从列表里消失");
+assert.ok(!hidden.models.some((m) => m.model === "deepseek-flash"), "标了 hidden 的模型该从列表里消失");
 assert.ok(hidden.models.some((m) => m.model === "deepseek-v4-pro"), "只藏标了的那条,别把别的一起带走");
 // 远程清单也能下架内置模型(不然下架只能等发版)
-const remoteHidden = resolvedProvider("deepseek", { modelCatalog: { deepseek: [{ model: "deepseek-v4-flash", hidden: true }] } });
-assert.ok(!remoteHidden.models.some((m) => m.model === "deepseek-v4-flash"), "清单标了 hidden 的内置模型该消失");
+const remoteHidden = resolvedProvider("deepseek", { modelCatalog: { deepseek: [{ model: "deepseek-flash", hidden: true }] } });
+assert.ok(!remoteHidden.models.some((m) => m.model === "deepseek-flash"), "清单标了 hidden 的内置模型该消失");
 // 用户手填 hidden: false 能把清单下架的再请回来
 const unhidden = resolvedProvider("deepseek", {
-  modelCatalog: { deepseek: [{ model: "deepseek-v4-flash", hidden: true }] },
-  providerConfig: { deepseek: { models: [{ model: "deepseek-v4-flash", hidden: false }] } },
+  modelCatalog: { deepseek: [{ model: "deepseek-flash", hidden: true }] },
+  providerConfig: { deepseek: { models: [{ model: "deepseek-flash", hidden: false }] } },
 });
-assert.ok(unhidden.models.some((m) => m.model === "deepseek-v4-flash"), "手填 hidden: false 压过清单");
+assert.ok(unhidden.models.some((m) => m.model === "deepseek-flash"), "手填 hidden: false 压过清单");
 console.log("✓ 清单优先级:用户手填 > 远程 > 内置(逐个模型合并,hidden 显式隐藏)");
 
 // 仓库里那份 catalog/models.json 必须和内置表同步 —— 加了模型忘了跑 gen-catalog.mjs,
@@ -220,6 +221,17 @@ assert.strictEqual(isCnMachine("Asia/Taipei", "zh_TW.UTF-8"), false, "港澳台�
 assert.strictEqual(isCnMachine("Asia/Hong_Kong", "zh-Hant"), false);
 assert.strictEqual(isCnMachine("", ""), false, "探不到时区/语言就按国际站,不瞎猜");
 console.log("✓ 国内环境判定就位");
+
+// 同系列只留最高 3 个版本;别名按实际版本算、第三方不动、会话正在用的老版本保留
+const ids = (l) => l.map((m) => m.value);
+const fam = [
+  { value: "default", resolvedModel: "claude-opus-5-5" }, { value: "claude-opus-5" }, { value: "claude-opus-4-8" },
+  { value: "claude-opus-4-7" }, { value: "claude-opus-4-6[1m]" }, { value: "sonnet", resolvedModel: "claude-sonnet-5-5" },
+  { value: "claude-haiku-4-5-20251001" }, { value: "deepseek-v4" }, { value: "deepseek-v3" }, { value: "deepseek-v2" }, { value: "deepseek-v1" },
+];
+assert.deepStrictEqual(ids(capModelFamilies(fam)), ["default", "claude-opus-5", "claude-opus-4-8", "sonnet", "claude-haiku-4-5-20251001", "deepseek-v4", "deepseek-v3", "deepseek-v2", "deepseek-v1"]);
+assert.ok(ids(capModelFamilies(fam, 3, ["claude-opus-4-6"])).includes("claude-opus-4-6[1m]"), "会话正在用的老版本不能截掉");
+console.log("✓ 同系列模型截到 3 个");
 
 
 console.log("all ok");
