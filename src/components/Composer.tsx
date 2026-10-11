@@ -625,7 +625,8 @@ export function Composer({ session }: { session: Session }) {
   // 选了但被 CLI 降档(模型不支持该档)显示「max→high」,不让界面摆一个假档位。
   const effortLevels = sessionModel(session)?.supportedEffortLevels ?? [];
   const effortSel = session.effort ?? null, effortApplied = session.effortApplied ?? null;
-  const effortDown = !!effortSel && effortApplied !== effortSel;
+  // effortApplied 为 undefined = CLI 还没回报实际档位(会话没起来/读超时),不能当「不支持」;null 才是确认不发
+  const effortDown = !!effortSel && session.effortApplied !== undefined && effortApplied !== effortSel;
   const effortTag = !effortLevels.length && !effortSel ? null
     : !effortSel ? t("自动") + (effortApplied ? " " + effortApplied : "")
     : effortDown ? `${effortSel}→${effortApplied ?? t("不支持")}` : effortSel;

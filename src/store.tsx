@@ -986,7 +986,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           case "git_compare":
             dispatch({ type: "append", id: m.sessionId, item: { kind: "system", text: m.text, ts: Date.now() } }); break;
           // effort:用户选的档位 + CLI 实际要发的档位(降档后)。切档/切模型/plan 升降/会话启动时都会来
-          case "effort": dispatch({ type: "patch", id: m.sessionId, patch: { effort: m.effort ?? null, effortApplied: m.applied ?? null } }); break;
+          case "effort": dispatch({ type: "patch", id: m.sessionId, patch: { effort: m.effort ?? null, effortApplied: m.applied } }); break;
           case "models":
             if (m.sessionId === HOME_MODELS_ID) dispatch({ type: "home_models", models: m.models });
             else dispatch({ type: "patch", id: m.sessionId, patch: { models: m.models } });

@@ -2041,15 +2041,19 @@ const effortFor = (sess) => sess.effort || (sess.permMode === "plan" ? "xhigh" :
 const effortProvider = (model) => ["claude", "openai"].includes(providerOf(model));
 // 把档位推给 CLI(apply),再读回 CLI 实际要发的档位(applied.effort:降档之后的值)广播出去。
 // 读回这步不能省:界面上显示 max,CLI 实际按 high 发,用户永远不知道。
-async function syncEffort(sess, id, apply = true) {
+async function syncEffort(sess, id, apply = true, retry = true) {
   const q = sess?.q;
   if (!q) return;
+  let got = false;
   try {
     if (apply && effortProvider(loadIndex().find((e) => e.id === id)?.model)) await q.applyFlagSettings({ effortLevel: effortFor(sess) });
     const s = await Promise.race([q.getSettings(), new Promise((r) => setTimeout(() => r(null), 3000))]);
-    if (s) sess.effortApplied = s.applied?.effort ?? null;
+    if (s) { sess.effortApplied = s.applied?.effort ?? null; got = true; }
   } catch {}
-  broadcast({ type: "effort", sessionId: id, effort: sess.effort ?? null, applied: sess.effortApplied ?? null });
+  // 没读到 ≠ 不支持:CLI 刚起来时 get_settings 会超时。null 才表示「CLI 确认不发 effort」,读不到记成未知(undefined),
+  // 界面不报「high→不支持」,2 秒后再读一次。
+  if (!got) { sess.effortApplied = undefined; if (retry) setTimeout(() => syncEffort(sess, id, apply, false), 2000); }
+  broadcast({ type: "effort", sessionId: id, effort: sess.effort ?? null, applied: sess.effortApplied });
 }
 
 const claudeBinReal = () => { try { return CLAUDE_BIN ? fs.realpathSync(CLAUDE_BIN) : null; } catch { return null; } };
@@ -3114,7 +3118,7 @@ wss.on("connection", (ws) => {
         if (entry) { if (level) entry.effort = level; else delete entry.effort; saveIndex(idx); }
         const sess = sessions.get(m.sessionId);
         if (sess) { sess.effort = level; syncEffort(sess, m.sessionId); }
-        else broadcast({ type: "effort", sessionId: m.sessionId, effort: level, applied: null });
+        else broadcast({ type: "effort", sessionId: m.sessionId, effort: level }); // 会话没起来:实际档位未知,不带 applied
         break;
       }
       case "set_provider_key": {
