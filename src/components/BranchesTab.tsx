@@ -558,7 +558,10 @@ function BranchSpine({ local, remote, remoteSha, remotes, pushSpecs, current, fo
       {/* 画布至少要包住主干:聚焦的 chip 可能排在很靠右的位置(名字长的一串),svg 只有 tab 排那么宽的话
           主干和它的圆角会被裁掉半截。多出来的宽度是透明的,不影响布局。 */}
       {!!lanes.length && (
-        <div className="brz-fan" style={{ width: Math.max(rowW, cx + 8) }}>
+        // 连线区不在 chip 排的滚动区里(线的落点要钉在下面不滚的远端 tab 上),手指放线上横滑没反应。
+        // 横向分量转给 chip 排:排一滚,onScroll 重量 cx,主干跟着挪。竖向不拦,照常滚整页。
+        <div className="brz-fan" style={{ width: Math.max(rowW, cx + 8), minWidth: "100%" }}
+          onWheel={(e) => { if (Math.abs(e.deltaX) > Math.abs(e.deltaY) && bandRef.current) bandRef.current.scrollLeft += e.deltaX; }}>
           <svg className="brz-map-svg" width={Math.max(rowW, cx + 8)} height={FAN_H}>
             <line x1={cx} y1={0} x2={cx} y2={FORK_Y} className="brz-map-line" />
             {/* 箭头指向数据实际要去的一端。平时是本地→远端(每条分叉末端朝下,落在 tab 上);
