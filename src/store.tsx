@@ -7,7 +7,7 @@ import { ConfirmDialog } from "./components/ConfirmDialog";
 import { toast, dismissToast } from "./components/Toast";
 import i18n, { getLang } from "./i18n";
 import { PERMISSION_PRESETS, type PermissionMode } from "./permissions";
-import { COMMIT_HOLD_MS } from "./lib/gitcmd";
+import { COMMIT_HOLD_MS, FLOW_HOLD_MS } from "./lib/gitcmd";
 import { pickAutoModel } from "./lib/automodel";
 import { recheckOf } from "./lib/timeline";
 
@@ -43,6 +43,8 @@ const GIT_OPS: [RegExp, string][] = [
   [/\bgit\s+rebase\b/, "变基"],
 ];
 const gitOpLabel = (cmd: string) => GIT_OPS.find(([re]) => re.test(cmd))?.[1];
+// 命令发出的时刻,terminal_result 据此算"离流光最短亮完还差多久"。键 = 会话 + 命令原文。
+const opStart = new Map<string, number>();
 
 // 点“允许并记住”时带回来的全部规则建议；同一次授权只会恢复 agent 一次。
 export interface RememberChoice { updates: PermissionSuggestion[]; label: string }
@@ -118,7 +120,7 @@ type Action =
   | { type: "prepend_history"; id: string; items: TimelineItem[]; more: Session["histMore"] } // 往上翻要回来的更早一段
   | { type: "tool_result"; id: string; toolUseId: string; result: any; isError?: boolean }
   | { type: "decide_permission"; id: string; requestId: string; decision: "allow" | "deny"; answer?: string; remembered?: string }
-  | { type: "add_usage"; id: string; costUsd: number; inputTokens: number; outputTokens: number; cacheWrite: number; cacheRead: number }
+  | { type: "add_usage"; id: string; costUsd: number; inputTokens: number; outputTokens: number; cacheWrite: number; cacheRead: number; workMs?: number }
   | { type: "stream_start"; id: string }               // 开一个流式 agent_text
   | { type: "stream_delta"; id: string; text: string } // 增量追加
   | { type: "stream_stop"; id: string }                // 结束流式
@@ -374,6 +376,7 @@ function reducer(s: State, a: Action): State {
         outputTokens: x.outputTokens + a.outputTokens,
         cacheWriteTokens: (x.cacheWriteTokens ?? 0) + a.cacheWrite,
         cacheReadTokens: (x.cacheReadTokens ?? 0) + a.cacheRead,
+        workMs: (x.workMs ?? 0) + (a.workMs ?? 0),
       }));
     case "stream_start":
       return upd(a.id, (x) => ({
@@ -654,7 +657,8 @@ function handleSdkMessage(dispatch: (a: Action) => void, id: string, msg: any, l
     const silent = inTok === 0 && outTok === 0 && !msg.aborted && !msg.is_error;
     if (!silent) {
       dispatch({ type: "add_usage", id, costUsd: msg.total_cost_usd ?? 0, inputTokens: inTok, outputTokens: outTok,
-        cacheWrite: msg.usage?.cache_creation_input_tokens ?? 0, cacheRead: msg.usage?.cache_read_input_tokens ?? 0 });
+        cacheWrite: msg.usage?.cache_creation_input_tokens ?? 0, cacheRead: msg.usage?.cache_read_input_tokens ?? 0,
+        workMs: msg.duration_ms ?? 0 });
       // 每条消息 token(2.4):本轮 in 记到最近 user,out 记到最近 agent
       // 未命中缓存的输入 = 新读 + 新建缓存(cache_read 才是命中,不计)
       const inUncached = (msg.usage?.input_tokens ?? 0) + (msg.usage?.cache_creation_input_tokens ?? 0);
@@ -1009,10 +1013,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const opRaw = gitOpLabel(m.command);
             const op = opRaw ? i18n.t(opRaw) : "";
             const tail = (m.output || "").trim().split("\n").pop() || m.command;
-            // commit 成功的这句压后到流光跑完再说(分支页那条线最短亮 COMMIT_HOLD_MS)——
-            // 提交常常几百毫秒就完事,提示先弹、线还在跑,读起来像"说完成了但还没完"。失败不压:错误要立刻见人。
+            // 成功的这句压后到流光跑完再说(分支页那条线从发命令起最短亮 COMMIT_HOLD_MS / FLOW_HOLD_MS)——
+            // 命令常常几百毫秒就完事,提示先弹、线还在跑,读起来像"说完成了但还没完"。
+            // 慢命令(推几秒)早过了最短时长,wait ≤ 0 立刻弹。失败不压:错误要立刻见人。
+            const key = `${m.sessionId}\n${m.command}`;
+            const holdMs = /\bgit\s+commit\b/.test(m.command) ? COMMIT_HOLD_MS : /\bgit\s+(push|pull|fetch)\b/.test(m.command) ? FLOW_HOLD_MS : 0;
+            const wait = holdMs - (Date.now() - (opStart.get(key) ?? 0));
+            opStart.delete(key);
             const say = () => toast(m.exitCode === 0 ? i18n.t("已{{op}}", { op }) : i18n.t("{{op}}失败：{{tail}}", { op, tail }), m.exitCode === 0 ? "success" : "error");
-            if (op) { if (m.exitCode === 0 && /\bgit\s+commit\b/.test(m.command)) setTimeout(say, COMMIT_HOLD_MS); else say(); }
+            if (op) { if (m.exitCode === 0 && wait > 0) setTimeout(say, wait); else say(); }
             // 首页分支页(id 形如 home:<路径>)没有消息流可打印输出,失败会静默 —— 用 toast 兜一下
             else if (m.sessionId.startsWith("home:") && m.exitCode !== 0)
               toast(i18n.t("命令失败({{code}})：{{tail}}", { code: m.exitCode, tail }), "error");
@@ -1330,6 +1339,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       // 分支图要在 commit/push/pull 期间点亮连线流光。命令从顶栏、分支面板、节点菜单三处发起,
       // 这里是唯一汇合点 —— 统一广播一次,免得每个入口各自设一遍状态(总有漏的)。
       window.dispatchEvent(new CustomEvent("cc-git-op", { detail: { id, command } }));
+      opStart.set(`${id}\n${command}`, Date.now());
       send({ type: "terminal_command", sessionId: id, command });
     },
     sshReconnect(id) { send({ type: "ssh_reconnect", sessionId: id }); },

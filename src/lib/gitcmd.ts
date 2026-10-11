@@ -5,6 +5,8 @@ export function q(value: string) { return `'${value.replace(/'/g, "'\\''")}'`; }
 // commit 的流光最短亮多久 / 成功提示压后多久。两处必须同一个数:提示先于流光结束弹出,
 // 就成了"还在跑但已经说完成了"。放这儿是因为一处在 BranchesTab、一处在 store 的 terminal_result。
 export const COMMIT_HOLD_MS = 3000;
+// push / pull 的流光最短亮多久(1.4s = 光束跑完一整趟多一点),提示同样压到这个时刻。
+export const FLOW_HOLD_MS = 1400;
 
 // 把本地分支推到某个远程分支(remoteRef 形如 "origin/main")。
 //

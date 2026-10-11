@@ -144,6 +144,7 @@ export interface Session {
   outputTokens: number;      // 含思考(thinking 计在 output,SDK 不单列推理 token)
   cacheWriteTokens: number;  // 其中写进缓存的部分
   cacheReadTokens: number;   // 其中命中缓存的部分
+  workMs?: number;           // agent 干活的累计时长:各轮 result.duration_ms 之和(不含空闲)
   contextTokens: number;   // 当前上下文占用(最近一轮送进模型的总 token)
   contextWindow: number;   // 模型上下文窗口(来自 modelUsage)
   sessionLimit: LimitUsage;  // 5h 限额

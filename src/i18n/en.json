@@ -717,6 +717,7 @@
   "输入 {{n}}(新)": "Input {{n}} (new)",
   "缓存写入 {{n}}": "Cache write {{n}}",
   "缓存命中 {{n}}": "Cache hit {{n}}",
+  "缓存命中 {{n}}(不计入合计)": "Cache hit {{n}} (not in total)",
   "输出 {{n}}(含思考)": "Output {{n}} (incl. thinking)",
   "合计 {{n}}": "Total {{n}}",
   "shell 命令": "shell command",

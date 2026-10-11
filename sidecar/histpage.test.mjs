@@ -8,7 +8,7 @@ for (let r = 0; r < 5; r++) {
   log.push({ type: "user", message: { content: `第${r}轮` }, timestamp: new Date(1000 * (r + 1)).toISOString() });
   log.push({ type: "assistant", message: { content: [{ type: "tool_use", id: `t${r}` }] } });
   log.push({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: `t${r}` }] } });
-  log.push({ type: "result", usage: { input_tokens: 10, output_tokens: 1, cache_read_input_tokens: 100 }, total_cost_usd: 0.5 });
+  log.push({ type: "result", usage: { input_tokens: 10, output_tokens: 1, cache_read_input_tokens: 100 }, total_cost_usd: 0.5, duration_ms: 2000 });
 }
 log.push({ type: "result", usage: { input_tokens: 0, output_tokens: 0 } }); // 静默回合,不计
 
@@ -38,6 +38,6 @@ assert.strictEqual(d.messages[0].message.content, "第1轮");
 
 // 用量底数:前 3 轮(切点前)= 3 × (110 入 / 1 出 / 0.5 刀),静默回合不算
 const base = usageBase(log, a.before);
-assert.deepStrictEqual(base, { costUsd: 1.5, inputTokens: 330, outputTokens: 3, cacheWrite: 0, cacheRead: 300 });
+assert.deepStrictEqual(base, { costUsd: 1.5, inputTokens: 330, outputTokens: 3, cacheWrite: 0, cacheRead: 300, workMs: 6000 });
 
 console.log("✓ histpage 自检通过");

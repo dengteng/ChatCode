@@ -1299,7 +1299,7 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
           </>;
         })()}
         {/* 用量/耗时跟随对话流,落在整段消息的右下角(不再单独占一条压在输入框上方的色带) */}
-        <SessionStats session={session} startedAt={state.index.find((entry) => entry.id === session.id)?.createdAt} />
+        <SessionStats session={session} />
         <div ref={bottomRef} />
       </div>
 
@@ -1899,21 +1899,34 @@ function workSummary(timeline: TimelineItem[], t: (key: string) => string) {
   return t("正在思考…");
 }
 
-function SessionStats({ session, startedAt }: { session: Session; startedAt?: number }) {
+function SessionStats({ session }: { session: Session }) {
   const { t } = useTranslation();
-  const started = startedAt || session.timeline[0]?.ts;
-  const duration = started ? Math.max(0, Date.now() - started) : 0;
+  // 只记 agent 干活的时间:各轮 result 的耗时累加,空闲/等人的时间不算(以前拿 now - 会话创建时刻,挂一个月就是 700 多小时)。
+  // 正在跑的这一轮还没有 result,从它的第一条 user 消息起算补上。
+  let live = 0;
+  if (session.status === "running") {
+    let t0: number | undefined;
+    for (let i = session.timeline.length - 1; i >= 0; i--) {
+      const it = session.timeline[i];
+      if (it.kind === "result") break;
+      if (it.kind === "user") t0 = it.ts;
+    }
+    if (t0) live = Math.max(0, Date.now() - t0);
+  }
+  const duration = (session.workMs ?? 0) + live;
   // hover 拆开总数:新输入 / 缓存写 / 缓存命中 / 输出。推理(thinking)SDK 不单列,归在输出里
   const cw = session.cacheWriteTokens ?? 0, cr = session.cacheReadTokens ?? 0;
   const fresh = Math.max(0, session.inputTokens - cw - cr);
+  // 合计不含缓存命中:每轮都把整段上下文重读一遍,累加起来是几亿的虚高数,不代表真正新增的用量
+  const total = Math.max(0, session.inputTokens - cr) + session.outputTokens;
   const detail = [
     t("输入 {{n}}(新)", { n: fresh.toLocaleString() }),
     t("缓存写入 {{n}}", { n: cw.toLocaleString() }),
-    t("缓存命中 {{n}}", { n: cr.toLocaleString() }),
+    t("缓存命中 {{n}}(不计入合计)", { n: cr.toLocaleString() }),
     t("输出 {{n}}(含思考)", { n: session.outputTokens.toLocaleString() }),
-    t("合计 {{n}}", { n: (session.inputTokens + session.outputTokens).toLocaleString() }),
+    t("合计 {{n}}", { n: total.toLocaleString() }),
   ].join("\n");
-  return <div className="session-stats"><span title={detail}>{fmtTok(session.inputTokens + session.outputTokens)} tokens</span><span>{fmtDurationCoarse(duration)}</span></div>;
+  return <div className="session-stats"><span title={detail}>{fmtTok(total)} tokens</span><span>{fmtDurationCoarse(duration)}</span></div>;
 }
 
 // 终端一条 = 两个气泡:① 用户发的 shell 命令(用户头像 + ! 前缀)② 电脑回的日志(本地/SSH 电脑头像)

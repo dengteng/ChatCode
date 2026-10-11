@@ -6,7 +6,7 @@ import { html as diffToHtml } from "diff2html";
 import "diff2html/bundles/css/diff2html.min.css";
 import type { Session, GitLogData, GitCommit, GitCommitDetail, GitBranch, GitDiffFile } from "../types";
 import { useStore } from "../store";
-import { q, pushCmd, pushTargets, lanesFor, unpushedFor, COMMIT_HOLD_MS, type RepoLane } from "../lib/gitcmd";
+import { q, pushCmd, pushTargets, lanesFor, unpushedFor, COMMIT_HOLD_MS, FLOW_HOLD_MS, type RepoLane } from "../lib/gitcmd";
 import { btnPress } from "../lib/utils";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { useTranslation } from "react-i18next";
@@ -33,13 +33,15 @@ function DiffHtml({ patch, clipped }: { patch: string; clipped?: boolean }) {
 
 // 布尔量的"最短亮灯时长"闩锁:active 一置真就至少保持 ms 毫秒再落下。
 // 用途:commit/push/pull 常常几百毫秒就跑完,连线上的流光一闪而过等于没有 —— 兜底让人看清。
-// 1.4s = 光束跑完一整趟多一点;原来 3s 是纯多余的等待。
-function useMinHold(active: boolean, ms = 1400) {
+// 从置真那刻起算,不是从落下起算:慢命令(推几秒)跑完就该立刻收,再多亮 ms 会比成功提示晚,
+// 读起来像"提示说完成了、线还在跑"。store 的 terminal_result 用同一算法压后快命令的提示。
+function useMinHold(active: boolean, ms = FLOW_HOLD_MS) {
   const [held, setHeld] = useState(active);
+  const since = useRef(Date.now());
   useEffect(() => {
-    if (active) { setHeld(true); return; }
+    if (active) { if (!held) since.current = Date.now(); setHeld(true); return; }
     if (!held) return;
-    const t = window.setTimeout(() => setHeld(false), ms);
+    const t = window.setTimeout(() => setHeld(false), Math.max(0, ms - (Date.now() - since.current)));
     return () => window.clearTimeout(t);
   }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
   return held;
@@ -85,8 +87,12 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
   const [repo, setRepo] = useState<string | null>(null);
   const [syncing, setSyncing] = useState<"push" | "pull" | null>(null); // 本地↔远程连线上要放流光的方向
   const [committingOp, setCommittingOp] = useState(false); // 顶栏发起的 commit(不走 committing 这个 prop)
-  // git 信息刷新 = 上一条写操作跑完(terminal_result 会立刻重拉 git_info),菊花停在这里
-  useEffect(() => { setPushing(false); setSyncing(null); setCommittingOp(false); }, [git]);
+  // git 信息刷新 = 上一条写操作跑完(terminal_result 会立刻重拉 git_info),菊花停在这里。
+  // 但 Chat 每 15s 也在轮询 git_info,推送跑几秒就可能撞上一次:不看命令还在不在跑就收,
+  // 流光和菊花提前落下,push/↓ 按钮在命令还没完时又冒出来。命令没完的刷新一律忽略,等跑完后的那次。
+  const gitOpBusy = useRef(false);
+  gitOpBusy.current = session.timeline.slice(-20).some((x) => x.kind === "terminal" && x.pending && /\bgit\s+(push|pull|fetch|commit)\b/.test(x.command));
+  useEffect(() => { if (gitOpBusy.current) return; setPushing(false); setSyncing(null); setCommittingOp(false); }, [git]);
   // 三处入口(顶栏 / 本面板按钮 / 节点菜单)发的 git 命令都汇到 store.runTerminal 的这条广播
   useEffect(() => {
     const on = (e: Event) => {

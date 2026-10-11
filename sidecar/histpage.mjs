@@ -40,7 +40,7 @@ export function historyChunk(log, before, rounds = HIST_ROUNDS, untilTs) {
  * (含缓存的输入、跳过全 0 的静默回合),否则会话右下角的 token 总数会随分页变小。
  */
 export function usageBase(log, end) {
-  const b = { costUsd: 0, inputTokens: 0, outputTokens: 0, cacheWrite: 0, cacheRead: 0 };
+  const b = { costUsd: 0, inputTokens: 0, outputTokens: 0, cacheWrite: 0, cacheRead: 0, workMs: 0 };
   for (let i = 0; i < end; i++) {
     const m = log[i];
     if (m?.type !== "result") continue;
@@ -53,6 +53,7 @@ export function usageBase(log, end) {
     b.outputTokens += outTok;
     b.cacheWrite += u.cache_creation_input_tokens ?? 0;
     b.cacheRead += u.cache_read_input_tokens ?? 0;
+    b.workMs += m.duration_ms ?? 0;
   }
   return b;
 }
