@@ -1128,11 +1128,14 @@ function saveSettings(s) {
 //   · 不上报任何东西:GET 一个公开只读接口,没有 body、不带 key、不带任何设备或用户标识。
 //     query 只有 ?project=chat-code(服务端要它选回源地址)。服务端能看到 IP 和时间,和
 //     src/version.ts 那个每次启动都发的更新检查是同一台机器、同一份日志,没有新增暴露面。
-// 只认自己的服务(api.dengteng.xyz,与 src/version.ts 的更新检查同一个后端),它回源到本仓库的
-// catalog/models.json 并缓存一小时。原先是 raw.githubusercontent + jsDelivr 双源直连,换掉的理由:
-// raw 在国内常被污染,jsDelivr 又多一方能看到用户请求;收拢到自己域名后可达性和信任面都更干净。
-// 单点故障是明知的取舍:服务挂了只是拉不到新清单,本地那份原样能用(见下面两处 return)。
-const CATALOG_URL = "https://api.dengteng.xyz/api/public/model-catalog?project=chat-code";
+// 三级兜底,按顺序:
+//   1. tt-center 后台(api.dengteng.xyz,与 src/version.ts 的更新检查同一个后端)—— 唯一真相,后台「项目 → Chat Code → 模型清单」配;
+//   2. 它挂了就直连 GitHub 上本仓库的 catalog/models.json(出厂清单,没有 claude 组);raw 在国内常被污染,所以只当备胎;
+//   3. 两个都拉不到:settings 里上次存下的那份原样不动,菜单照旧用它。
+const CATALOG_URLS = [
+  "https://api.dengteng.xyz/api/public/model-catalog?project=chat-code",
+  "https://raw.githubusercontent.com/dengteng/ChatCode/main/catalog/models.json",
+];
 const CATALOG_TTL = 86400_000; // 一天
 
 // 回值给调用方用来决定「要不要重播模型列表 / toast 说什么」,三种结局分开:
@@ -1149,23 +1152,31 @@ async function fetchCatalog() {
       return await r.json();
     } finally { clearTimeout(t); }
   };
-  let j;
-  try { j = await get(CATALOG_URL); } catch (e) { return { ok: false, error: String(e?.message || e) }; }
-  // 形状不对就整份丢掉,别把半份垃圾写进 settings —— 宁可没有清单,也不要一份烂的赖在那儿。
-  if (!j || typeof j.providers !== "object" || Array.isArray(j.providers)) return { ok: false, error: "清单格式不对" };
+  // 形状不对就当这一源没拉到、试下一个,别把半份垃圾写进 settings。
+  let j = null, src = -1, error = "";
+  for (const [i, url] of CATALOG_URLS.entries()) {
+    try {
+      const r = await get(url);
+      if (r && typeof r.providers === "object" && !Array.isArray(r.providers)) { j = r; src = i; break; }
+      error = "清单格式不对";
+    } catch (e) { error = String(e?.message || e); }
+  }
+  if (!j) return { ok: false, error }; // 都没拉到:上次那份原样留着
+  const s = loadSettings();
   const catalog = {};
-  // claude 组单独存:它管的是 Claude 菜单显示哪些(见 reportModels),不是某家第三方的模型表
-  const claudeCatalog = sanitizeClaudeCatalog(j.providers.claude);
+  // claude 组单独存:它管的是 Claude 菜单显示哪些(见 reportModels),不是某家第三方的模型表。
+  // GitHub 那份没有 claude 组,降级拉到它时沿用上次从后台拿到的,别把后台的配置冲掉。
+  const claudeCatalog = src === 0 ? sanitizeClaudeCatalog(j.providers.claude) : (s.claudeCatalog || []);
   for (const [id, list] of Object.entries(j.providers)) {
     if (!PROVIDERS[id] || id === "claude") continue; // 只认识的家
     const clean = sanitizeCatalogModels(id, list);
     if (clean.length) catalog[id] = clean;
   }
-  const s = loadSettings();
   const changed = JSON.stringify([catalog, claudeCatalog]) !== JSON.stringify([s.modelCatalog || {}, s.claudeCatalog || []]);
   // 时间戳照记:清单是空的(比如全被 sanitize 掉了)也算这次拉过了,别每次启动重打。
-  saveSettings({ ...s, modelCatalog: catalog, claudeCatalog, modelCatalogAt: Date.now() });
-  return { ok: true, changed, count: Object.values(catalog).reduce((n, l) => n + l.length, claudeCatalog.length) };
+  // 降级拉到的只顶一小时:之后再去问后台,不用等满一天
+  saveSettings({ ...s, modelCatalog: catalog, claudeCatalog, modelCatalogAt: src === 0 ? Date.now() : Date.now() - CATALOG_TTL + 3600_000 });
+  return { ok: true, changed, fallback: src > 0, count: Object.values(catalog).reduce((n, l) => n + l.length, claudeCatalog.length) };
 }
 let catalogInflight = null; // 只在真的发出请求时占位(TTL 跳过的那条不占,否则会把随后的 force 也吞掉)
 async function refreshCatalog({ force = false } = {}) {
