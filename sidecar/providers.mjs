@@ -263,8 +263,8 @@ export function applyClaudeCatalog(rows, cat, cur) {
 //     在模型表里写 { "model": "xxx", "hidden": true }。
 //   · 补齐 value/provider。手填表里新增一条时很容易只写 model 和 displayName,
 //     而 value 是模型菜单的选中键,缺了那条就选不动(providerOf 也认它来判归属)。
-const finalize = (id, list) => list
-  .filter((m) => !m.hidden)
+const finalize = (id, list, keepHidden) => list
+  .filter((m) => keepHidden || !m.hidden)
   .map((m) => (m.value ? m : { ...m, value: `${id}/${m.model}`, provider: m.provider || id }));
 
 // 内置 → 远程清单 → 用户手填,一层压一层(见 resolvedProvider 的优先级说明)。
@@ -330,7 +330,8 @@ export function endpointsOf(id, settings) {
 // 填表那一刻 —— 清单拉到了、也存进 settings 了,就是不生效,界面上还什么都不提示,
 // 用户只会觉得"更新坏了"。逐个合并之后,手填的那几条照旧压过远程,没填的那些照常跟着清单更新。
 // 代价是"从表里删掉一条"不再等于"不要这个模型",所以补了 hidden —— 见 dropHidden。
-export function resolvedProvider(id, settings) {
+// keepHidden:连 hidden 的也留着。菜单不要它们,但计价要 —— 隐藏的模型老会话照常在跑(见 spend.mjs priceTable)。
+export function resolvedProvider(id, settings, { keepHidden = false } = {}) {
   const def = PROVIDERS[id];
   if (!def) return null;
   const cfg = settings?.providerConfig?.[id] || {};
@@ -344,7 +345,7 @@ export function resolvedProvider(id, settings) {
     models: finalize(id, mergeModels(
       mergeCatalog(id, v.models || def.models, settings?.modelCatalog?.[id]),
       Array.isArray(cfg.models) ? cfg.models : [],
-    )),
+    ), keepHidden),
   };
 }
 

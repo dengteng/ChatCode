@@ -17,7 +17,7 @@ export function priceTable(settings) {
   const t = new Map();
   for (const p of Object.values(PROVIDERS)) {
     if (p.id === "claude") continue; // 订阅制,不走这条路
-    for (const m of resolvedProvider(p.id, settings)?.models ?? []) {
+    for (const m of resolvedProvider(p.id, settings, { keepHidden: true })?.models ?? []) {
       if (m?.price && m?.model) t.set(m.model, m.price);
     }
   }
