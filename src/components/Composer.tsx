@@ -1074,6 +1074,18 @@ export function Composer({ session }: { session: Session }) {
           r.collapse(true); sel.removeAllRanges(); sel.addRange(r);
           return;
         }
+        // 光标在行尾、下一行以 chip 开头:modify("forward") 一步就跨过整块、落到 chip 右侧,
+        // 永远停不到 chip 左边(行首)。这里直接落到 chip 左侧。
+        if (e.key === "ArrowRight") {
+          const nx = siblingAtCaret(sel, "next");
+          const c = nx && nx.nodeName === "BR" ? asChip(skipZwspNodes(nx.nextSibling, "next")) : null;
+          if (c) {
+            e.preventDefault();
+            const r = document.createRange(); r.setStartBefore(c); r.collapse(true);
+            sel.removeAllRanges(); sel.addRange(r);
+            return;
+          }
+        }
         const dir = e.key === "ArrowRight" ? "forward" : "backward";
         const beforeN = sel.anchorNode, beforeO = sel.anchorOffset;
         sel.modify("move", dir, "character");
