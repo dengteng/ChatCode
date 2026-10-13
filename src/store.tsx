@@ -1171,6 +1171,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   };
   blobSend = send; // 给 fetchBlob 用(ImgTag 在 context 外调)
 
+  // 后台会话每 3 分钟刷一次 git 状态,顺带触发 sidecar 的节流 fetch —— 否则后台会话的「领先/落后」
+  // 只在启动时刷一次,要切过去才更新。前台会话 Chat.tsx 已 15s 一轮,跳过。闭包里的 send 只读 wsRef,捕获首帧无妨。
+  useEffect(() => {
+    const t = window.setInterval(() => {
+      const s = stateRef.current;
+      for (const e of s.index) if (!e.casual && e.cwd && e.id !== s.activeId) send({ type: "git_info", sessionId: e.id });
+    }, 180_000);
+    return () => window.clearInterval(t);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // 依赖数组空的:下面这些方法只碰 send / dispatch / stateRef / 各 waiters ref / setDupAsk,全是稳定引用。
   // 身份一变就白拆 context 了(消费者照样每次重渲染),所以这里宁可 disable 掉 exhaustive-deps
   // 也不让 state 溜进依赖 —— 要读实时状态一律走 stateRef.current。

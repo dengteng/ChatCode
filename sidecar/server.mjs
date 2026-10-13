@@ -685,6 +685,10 @@ const lastFetch = new Map();
 // 同一个远端两条连接抢网络,收尾还要抢 packed-refs 锁。后台 fetch 晚一轮(15s 轮询)没有任何代价,
 // 用户干等没法解释。不写 lastFetch —— 这次是跳过不是跑过,下一轮该补上。
 let userCmdsRunning = 0;
+// 已经在跑的后台 fetch 挡不住,只能等:用户的 git pull 若跟它同时跑,两边一起改写 .git/FETCH_HEAD,
+// pull 读到两条待合并记录,判成不能快进,报 "Need to specify how to reconcile divergent branches"(实际只是落后)。
+// 用户的 git 命令开跑前先等这里清空(见 terminal_command)。
+const fetching = new Set();
 function maybeFetch(repo) {
   const now = Date.now();
   if (userCmdsRunning > 0) return;
@@ -692,7 +696,8 @@ function maybeFetch(repo) {
   lastFetch.set(repo, now);
   // --prune:远端已删的分支,本地 refs/remotes 会一直留着(git fetch 默认不删),
   // 分支页的"远程 N"就比 GitHub 上多出一堆早已删掉的分支。
-  execOut("git", ["fetch", "--quiet", "--prune"], repo, { GIT_TERMINAL_PROMPT: "0" });
+  const p = execOut("git", ["fetch", "--quiet", "--prune"], repo, { GIT_TERMINAL_PROMPT: "0" }).finally(() => fetching.delete(p));
+  fetching.add(p);
 }
 function trackCounts(track = "") {
   const ahead = Number((track.match(/ahead (\d+)/) || [])[1] || 0);
@@ -3292,7 +3297,9 @@ wss.on("connection", (ws) => {
         const cwd0 = sess?.termCwd || sess?.agentCwd || resolveCwd(m.sessionId);
         const script = `${m.command}\n__ec=$?; printf '\\0%s\\0%s' "$PWD" "$__ec"`;
         userCmdsRunning++; // 跑着期间挡掉后台 fetch,别跟用户的 push/pull 抢同一个远端(见 maybeFetch)
-        runShell(script, cwd0, 30000, (err, stdout, stderr) => {
+        // ponytail: 等的是所有仓库的后台 fetch,不分仓库;最坏多等一次 fetch 超时(12s),真碍事再按仓库分
+        const ready = /\bgit\b/.test(m.command) ? Promise.all(fetching) : Promise.resolve();
+        ready.then(() => runShell(script, cwd0, 30000, (err, stdout, stderr) => {
           userCmdsRunning--;
           let output = stdout || "", newCwd = cwd0, ec = err?.code ?? 0;
           const parts = output.split("\0");
@@ -3310,7 +3317,7 @@ wss.on("connection", (ws) => {
             repoRoot(wcwd).then((root) => { const wm = loadCommitWm(); wm[m.sessionId] = collectRoundSummaries(m.sessionId, ownCommitIn(wcwd, root)).length; saveCommitWm(wm); });
           }
           send(ws, { type: "terminal_result", sessionId: m.sessionId, command: m.command, cwd: newCwd, cwdChanged: newCwd !== cwd0, output, exitCode: ec });
-        }, outStreamer(ws, m.sessionId, m.command));
+        }, outStreamer(ws, m.sessionId, m.command)));
         break;
       }
       case "ssh_reconnect": {
