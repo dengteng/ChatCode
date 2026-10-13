@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { LoaderCircle, CircleCheck, CircleAlert, Circle, Plus, Search, Settings as SettingsIcon, Blocks, X, GripVertical, FolderPlus, ChevronRight, ChevronDown, Trash2, Clock } from "lucide-react";
 import { useStore } from "../store";
+import { useEnsureMemory } from "../memory";
 import { clockOf } from "./Composer";
 import type { VersionCheck } from "../version";
 import { onEdgeGlow } from "../lib/edgeGlow";
@@ -158,6 +159,7 @@ export function Sidebar({ onSearch, onOpenSettings, update, onShowUpdate }:
     return () => window.removeEventListener("focus", requestAuthStatus);
   }, [state.connected]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEnsureMemory(state.index.filter((e) => !e.casual).map((e) => e.cwd)); // 配了全局记忆根目录就给每个项目补上,并静默补全记忆索引
   // 最近 10 个不重复项目目录(index[0] 最新),新建会话时可一键复用
   const recentDirs = [...new Set(state.index.map((e) => e.cwd).filter(Boolean))].slice(0, 10);
   const roots = state.index.filter((e) => !e.inheritFrom || !state.index.some((p) => p.id === e.inheritFrom));

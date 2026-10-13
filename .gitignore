@@ -35,3 +35,4 @@ docs/
 
 # 产品介绍图文工作目录:截图副本 + 计划,本地留着,不入库
 .product-intro/
+.claude/settings.local.json

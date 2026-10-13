@@ -13,6 +13,7 @@ import { THEMES, EFFORT_LEVELS, modelName, modelProvider, providerBrand, type Ef
 import { loadExtensions, loadMarketplace, marketplaceNames, installPlugin, uninstallPlugin, enablePlugin, disablePlugin, addMarketplace, removeMarketplace, installSkillGit, setSkillOn, removeSkill, setMcpOn, removeMcp, loadExtNotes, saveExtNote, SEED_MARKETPLACES, type Exts, type MarketPlugin } from "../extensions";
 import { EXT_NOTE_ZH } from "../extNotesZh";
 import { openEditorWindow } from "../popout";
+import { MEMORY_ROOT_KEY, getMemoryRoot, applyMemoryRoot } from "../memory";
 import { btnPress } from "../lib/utils";
 import { copyText } from "./Chat";
 import { modelLogo } from "./Avatar";
@@ -20,7 +21,7 @@ import { modelLogo } from "./Avatar";
 import { ProfilePane } from "./ProfilePane";
 import { checkVersion, APP_VERSION, SDK_VERSION, ApiError, type VersionCheck } from "../version";
 
-type Tab = "appearance" | "account" | "profile" | "github" | "ssh" | "extensions" | "notify" | "about";
+type Tab = "appearance" | "account" | "profile" | "github" | "ssh" | "extensions" | "memory" | "notify" | "about";
 
 // 滑杆填充长度。原生 accent-color 的填充只走到 thumb 圆心 —— 拉到底也差半个 thumb,看着像"拉不到头"。
 // 这里算到 thumb 的右边沿:最小值时填充正好被 thumb 盖住(看着空),最大值时铺满整条(看着满)。
@@ -51,7 +52,7 @@ export function Settings({ onClose, initialTab, theme, onPickTheme, customBg, cu
         <div className="settings-body">
           <nav className="settings-nav">
             {/* 这个 tab 装的是 个人资料 + 账号/登录/同步(SHOW_ACCOUNT 关掉时就只剩头像昵称,名字随之改回「个人资料」) */}
-            {([["profile", "个人资料"],["account", "大模型"], ["github", "GitHub连接"], ["ssh", "SSH连接"], ["extensions", "Plugin/MCP/Skills"], ["appearance", "语言与主题"], ["notify", "通知提醒"], ["about", "关于"]] as [Tab, string][]).map(([k, label]) => (
+            {([["profile", "个人资料"],["account", "大模型"], ["github", "GitHub连接"], ["ssh", "SSH连接"], ["extensions", "Plugin/MCP/Skills"], ["memory", "记忆"], ["appearance", "语言与主题"], ["notify", "通知提醒"], ["about", "关于"]] as [Tab, string][]).map(([k, label]) => (
               <button key={k} type="button" className={tab === k ? "sel" : ""} {...btnPress(() => setTab(k))}>{t(label)}</button>
             ))}
           </nav>
@@ -62,6 +63,7 @@ export function Settings({ onClose, initialTab, theme, onPickTheme, customBg, cu
             {tab === "github" && <GithubTab />}
             {tab === "ssh" && <SshTab />}
             {tab === "extensions" && <ExtensionsTab />}
+            {tab === "memory" && <MemorySettingsTab />}
             {tab === "notify" && <NotifyTab />}
             {tab === "about" && <AboutTab />}
           </div>
@@ -240,6 +242,45 @@ function NotifyTab() {
         {t("完成时播放提示音")}
       </label>
       <p className="settings-note">{t("任务跑完、或者会话等你授权时,Dock 里的图标会跳一下、并响一声。窗口正在前台时系统本来就不跳,但提示音照响。两项都不需要系统通知权限;桌面通知另归系统管,不受这里影响。")}</p>
+    </section>
+  );
+}
+
+// 记忆:所有项目的记忆存储根目录,配一次全部项目有效。项目内的「记忆」面板只看/改记忆内容,不再改位置。
+// 实际落到 <根目录>/<项目名>(项目名取 git origin 仓库名,没有就用目录名);新开的项目由 Sidebar 常驻补套。
+function MemorySettingsTab() {
+  const { t } = useTranslation();
+  const { state } = useStore();
+  const [root, setRoot] = useState(getMemoryRoot);
+  const [busy, setBusy] = useState(false);
+  const pick = async () => {
+    let p: string | null = null;
+    try { p = await invoke<string | null>("choose_directory"); } catch { /* 取消选择 */ }
+    if (!p || p === root) return;
+    localStorage.setItem(MEMORY_ROOT_KEY, p);
+    setRoot(p);
+    setBusy(true);
+    const r = await applyMemoryRoot(state.index.filter((e) => !e.casual).map((e) => e.cwd), p, true);
+    setBusy(false);
+    if (r.failed.length) toast(t("{{ok}} 个项目已改存,{{n}} 个失败:{{dirs}}", { ok: r.ok, n: r.failed.length, dirs: r.failed.join("、") }), "error");
+    else toast(t("已应用到 {{ok}} 个项目", { ok: r.ok }), "success");
+  };
+  const clear = () => { localStorage.removeItem(MEMORY_ROOT_KEY); setRoot(""); };
+  return (
+    <section className="settings-section">
+      <h4>{t("记忆存储位置")}</h4>
+      <div className="provider-row setting-row">
+        <div className="provider-id"><div>
+          <b>{t("根目录")}</b>
+          <div className="muted" title={root}>{root || t("未设置:各项目用默认位置")}</div>
+        </div></div>
+        <div className="provider-actions">
+          {root && <button disabled={busy} {...btnPress(clear)}>{t("清除")}</button>}
+          <button className="primary" disabled={busy} {...btnPress(pick)}>{busy ? t("迁移中…") : root ? t("更改…") : t("选择…")}</button>
+        </div>
+      </div>
+      <p className="settings-note">{t("所有项目的记忆都存到「根目录/项目名」下,一次配置全部生效;新开的项目会自动套用。选 Obsidian 库、iCloud、Dropbox 里的文件夹,就由同步盘负责传到其他电脑。其他电脑填同一个根目录名下的同名项目即可共用。")}</p>
+      <p className="settings-note">{t("选择或更改时,现有记忆会并进新位置,旧目录原样保留不删。项目已单独设过位置的,换根目录时也会改过去;清除根目录只是不再自动套用,各项目保持当前位置。")}</p>
     </section>
   );
 }

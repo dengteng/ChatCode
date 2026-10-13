@@ -1541,7 +1541,6 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 .mem-drift { display: flex; gap: 8px; padding: 9px 11px; margin-bottom: 12px; border-radius: 9px; font-size: 12px; color: #b5771f; background: color-mix(in srgb, #d08428 12%, transparent); border: 1px solid color-mix(in srgb, #d08428 32%, transparent); }
 .mem-drift svg { flex-shrink: 0; margin-top: 1px; }
 .mem-drift b { color: #b5771f; }
-.mem-drift-note { margin-top: 3px; font-size: 11px; }
 .mem-group { margin-bottom: 14px; }
 .mem-group-title { margin: 0 0 6px; font-size: 12px; font-weight: 600; color: var(--muted); }
 .mem-card { border: 1px solid var(--border); border-radius: 9px; margin-bottom: 6px; overflow: hidden; background: color-mix(in srgb, var(--accent) 4%, transparent); }

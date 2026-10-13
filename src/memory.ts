@@ -129,6 +129,51 @@ export async function syncMemoryTo(cwd: string, root: string, name: string): Pro
   return target;
 }
 
+// 全局记忆根目录:「设置 → 记忆」里配一次,所有项目的记忆都存到 <根目录>/<项目名>。每台电脑各存 localStorage。
+// 空 = 没配,各项目照旧用默认位置(或自己单独设过的位置)。
+export const MEMORY_ROOT_KEY = "ChatCode-memory-sync-root";
+export const getMemoryRoot = () => localStorage.getItem(MEMORY_ROOT_KEY) ?? "";
+
+const rootApplied = new Set<string>(); // `${根目录}\n${cwd}`:本次运行已套过的,自动补套不重复读盘
+
+// 把全局根目录套到这批项目上(逐个走 syncMemoryTo:迁移现有记忆 + 写 autoMemoryDirectory)。
+// force=false(自动补套):项目已有自己的记忆目录就不碰。
+// force=true(换了根目录):已经在新根目录下的保留,其余改过去。旧目录原样保留不删。
+export async function applyMemoryRoot(cwds: string[], root: string, force: boolean): Promise<{ ok: number; failed: string[] }> {
+  const prefix = `${root.replace(/\/+$/, "")}/`;
+  let ok = 0;
+  const failed: string[] = [];
+  for (const cwd of new Set(cwds.filter(Boolean))) {
+    const key = `${root}\n${cwd}`;
+    if (!force && rootApplied.has(key)) continue;
+    try {
+      // 项目目录没了就跳过:write_file 会把 .claude/ 在原地重建出来
+      if (!(await invoke<unknown[]>("read_dir_meta", { path: cwd })).length) continue;
+      const cur = await resolveMemoryDir(cwd);
+      if (cur.custom && (!force || cur.dir.startsWith(prefix))) { rootApplied.add(key); continue; }
+      await syncMemoryTo(cwd, root, await defaultSyncName(cwd));
+      rootApplied.add(key);
+      ok++;
+    } catch { failed.push(cwd); }
+  }
+  return { ok, failed };
+}
+
+// 常驻挂一次(新开的项目、重启后恢复的项目都算):
+// 配了根目录就给还没单独设过记忆目录的项目补上;再逐个扫一遍记忆目录,scanMemories 顺带把漏登记的补进索引
+export function useEnsureMemory(cwds: string[]) {
+  const key = [...new Set(cwds.filter(Boolean))].sort().join("\n");
+  useEffect(() => {
+    if (!key) return;
+    const list = key.split("\n");
+    const root = getMemoryRoot();
+    void (async () => {
+      if (root) await applyMemoryRoot(list, root, false);
+      for (const cwd of list) await scanMemories(cwd).catch(() => {});
+    })();
+  }, [key]);
+}
+
 // frontmatter 里取某个标量字段(顶层或 metadata 下)
 function fmField(fm: string, key: string): string {
   const re = new RegExp(`^\\s*${key}\\s*:\\s*(.+)$`, "m");
@@ -188,6 +233,18 @@ export async function scanMemories(cwd: string): Promise<MemoryScan> {
     return parseMemory(file, path, await readText(path), mtime, indexedSet.has(file));
   }));
   entries.sort((a, b) => b.mtime - a.mtime);
+
+  // 静默补索引:文件在、MEMORY.md 里没登记的,按 `- [标题](文件) — 描述` 追加(目录来自 resolveMemoryDir,跟着设置里的存储位置走)。
+  // 冲突副本 .local-copy.md 等人工合并,不登记。索引里指向已删文件的悬空行不自动删:另一台电脑的文件可能只是还没同步过来。
+  // ponytail: 读-改-写,和 agent 同一秒写索引会重复一行;真嫌烦再加锁
+  const missing = entries.filter((e) => !e.indexed && !/\.local-copy\.md$/i.test(e.file));
+  if (missing.length) {
+    const add = missing.map((e) => `- [${e.title}](${e.file})${e.description ? ` — ${e.description}` : ""}`).join("\n");
+    try {
+      await invoke("write_file", { path: `${dir}/MEMORY.md`, content: mergeIndex(indexRaw, add) });
+      for (const e of missing) { e.indexed = true; indexedSet.add(e.file); }
+    } catch { /* 写不进去就留着告警 */ }
+  }
 
   const present = new Set(mdFiles.map(([n]) => n));
   // 索引里带 .md 链接、但磁盘上已无该文件

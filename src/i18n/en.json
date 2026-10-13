@@ -423,7 +423,6 @@
   "这个项目还没有记忆。agent 在对话里记下的事实会出现在这里。": "This project has no memories yet. Facts the agent notes during conversations will appear here.",
   "{{num}} 条记忆未登记进 MEMORY.md 索引": "{{num}} memories not registered in the MEMORY.md index",
   "{{num}} 条索引项对应的文件已不存在:{{files}}": "{{num}} index entries point to files that no longer exist: {{files}}",
-  "(一键修复索引将在第二层实现)": "(One-click index repair lands in a future layer)",
   "偏好": "Preferences",
   "项目": "Project",
   "参考": "Reference",
@@ -879,10 +878,14 @@
   " —— 之前的对话记忆不会带到新目录(聊天记录仍保留在界面上),在该目录重开上下文。": " — previous memory is not carried over (the chat stays on screen); context restarts in that directory.",
   "绑定": "Bind",
   "已同步到": "Synced to",
-  "跨电脑同步…": "Sync across computers…",
-  "记忆改存到同步盘里的文件夹(Obsidian 库、iCloud、Dropbox 等),由同步盘负责传到其他电脑。其他电脑填同一个项目名即可共用。": "Memory moves into a folder on your sync drive (Obsidian vault, iCloud, Dropbox, etc.), which carries it to your other computers. Use the same project name there to share it.",
   "根目录": "Root folder",
   "项目名": "Project name",
   "迁移中…": "Moving…",
-  "迁移并同步": "Move and sync"
+  "更改…": "Change…",
+  "记忆存储位置": "Memory location",
+  "未设置:各项目用默认位置": "Not set: each project uses its default location",
+  "{{ok}} 个项目已改存,{{n}} 个失败:{{dirs}}": "{{ok}} project(s) moved, {{n}} failed: {{dirs}}",
+  "已应用到 {{ok}} 个项目": "Applied to {{ok}} project(s)",
+  "所有项目的记忆都存到「根目录/项目名」下,一次配置全部生效;新开的项目会自动套用。选 Obsidian 库、iCloud、Dropbox 里的文件夹,就由同步盘负责传到其他电脑。其他电脑填同一个根目录名下的同名项目即可共用。": "Every project's memory is stored under \"root/project name\". Configure once and it applies to all projects, including ones opened later. Pick a folder in an Obsidian vault, iCloud or Dropbox and the sync service carries it to your other computers, where a project with the same name shares it.",
+  "选择或更改时,现有记忆会并进新位置,旧目录原样保留不删。项目已单独设过位置的,换根目录时也会改过去;清除根目录只是不再自动套用,各项目保持当前位置。": "When you pick or change the root, existing memory is merged into the new location and the old folder is kept. Projects with their own location are moved too when the root changes. Clearing the root only stops auto-applying; projects stay where they are."
 }
