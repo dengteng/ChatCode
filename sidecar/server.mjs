@@ -2,7 +2,7 @@
 // 前端(浏览器/Tauri webview)连 ws://127.0.0.1:8975,每个 session 独立跑一个 SDK query,天然支持并行任务。
 import { WebSocketServer } from "ws";
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { PROVIDERS, providerOf, modelArg, envForModel, COLLAB, collabOn, collabOpts, extraModels, resolvedProvider, endpointsOf, variantsOf, setProxyPort, isCnMachine, sanitizeCatalogModels, capModelFamilies } from "./providers.mjs";
+import { PROVIDERS, providerOf, modelArg, envForModel, COLLAB, collabOn, collabOpts, extraModels, resolvedProvider, endpointsOf, variantsOf, setProxyPort, isCnMachine, sanitizeCatalogModels, sanitizeClaudeCatalog, applyClaudeCatalog, capModelFamilies } from "./providers.mjs";
 import { accumulate, emptySpend, priceTable, ledgerAdd, ledgerStats } from "./spend.mjs";
 import { startProxy } from "./openai-proxy.mjs";
 import { capToolResults } from "./logcap.mjs";
@@ -1154,16 +1154,18 @@ async function fetchCatalog() {
   // 形状不对就整份丢掉,别把半份垃圾写进 settings —— 宁可没有清单,也不要一份烂的赖在那儿。
   if (!j || typeof j.providers !== "object" || Array.isArray(j.providers)) return { ok: false, error: "清单格式不对" };
   const catalog = {};
+  // claude 组单独存:它管的是 Claude 菜单显示哪些(见 reportModels),不是某家第三方的模型表
+  const claudeCatalog = sanitizeClaudeCatalog(j.providers.claude);
   for (const [id, list] of Object.entries(j.providers)) {
-    if (!PROVIDERS[id] || id === "claude") continue; // 只认识的家;claude 的列表来自 SDK,不受清单管
+    if (!PROVIDERS[id] || id === "claude") continue; // 只认识的家
     const clean = sanitizeCatalogModels(id, list);
     if (clean.length) catalog[id] = clean;
   }
   const s = loadSettings();
-  const changed = JSON.stringify(catalog) !== JSON.stringify(s.modelCatalog || {});
+  const changed = JSON.stringify([catalog, claudeCatalog]) !== JSON.stringify([s.modelCatalog || {}, s.claudeCatalog || []]);
   // 时间戳照记:清单是空的(比如全被 sanitize 掉了)也算这次拉过了,别每次启动重打。
-  saveSettings({ ...s, modelCatalog: catalog, modelCatalogAt: Date.now() });
-  return { ok: true, changed, count: Object.values(catalog).reduce((n, l) => n + l.length, 0) };
+  saveSettings({ ...s, modelCatalog: catalog, claudeCatalog, modelCatalogAt: Date.now() });
+  return { ok: true, changed, count: Object.values(catalog).reduce((n, l) => n + l.length, claudeCatalog.length) };
 }
 let catalogInflight = null; // 只在真的发出请求时占位(TTL 跳过的那条不占,否则会把随后的 force 也吞掉)
 async function refreshCatalog({ force = false } = {}) {
@@ -1400,7 +1402,13 @@ async function reportModels(ws, sessionId, q) {
   const base = claude.length ? claude : lastClaudeModels;
   // SDK 已上报的就不重复补(将来菜单补上后自动不再手动加),但 supportedModels 不带 contextWindow,
   // 直接原样用会让 opus5 的 1M 掉回默认 200k —— 所以把手工表里知道的窗口大小合并上去。
-  const manualBy = new Map(CLAUDE_MANUAL_MODELS.flatMap((m) => [[m.value, m], [m.model, m]]));
+  // 后台配了 claude 组就用它当手工表(名字/窗口/顺序都听它的),effort 档位沿用内置表里同 id 那条
+  const cat = sanitizeClaudeCatalog(loadSettings().claudeCatalog);
+  const builtinBy = new Map(CLAUDE_MANUAL_MODELS.map((m) => [m.model, m]));
+  const manualModels = cat.length
+    ? cat.filter((m) => !m.hidden).map((m) => ({ description: `${m.model} · 手动指定`, supportedEffortLevels: builtinBy.get(m.model)?.supportedEffortLevels ?? EFFORT_ALL, ...m }))
+    : CLAUDE_MANUAL_MODELS;
+  const manualBy = new Map(manualModels.flatMap((m) => [[m.value, m], [m.model, m]]));
   const merged = base.map((b) => {
     // 第三个 key 是归一化 id:SDK 的别名行(default → claude-opus-5[1m]、fable → claude-fable-5-1[1m])
     // 精确 key 一个都对不上,不按 baseModelId 兜一手,default 那条就只剩英文原名,
@@ -1425,11 +1433,13 @@ async function reportModels(ws, sessionId, q) {
     ? merged.map((x) => x.value === "default" ? { ...x, resolvedModel: collabSonnet.resolvedModel, displayName: collabSonnet.displayName } : x)
     : merged;
   const have = new Set(base.map(modelKey));
-  const manual = CLAUDE_MANUAL_MODELS.filter((m) => !have.has(m.value) && !base.some((b) => modelKey(b) === m.model));
+  const manual = manualModels.filter((m) => !have.has(m.value) && !base.some((b) => modelKey(b) === m.model));
   // 广播而非单播:改 settings/key 或重开会话时,所有客户端(桌面/手机)的该会话列表都同步更新,
   // 不再只发给触发的那个连接 —— 否则别的端一直用旧快照(kimi 新增模型选了却显示旧窗口)。
   const cur = loadIndex().find((e) => e.id === sessionId)?.model;
-  broadcast({ type: "models", sessionId, models: capModelFamilies(dedupeModels([...shown, ...manual, ...extraModels(loadSettings())]), 3, cur ? [cur] : []).map((m) => ({
+  const claudeRows = cat.length ? applyClaudeCatalog([...shown, ...manual], cat, cur) : [...shown, ...manual];
+  // 配了 claude 组就不再按系列截前 3 个:留哪些已经由后台说了算
+  broadcast({ type: "models", sessionId, models: capModelFamilies(dedupeModels([...claudeRows, ...extraModels(loadSettings())]), cat.length ? Infinity : 3, cur ? [cur] : []).map((m) => ({
     ...m, description: m.value === "default" && collabOn("default", loadSettings()) ? tr("Sonnet 5.5 主持 · Opus 顾问 · Haiku 子 agent") : localizeModelDesc(m.description),
     // OpenAI 走转译代理,effort 被翻成 reasoning_effort(只有三档);其他第三方不认 effort,不给档位
     ...(m.provider === "openai" && !m.supportedEffortLevels ? { supportedEffortLevels: ["low", "medium", "high"] } : {}),

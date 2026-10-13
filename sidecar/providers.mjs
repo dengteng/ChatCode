@@ -233,6 +233,30 @@ export function mergeModels(base, over) {
   ];
 }
 
+// claude 组:tt-center 后台「模型清单」配的 Claude 菜单(GitHub 那份出厂清单没有这一组)。
+// claude 没有 baseUrl 可劫持,但 value 是裸 id、会原样当 --model 传给 CLI —— 只收官方 id 的样子。
+const CLAUDE_ID = /^claude-[a-z0-9.-]+(\[1m\])?$/;
+export function sanitizeClaudeCatalog(list) {
+  if (!Array.isArray(list)) return [];
+  return list.filter((m) => CLAUDE_ID.test(m?.model ?? "")).map((m) => {
+    const clean = { value: m.model, provider: "claude" };
+    for (const k of CATALOG_FIELDS) if (m[k] !== undefined) clean[k] = m[k];
+    return clean;
+  });
+}
+
+// 配了 claude 组时,Claude 菜单只留组里列出且没隐藏的,按组内顺序排。
+// default 一行照留(它是「跟随最新」的入口);会话正在用的那个也留,摘掉了模型条就只剩裸 id。
+const claudeBaseId = (m) => String(m?.resolvedModel || m?.model || m?.value || "").replace(/\[.*$/, "").replace(/-\d{8}$/, "");
+export function applyClaudeCatalog(rows, cat, cur) {
+  const rank = new Map(cat.filter((m) => !m.hidden).map((m, i) => [claudeBaseId(m), i]));
+  const curId = cur ? claudeBaseId({ value: cur }) : "";
+  const pos = (m) => (m.value === "default" ? -1 : rank.get(claudeBaseId(m)) ?? rank.size);
+  return rows
+    .filter((m) => m.value === "default" || rank.has(claudeBaseId(m)) || (cur && (m.value === cur || claudeBaseId(m) === curId)))
+    .sort((a, b) => pos(a) - pos(b));
+}
+
 // 三层叠完后收尾:
 //   · hidden 的模型摘掉。为什么需要它:改成按模型合并之后,"从手填表里删掉一条"不再等于
 //     "不要这个模型"了(下次清单会把它加回来)。得有个显式说不的写法 ——

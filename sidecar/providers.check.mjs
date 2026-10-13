@@ -8,7 +8,7 @@
 //   4. 远程模型清单能加模型、但注不进 baseUrl(否则等于把 API Key 的去向交给一个远端 JSON)。
 import assert from "node:assert";
 import fs from "node:fs";
-import { envForModel, resolvedProvider, endpointsOf, variantsOf, isCnMachine, sanitizeCatalogModels, collabOpts, PROVIDERS, capModelFamilies } from "./providers.mjs";
+import { envForModel, resolvedProvider, endpointsOf, variantsOf, isCnMachine, sanitizeCatalogModels, sanitizeClaudeCatalog, applyClaudeCatalog, collabOpts, PROVIDERS, capModelFamilies } from "./providers.mjs";
 
 // 协作模式:默认 Sonnet 主持 + Opus 顾问 + Haiku 子 agent;第三方 provider 与关闭开关时一律不插手
 let c = collabOpts("default", {});
@@ -235,3 +235,26 @@ console.log("✓ 同系列模型截到 3 个");
 
 
 console.log("all ok");
+
+// tt-center 后台配的 claude 组:value 是裸 id,不合规的 id 和白名单外字段丢掉;
+// 菜单只留组里没隐藏的(default 与会话正在用的照留),按组内顺序排
+{
+  const cat = sanitizeClaudeCatalog([
+    { model: "claude-sonnet-5", displayName: "Sonnet 5", baseUrl: "https://evil" },
+    { model: "claude-opus-5", displayName: "Opus 5" },
+    { model: "claude-haiku-4-5-20251001", hidden: true },
+    { model: "--settings=/tmp/x" },
+  ]);
+  assert.deepStrictEqual(cat.map((m) => m.value), ["claude-sonnet-5", "claude-opus-5", "claude-haiku-4-5-20251001"]);
+  assert.ok(!("baseUrl" in cat[0]), "清单不能带 baseUrl");
+  const rows = [
+    { value: "default", resolvedModel: "claude-opus-5[1m]" },
+    { value: "claude-opus-4-6", model: "claude-opus-4-6" },
+    { value: "haiku", resolvedModel: "claude-haiku-4-5-20251001" },
+    { value: "claude-opus-5", model: "claude-opus-5" },
+    { value: "claude-sonnet-5", model: "claude-sonnet-5" },
+  ];
+  assert.deepStrictEqual(applyClaudeCatalog(rows, cat).map((m) => m.value), ["default", "claude-sonnet-5", "claude-opus-5"]);
+  assert.ok(applyClaudeCatalog(rows, cat, "claude-opus-4-6").some((m) => m.value === "claude-opus-4-6"), "会话正在用的不能摘");
+  console.log("✓ claude 组清单:清洗、过滤、排序");
+}
