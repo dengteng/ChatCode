@@ -184,9 +184,13 @@ export const PROVIDERS = {
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", // Gemini 的 OpenAI 兼容端点
     smallFast: "gemini-3.8-flash",
     models: [
-      { value: "gemini/gemini-2.5-pro",   model: "gemini-2.5-pro",   displayName: "Gemini 2.5 Pro",   description: "gemini-2.5-pro · 最强", provider: "gemini", contextWindow: 1_000_000 },
+      // Gemini 4 Argon(2026-10-13 发布),Gemini 4 代旗舰。未写 price:同家现有条目都没写价,
+      // 官方价格页没查到就不写(见顶部 price 说明)。vision 也不写:openai 传输由代理转图,见顶部注释。
+      { value: "gemini/gemini-4-argon", model: "gemini-4-argon", displayName: "Gemini 4 Argon", description: "gemini-4-argon · 最强", provider: "gemini", contextWindow: 1_048_576 },
       // Gemini 3.8 Flash(2026-09-02 发布)。新一代 flash 档,取代 2.5-flash。
       { value: "gemini/gemini-3.8-flash", model: "gemini-3.8-flash", displayName: "Gemini 3.8 Flash", description: "gemini-3.8-flash · 快", provider: "gemini", contextWindow: 1_048_576 },
+      // 2026-10-14 下架:被 Gemini 4 Argon 取代(新一代旗舰)。加 hidden,老会话仍可用。
+      { value: "gemini/gemini-2.5-pro", model: "gemini-2.5-pro", displayName: "Gemini 2.5 Pro", description: "gemini-2.5-pro · 最强", provider: "gemini", contextWindow: 1_000_000, hidden: true },
       // 2026-10-05 下架:被 Gemini 3.8 Flash 取代。加 hidden,老会话仍可用。
       { value: "gemini/gemini-2.5-flash", model: "gemini-2.5-flash", displayName: "Gemini 2.5 Flash", description: "gemini-2.5-flash · 快", provider: "gemini", contextWindow: 1_000_000, hidden: true },
     ],
