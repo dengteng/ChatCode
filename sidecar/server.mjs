@@ -2434,6 +2434,10 @@ function deliverUserMessage(ws, m) {
       // 上一轮登录失效:换个 CLI 进程再发,让它重新读凭证(见 authentication_failed 那处)
       sess.authFailed = false;
       await restartAgent(ws, sess, m.sessionId, true);
+    } else if (sess.modelRestart) {
+      // 切模型时 CLI 拒了 setModel(见 set_model 那处):换个按新模型启动的进程再发
+      sess.modelRestart = false;
+      await restartAgent(ws, sess, m.sessionId, true);
     }
     if (!isSlashCmd) sess.hadUserTurn = true; // 光发 /compact 这类命令不算"聊过":上下文里没有可保的内容
     // git 现状放在**用户文本之后**:它可能有几十行,搁最前面会把用户真正问的那句挤到很远;
@@ -3132,7 +3136,15 @@ wss.on("connection", (ws) => {
           restartAgentCwd(ws, sess, m.sessionId, sess.agentCwd);
         } else {
           // 换模型后 CLI 可能降档(Haiku 4.5 不支持 effort),等它切完再读回实际档位
-          sess?.q?.setModel?.(m.model === "default" ? (collabOn(m.model, loadSettings()) ? COLLAB.main : undefined) : modelArg(m.model))?.then?.(() => syncEffort(sess, m.sessionId), () => {});
+          // 被拒不能吞:协作模式挂着 advisor 时,CLI 对它模型目录里没有的 id(如 claude-haiku-5-5)会拒绝 setModel,
+          // 而同一个 id 用 --model 启动却能跑。吞掉的话界面显示已切换,下一轮照旧是老模型。
+          // 改为下一条消息前 resume 重启(spawnAgent 从 index 读新模型进 options),上下文不丢。
+          sess?.q?.setModel?.(m.model === "default" ? (collabOn(m.model, loadSettings()) ? COLLAB.main : undefined) : modelArg(m.model))?.then?.(
+            () => { sess.modelRestart = false; syncEffort(sess, m.sessionId); },
+            (e) => {
+              console.error(`[model] setModel(${m.model}) 被拒,下一条消息前重启 query: ${String(e?.message || e).slice(0, 200)}`);
+              sess.modelRestart = true;
+            });
         }
         break;
       }
