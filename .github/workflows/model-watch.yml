@@ -2,7 +2,8 @@
 # 开 PR 等人合并,再推一条通知到 tt-center 手机端。合并后 catalog/models.json 进 main,客户端一天内自动拉到。
 #
 # 需要的 Secrets(Settings → Secrets and variables → Actions):
-#   TT_NOTIFY_KEY     tt-center 的机器 key,scopes 要含 cron、chatcode、llm:deepseek(DeepSeek key 从它现领)
+#   TT_NOTIFY_KEY     tt-center 的机器 key,scopes 要含 cron、chatcode、llm:deepseek(DeepSeek key 从它现领)、
+#                     model-catalog(合并后 catalog-sync.yml 用它把改动同步进后台清单)
 # 还要在 Settings → Actions → General 勾上「Allow GitHub Actions to create and approve pull requests」。
 name: model-watch
 
@@ -141,8 +142,13 @@ jobs:
 
       - name: 心跳 ok / fail
         if: always()
+        # 模型名来自 models.dev(外部数据),走 env 传,不直接拼进脚本
+        env:
+          DETAIL: ${{ steps.diff.outputs.detail }}
+          OPEN_PRS: ${{ steps.open.outputs.count }}
         run: |
           ev=$([ "${{ job.status }}" = success ] && echo ok || echo fail)
-          jq -n --arg ev "$ev" --arg out "${{ steps.diff.outputs.summary }} $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+          [ -n "$DETAIL" ] || [ "${OPEN_PRS:-0}" = 0 ] || DETAIL="上次的模型巡检 PR 还没处理,本轮跳过对比"
+          jq -n --arg ev "$ev" --arg out "$DETAIL $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
             '{slug:"chatcode.model-watch", event:$ev, schedule:"0 1 * * *", tz:"UTC", output:$out}' |
             curl -s -m 10 -o /dev/null -H "x-notify-key: $TT_KEY" -H 'content-type: application/json' -d @- "$TT/api/cron/ping" || true

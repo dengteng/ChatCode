@@ -112,7 +112,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   fs.writeFileSync(seenOut, JSON.stringify(next, null, 2) + "\n");
   const n = (o) => Object.values(o).reduce((s, l) => s + l.length, 0);
   console.log(`新模型 ${n(added)} 个,该下架 ${n(retired)} 个`);
-  for (const [id, l] of Object.entries(added)) console.log(`  + ${id}: ${l.map((m) => m.id).join(", ")}`);
-  for (const [id, l] of Object.entries(retired)) console.log(`  - ${id}: ${l.map((m) => m.id).join(", ")}`);
-  if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `changed=${n(added) + n(retired) > 0}\nsummary=新模型 ${n(added)} 个,该下架 ${n(retired)} 个\n`);
+  const names = (o) => Object.entries(o).map(([id, l]) => `${id}: ${l.map((m) => m.id).join(", ")}`);
+  for (const s of names(added)) console.log(`  + ${s}`);
+  for (const s of names(retired)) console.log(`  - ${s}`);
+  // detail 给 tt-center 心跳看(网页、手机的定时任务明细都直接显示它):带上模型名,不用再翻 Actions 日志。
+  // summary 仍只是计数,PR 标题用它,不让一长串名字撑爆标题。
+  const detail = [`新模型 ${n(added)} 个,该下架 ${n(retired)} 个`, ...names(added).map((s) => `+ ${s}`), ...names(retired).map((s) => `- ${s}`)].join("; ");
+  if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `changed=${n(added) + n(retired) > 0}\nsummary=新模型 ${n(added)} 个,该下架 ${n(retired)} 个\ndetail=${detail}\n`);
 }

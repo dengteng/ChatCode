@@ -1,0 +1,34 @@
+# catalog/models.json 进了 main(模型巡检 PR 合并、或手改后推送)→ 把改动同步进 tt-center 后台的模型清单。
+# 客户端优先读后台那份,不同步的话合并 PR 到不了客户端。tt-center 做三方合并:只应用这次改动前后的差异,
+# 后台手改过的值不动(规则见 tt-center src/lib/modelCatalog.ts 的 mergeUpstream)。
+#
+# 需要的 Secrets:TT_NOTIFY_KEY,scopes 要含 model-catalog(与 model-watch 共用那把)。
+name: catalog-sync
+
+on:
+  push:
+    branches: [main]
+    paths: [catalog/models.json]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: 同步到 tt-center
+        env:
+          TT_KEY: ${{ secrets.TT_NOTIFY_KEY }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          # 新建文件或手动触发时没有上一版:before 传 null,tt-center 只补库里缺的模型
+          prev=$(git show "$BEFORE:catalog/models.json" 2>/dev/null || echo null)
+          jq -n --argjson before "$prev" --slurpfile after catalog/models.json '{before:$before, after:$after[0]}' |
+            curl -sS -f -m 20 -H "x-notify-key: $TT_KEY" -H 'content-type: application/json' -d @- \
+              "https://api.dengteng.xyz/api/model-catalog/sync?project=chat-code" | tee /dev/stderr | jq -r '.changes[]?'
