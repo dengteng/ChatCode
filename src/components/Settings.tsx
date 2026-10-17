@@ -9,11 +9,11 @@ import remarkGfm from "remark-gfm";
 import { rawHtml, useMdImages } from "../lib/mdhtml";
 import { useStore, useApi, DOCK_BOUNCE_KEY, dockBounceOn, SOUND_KEY, soundOn, playDing } from "../store";
 import { toast } from "./Toast";
-import { THEMES, EFFORT_LEVELS, modelName, modelProvider, providerBrand, type EffortLevel, type ResumeMode, type SshHost, type ThemeId, type CustomArt } from "../types";
+import { THEMES, EFFORT_LEVELS, modelName, modelProvider, providerBrand, homeModelRow, isDefaultRow, type EffortLevel, type ResumeMode, type SshHost, type ThemeId, type CustomArt } from "../types";
 import { loadExtensions, loadMarketplace, marketplaceNames, installPlugin, uninstallPlugin, enablePlugin, disablePlugin, addMarketplace, removeMarketplace, installSkillGit, setSkillOn, removeSkill, setMcpOn, removeMcp, loadExtNotes, saveExtNote, SEED_MARKETPLACES, type Exts, type MarketPlugin } from "../extensions";
 import { EXT_NOTE_ZH } from "../extNotesZh";
 import { openEditorWindow } from "../popout";
-import { MEMORY_ROOT_KEY, getMemoryRoot, applyMemoryRoot } from "../memory";
+import { MEMORY_ROOT_KEY, VAULT_MEMORY_DIR, getMemoryRoot, applyMemoryRoot, detectObsidianVaults } from "../memory";
 import { btnPress } from "../lib/utils";
 import { copyText } from "./Chat";
 import { modelLogo } from "./Avatar";
@@ -181,7 +181,7 @@ function AppearanceTab({ theme, onPick, customBg, customBlur, customBrightness, 
       </div>
       <div className="custom-slider-row">
         <label>{t("侧栏亮度")}<span className="muted">{Math.round(customBrightness * 100)}%</span></label>
-        <input type="range" min={50} max={150} step={5} value={Math.round(customBrightness * 100)} style={sliderFill(Math.round(customBrightness * 100), 50, 150)}
+        <input type="range" min={50} max={250} step={5} value={Math.round(customBrightness * 100)} style={sliderFill(Math.round(customBrightness * 100), 50, 250)}
           onChange={(e) => onSetCustomBrightness(Number(e.target.value) / 100)} />
       </div>
       <input ref={fileRef} type="file" accept="image/*" hidden onChange={(e) => pickFile(e.target.files?.[0])} />
@@ -253,10 +253,10 @@ function MemorySettingsTab() {
   const { state } = useStore();
   const [root, setRoot] = useState(getMemoryRoot);
   const [busy, setBusy] = useState(false);
-  const pick = async () => {
-    let p: string | null = null;
-    try { p = await invoke<string | null>("choose_directory"); } catch { /* 取消选择 */ }
-    if (!p || p === root) return;
+  const [vaults, setVaults] = useState<string[]>([]);
+  useEffect(() => { detectObsidianVaults().then(setVaults).catch(() => {}); }, []);
+  const applyRoot = async (p: string) => {
+    if (p === root) return;
     localStorage.setItem(MEMORY_ROOT_KEY, p);
     setRoot(p);
     setBusy(true);
@@ -264,6 +264,11 @@ function MemorySettingsTab() {
     setBusy(false);
     if (r.failed.length) toast(t("{{ok}} 个项目已改存,{{n}} 个失败:{{dirs}}", { ok: r.ok, n: r.failed.length, dirs: r.failed.join("、") }), "error");
     else toast(t("已应用到 {{ok}} 个项目", { ok: r.ok }), "success");
+  };
+  const pick = async () => {
+    let p: string | null = null;
+    try { p = await invoke<string | null>("choose_directory"); } catch { /* 取消选择 */ }
+    if (p) await applyRoot(p);
   };
   const clear = () => { localStorage.removeItem(MEMORY_ROOT_KEY); setRoot(""); };
   return (
@@ -279,6 +284,27 @@ function MemorySettingsTab() {
           <button className="primary" disabled={busy} {...btnPress(pick)}>{busy ? t("迁移中…") : root ? t("更改…") : t("选择…")}</button>
         </div>
       </div>
+      {vaults.length > 0 && (
+        <>
+          <h4>{t("检测到 Obsidian 库")}</h4>
+          {vaults.map((v) => {
+            const r = `${v}/${VAULT_MEMORY_DIR}`;
+            const cur = root.replace(/\/+$/, "") === r;
+            return (
+              <div key={v} className="provider-row setting-row">
+                <div className="provider-id"><div>
+                  <b>{v.split("/").pop()}</b>
+                  <div className="muted" title={r}>{r}</div>
+                </div></div>
+                <div className="provider-actions">
+                  <button className="primary" disabled={busy || cur} {...btnPress(() => applyRoot(r))}>{cur ? t("使用中") : t("使用这个库")}</button>
+                </div>
+              </div>
+            );
+          })}
+          <p className="settings-note">{t("记忆会存到库里的 claude-memory 文件夹,同步由你在 Obsidian 里配的同步方式负责。")}</p>
+        </>
+      )}
       <p className="settings-note">{t("所有项目的记忆都存到「根目录/项目名」下,一次配置全部生效;新开的项目会自动套用。选 Obsidian 库、iCloud、Dropbox 里的文件夹,就由同步盘负责传到其他电脑。其他电脑填同一个根目录名下的同名项目即可共用。")}</p>
       <p className="settings-note">{t("选择或更改时,现有记忆会并进新位置,旧目录原样保留不删。项目已单独设过位置的,换根目录时也会改过去;清除根目录只是不再自动套用,各项目保持当前位置。")}</p>
     </section>
@@ -291,7 +317,7 @@ function DefaultModelRow() {
   const { t } = useTranslation();
   const { state, setHomeModel, setHomeEffort } = useStore();
   const models = state.homeModels;
-  const cur = models.find((m) => m.value === state.homeModel);
+  const cur = homeModelRow(models, state.homeModel); // 存的那个被后台摘了/隐藏了就落到清单默认
   const levels = cur?.supportedEffortLevels ?? [];
   return (
     <div className="provider-row setting-row">
@@ -300,9 +326,9 @@ function DefaultModelRow() {
         <div className="muted">{t("只影响之后新建的会话;已开的会话在输入框下方的模型菜单里改")}</div>
       </div></div>
       <div className="provider-actions">
-        <select className="perm-picker on" value={state.homeModel} onChange={(e) => setHomeModel(e.target.value)}>
+        <select className="perm-picker on" value={cur?.value ?? state.homeModel} onChange={(e) => setHomeModel(e.target.value)}>
           {!cur && <option value={state.homeModel}>{state.homeModel === "default" ? t("默认模型") : state.homeModel}</option>}
-          {models.map((m) => <option key={m.value} value={m.value}>{providerBrand(modelProvider(m))} - {modelName(models, m)}</option>)}
+          {models.map((m) => <option key={m.value} value={m.value}>{providerBrand(modelProvider(m))} - {modelName(models, m)}{isDefaultRow(m) ? ` (${t("默认")})` : ""}</option>)}
         </select>
         <select className="perm-picker on" disabled={!levels.length} title={levels.length ? undefined : t("这个模型不支持 effort")}
           value={state.homeEffort ?? ""} onChange={(e) => setHomeEffort((e.target.value || null) as EffortLevel | null)}>
@@ -361,6 +387,12 @@ function AccountTab() {
   const catalogAt = state.auth?.catalogAt ?? 0;
   const cnList = Object.values(provs).filter((p) => p.cnAvailable || p.baseUrlCN).map((p) => p.label);
   const [edit, setEdit] = useState<{ id: string; mode: "key" | "config" } | null>(null);
+  // 默认只列配了 key 的厂商,其余从「添加厂商」下拉里挑。挑了只在本次打开的设置里显示(added 不落盘):
+  // 配上 key 就靠 configured 常驻,没配就下次打开自动收起 —— 没 key 的行留着也只是占地方。
+  const [added, setAdded] = useState<string[]>([]);
+  const shownProvs = PROVIDER_META.filter((m) => provs[m.id] && (provs[m.id].configured || added.includes(m.id)));
+  const addable = PROVIDER_META.filter((m) => provs[m.id] && !provs[m.id].configured && !added.includes(m.id));
+  const addProv = (id: string) => { if (!id) return; setAdded((a) => [...a, id]); setEdit({ id, mode: "key" }); };
   const autoResume = !!state.auth?.autoResume;
   const collab = state.auth?.collab !== false;
   if (edit) return <ProviderEditPage id={edit.id} mode={edit.mode} onDone={() => setEdit(null)} />;
@@ -382,14 +414,28 @@ function AccountTab() {
         </div>
       </div>
 
-      {PROVIDER_META.filter((m) => provs[m.id]).map((m) => <ProviderRow key={m.id} meta={m} onEdit={(mode) => setEdit({ id: m.id, mode })} />)}
+      {shownProvs.map((m) => <ProviderRow key={m.id} meta={m} onEdit={(mode) => setEdit({ id: m.id, mode })} />)}
+      {addable.length > 0 && (
+        <div className="provider-row setting-row">
+          <div className="provider-id"><div>
+            <b>{t("添加厂商")}</b>
+            <div className="muted">{t("选一家配 key 后会常驻在上面")}</div>
+          </div></div>
+          <div className="provider-actions">
+            <select className="perm-picker on" value="" onChange={(e) => addProv(e.target.value)}>
+              <option value="">{t("选择厂商…")}</option>
+              {addable.map((m) => <option key={m.id} value={m.id}>{provs[m.id].label || m.id}</option>)}
+            </select>
+          </div>
+        </div>
+      )}
 
       <h4>{t("新会话默认")}</h4>
       <DefaultModelRow />
       <div className="provider-row setting-row">
         <div className="provider-id"><div>
           <b>{t("协作模式")}</b>
-          <div className="muted">{t("Sonnet 主持写代码,Opus 当顾问(只在计划、卡住、收尾时被叫),子 agent 用 Haiku 去探索。只对 Claude 生效,对新起的会话生效;选了 Opus/Fable 当主模型时不挂 Opus 顾问")}</div>
+          <div className="muted">{t("Opus 当顾问(只在计划、卡住、收尾时被叫),子 agent 用 Haiku 去探索,模型都取自后台模型清单;主模型用你选的那个。没拿到后台清单时,还会让 Sonnet 当主模型。只对 Claude 生效,对新起的会话生效;选了 Opus/Fable 当主模型时不挂 Opus 顾问")}</div>
         </div></div>
         <div className="provider-actions">
           <button type="button" role="switch" aria-checked={collab} aria-label={t("协作模式")}

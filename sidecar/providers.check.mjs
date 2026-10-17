@@ -8,7 +8,7 @@
 //   4. 远程模型清单能加模型、但注不进 baseUrl(否则等于把 API Key 的去向交给一个远端 JSON)。
 import assert from "node:assert";
 import fs from "node:fs";
-import { envForModel, resolvedProvider, endpointsOf, variantsOf, isCnMachine, sanitizeCatalogModels, sanitizeClaudeCatalog, applyClaudeCatalog, collabOpts, PROVIDERS, capModelFamilies } from "./providers.mjs";
+import { envForModel, resolvedProvider, endpointsOf, variantsOf, isCnMachine, sanitizeCatalogModels, sanitizeClaudeCatalog, applyClaudeCatalog, collabOpts, effectiveDefault, defaultArg, visibleCatalog, PROVIDERS, capModelFamilies } from "./providers.mjs";
 
 // 协作模式:默认 Sonnet 主持 + Opus 顾问 + Haiku 子 agent;第三方 provider 与关闭开关时一律不插手
 let c = collabOpts("default", {});
@@ -21,6 +21,48 @@ assert.strictEqual(collabOpts("claude-sonnet-4-6", {}).settings.advisorModel, "o
 assert.deepStrictEqual(collabOpts("deepseek/deepseek-v4-pro", {}), { env: {} }, "第三方不插手");
 assert.deepStrictEqual(collabOpts("default", { collab: false }), { env: {} }, "开关关了不插手");
 console.log("✓ 协作模式就位");
+
+// 严格模式:后台配了 claude 组 → 默认模型 / 别名 / 顾问 / 子 agent / 后台小任务都只能是清单里没隐藏的
+{
+  const cat = (...ms) => ms.map((m) => (typeof m === "string" ? { model: m } : m));
+  const S = { claudeCatalog: cat("claude-fable-5-1", "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5",
+    { model: "claude-opus-4-8", hidden: true }, "claude-haiku-5-5", { model: "claude-haiku-4-5-20251001", hidden: true }) };
+  const vis = visibleCatalog(S);
+  assert.deepStrictEqual(vis.map((m) => m.value), ["claude-fable-5-1", "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5", "claude-haiku-5-5"]);
+  assert.strictEqual(effectiveDefault(vis, undefined), "claude-fable-5-1", "没设 = 清单第一条");
+  assert.strictEqual(effectiveDefault(vis, "claude-opus-5"), "claude-opus-5", "用户设的还在清单里 = 用它");
+  assert.strictEqual(effectiveDefault(vis, "claude-opus-4-8"), "claude-fable-5-1", "用户设的被隐藏了 = 回到清单第一条");
+  assert.strictEqual(effectiveDefault(vis, "claude-gone-1"), "claude-fable-5-1", "用户设的被删了 = 回到清单第一条");
+  assert.strictEqual(effectiveDefault(vis, "deepseek/deepseek-v4-pro"), "claude-fable-5-1", "用户默认是第三方 = default 行仍取清单第一条");
+
+  let k = collabOpts("default", S);
+  assert.strictEqual(k.main, "claude-fable-5-1", "default 不再被强制成 sonnet");
+  assert.strictEqual(k.settings, undefined, "主模型是 Fable,不挂 Opus 顾问");
+  assert.strictEqual(k.env.CLAUDE_CODE_SUBAGENT_MODEL, "claude-haiku-5-5");
+  assert.strictEqual(k.env.ANTHROPIC_DEFAULT_OPUS_MODEL, "claude-opus-5-5", "opus 别名钉到清单里第一个没隐藏的 opus,不是被隐藏的 4.8");
+  assert.strictEqual(k.env.ANTHROPIC_DEFAULT_SONNET_MODEL, "claude-sonnet-5");
+  assert.strictEqual(k.env.ANTHROPIC_DEFAULT_HAIKU_MODEL, "claude-haiku-5-5", "haiku 别名不能漏到被隐藏的 4.5");
+  assert.strictEqual(k.env.ANTHROPIC_SMALL_FAST_MODEL, "claude-haiku-5-5", "后台小任务也只用清单里的");
+  k = collabOpts("default", { ...S, defaultModel: "claude-sonnet-5" });
+  assert.strictEqual(k.main, "claude-sonnet-5"); assert.strictEqual(k.settings.advisorModel, "claude-opus-5-5", "顾问取清单里的 opus");
+  k = collabOpts("default", { ...S, collab: false });
+  assert.strictEqual(k.env.CLAUDE_CODE_SUBAGENT_MODEL, undefined, "协作关了不强制子 agent 模型"); assert.strictEqual(k.settings, undefined);
+  assert.strictEqual(k.env.ANTHROPIC_DEFAULT_HAIKU_MODEL, "claude-haiku-5-5", "但别名照样钉在清单里(不管开不开协作)");
+  k = collabOpts("claude-sonnet-5-5", S);
+  assert.strictEqual(k.main, "claude-sonnet-5-5", "老会话用着清单外的模型:不动它"); assert.strictEqual(k.env.ANTHROPIC_DEFAULT_OPUS_MODEL, "claude-opus-5-5");
+  const noHaiku = { claudeCatalog: cat("claude-opus-5-5", "claude-sonnet-5") };
+  k = collabOpts("default", noHaiku);
+  assert.strictEqual(k.main, "claude-opus-5-5"); assert.strictEqual(k.env.CLAUDE_CODE_SUBAGENT_MODEL, "claude-opus-5-5", "清单里没 haiku:退回主模型,不去碰清单外的");
+  assert.strictEqual(k.env.ANTHROPIC_SMALL_FAST_MODEL, "claude-opus-5-5");
+  k = collabOpts("default", { claudeCatalog: cat("claude-sonnet-5", "claude-haiku-5-5") });
+  assert.strictEqual(k.settings, undefined, "清单里没 opus:不挂顾问");
+  assert.deepStrictEqual(collabOpts("default", { claudeCatalog: cat({ model: "claude-opus-5-5", hidden: true }) }), collabOpts("default", {}), "清单全隐藏 = 当没配,行为同从前");
+  assert.deepStrictEqual(collabOpts("deepseek/deepseek-v4-pro", S), { env: {} }, "第三方不受清单影响");
+  assert.strictEqual(defaultArg(S), "claude-fable-5-1");
+  assert.strictEqual(defaultArg({}), "sonnet", "没清单:同从前(协作开着 = sonnet)");
+  assert.strictEqual(defaultArg({ collab: false }), undefined);
+  console.log("✓ 严格模式就位");
+}
 
 const keys = { providerKeys: { glm: "k", deepseek: "k" } };
 

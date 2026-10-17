@@ -251,7 +251,7 @@ export function sanitizeClaudeCatalog(list) {
 
 // 配了 claude 组时,Claude 菜单只留组里列出且没隐藏的,按组内顺序排。
 // default 一行照留(它是「跟随最新」的入口);会话正在用的那个也留,摘掉了模型条就只剩裸 id。
-const claudeBaseId = (m) => String(m?.resolvedModel || m?.model || m?.value || "").replace(/\[.*$/, "").replace(/-\d{8}$/, "");
+export const claudeBaseId = (m) => String(m?.resolvedModel || m?.model || m?.value || "").replace(/\[.*$/, "").replace(/-\d{8}$/, "");
 export function applyClaudeCatalog(rows, cat, cur) {
   const rank = new Map(cat.filter((m) => !m.hidden).map((m, i) => [claudeBaseId(m), i]));
   const curId = cur ? claudeBaseId({ value: cur }) : "";
@@ -259,6 +259,34 @@ export function applyClaudeCatalog(rows, cat, cur) {
   return rows
     .filter((m) => m.value === "default" || rank.has(claudeBaseId(m)) || (cur && (m.value === cur || claudeBaseId(m) === curId)))
     .sort((a, b) => pos(a) - pos(b));
+}
+
+// ---- 严格模式:后台配了 claude 组(且至少一条没隐藏)时,Claude 用到的模型必须全在清单里 ----
+// 不只是菜单:default 解析成谁、顾问/子 agent/后台小任务(标题、摘要)用谁、别名(opus/sonnet/haiku/fable)指向谁,
+// 都从清单里取。没配清单(或全隐藏了)时这套一律不启用,行为同从前。
+const famOf = (id) => /opus|sonnet|haiku|fable/i.exec(String(id ?? ""))?.[0].toLowerCase();
+export const visibleCatalog = (settings) => sanitizeClaudeCatalog(settings?.claudeCatalog).filter((m) => !m.hidden);
+// 默认模型:用户在客户端设的(settings.defaultModel)还在清单里且没隐藏就用它,否则回到清单里排第一的。
+export function effectiveDefault(vis, userDefault) {
+  return (vis.find((m) => m.value === userDefault) ?? vis[0])?.value;
+}
+// 别名钉到清单:按系列取清单里第一个没隐藏的;清单里没有这个系列就退回主模型,不去碰清单外的模型。
+function strictPins(vis, main) {
+  const pick = (fam) => vis.find((m) => famOf(m.value) === fam)?.value;
+  const fb = (fam) => pick(fam) ?? main;
+  return {
+    pins: {
+      ANTHROPIC_DEFAULT_OPUS_MODEL: fb("opus"), ANTHROPIC_DEFAULT_SONNET_MODEL: fb("sonnet"),
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: fb("haiku"), ANTHROPIC_DEFAULT_FABLE_MODEL: fb("fable"),
+      ANTHROPIC_SMALL_FAST_MODEL: fb("haiku"), // 后台小任务,不钉的话 CLI 自己去打清单外的 Haiku
+    },
+    haiku: fb("haiku"), opus: pick("opus"),
+  };
+}
+// 「default」背后实际跑谁(新建会话 / 切回默认时用)。严格模式取清单默认;否则同从前:协作开着是 Sonnet,关了交给 CLI。
+export function defaultArg(settings) {
+  const vis = visibleCatalog(settings);
+  return vis.length ? effectiveDefault(vis, settings.defaultModel) : collabOn("default", settings) ? COLLAB.main : undefined;
 }
 
 // 三层叠完后收尾:
@@ -444,6 +472,19 @@ export function isCnMachine(tz, lang) {
 export const COLLAB = { main: "sonnet", advisor: "opus", sub: "claude-haiku-5-5" };
 export const collabOn = (savedModel, settings) => settings.collab !== false && providerOf(savedModel) === "claude";
 export function collabOpts(savedModel, settings) {
+  const vis = providerOf(savedModel) === "claude" ? visibleCatalog(settings) : [];
+  if (vis.length) {
+    // 严格模式:主模型不再被强制成 Sonnet,就是用户选的(没选 = 清单默认);别名一律钉到清单里。
+    // 老会话用着清单外的模型时 main 仍是它自己,不动它。协作开关只管顾问 + 子 agent 要不要挂。
+    const main = !savedModel || savedModel === "default" ? effectiveDefault(vis, settings.defaultModel) : modelArg(savedModel);
+    const { pins, haiku, opus } = strictPins(vis, main);
+    if (settings.collab === false) return { main, env: pins };
+    return {
+      main,
+      env: { ...pins, CLAUDE_CODE_SUBAGENT_MODEL: haiku },
+      settings: opus && !/opus|fable/i.test(main) ? { advisorModel: opus } : undefined,
+    };
+  }
   if (!collabOn(savedModel, settings)) return { env: {} };
   const main = !savedModel || savedModel === "default" ? COLLAB.main : modelArg(savedModel);
   return {

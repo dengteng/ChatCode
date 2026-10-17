@@ -145,6 +145,7 @@
   "（图片）": "(image)",
   "本轮结束后执行": "Runs after this turn ends",
   "取消这条待发消息": "Cancel this queued message",
+  "不等后台任务，现在就发": "Send now, don't wait for the background task",
   "↑↓ 选择 · Tab 补全 · ⏎ 执行": "↑↓ select · Tab complete · ⏎ run",
   " · 当前": " · current",
   "模型列表加载中…": "Loading models…",
@@ -229,6 +230,9 @@
   "未配置": "Not configured",
   "更换": "Replace",
   "配置 key": "Configure key",
+  "添加厂商": "Add provider",
+  "选一家配 key 后会常驻在上面": "Pick one; once a key is set it stays listed above",
+  "选择厂商…": "Choose a provider…",
   "配置": "Configure",
   "清除": "Clear",
   "模型必须是 JSON 数组": "The models field must be a JSON array",
@@ -822,7 +826,7 @@
   "额度用尽后自动继续": "Auto-continue after usage limit",
   "额度恢复时自动接着跑": "Resume automatically when the limit resets",
   "协作模式": "Collaboration mode",
-  "Sonnet 主持写代码,Opus 当顾问(只在计划、卡住、收尾时被叫),子 agent 用 Haiku 去探索。只对 Claude 生效,对新起的会话生效;选了 Opus/Fable 当主模型时不挂 Opus 顾问": "Sonnet leads and writes code, Opus advises (called only when planning, stuck or finishing), sub-agents use Haiku to explore. Claude only; applies to new sessions. No Opus advisor when Opus/Fable is the main model.",
+  "Opus 当顾问(只在计划、卡住、收尾时被叫),子 agent 用 Haiku 去探索,模型都取自后台模型清单;主模型用你选的那个。没拿到后台清单时,还会让 Sonnet 当主模型。只对 Claude 生效,对新起的会话生效;选了 Opus/Fable 当主模型时不挂 Opus 顾问": "Opus advises (called only when planning, stuck or finishing) and sub-agents use Haiku to explore, both taken from the backend model list; the main model is the one you pick. Without the backend list, Sonnet also leads as the main model. Claude only; applies to new sessions. No Opus advisor when Opus/Fable is the main model.",
   "被中断的那一轮自动补发「继续」": "The interrupted turn gets a “Continue” sent for it",
   "模型列表": "Model list",
   "远程模型清单": "Remote model catalog",
@@ -887,5 +891,9 @@
   "{{ok}} 个项目已改存,{{n}} 个失败:{{dirs}}": "{{ok}} project(s) moved, {{n}} failed: {{dirs}}",
   "已应用到 {{ok}} 个项目": "Applied to {{ok}} project(s)",
   "所有项目的记忆都存到「根目录/项目名」下,一次配置全部生效;新开的项目会自动套用。选 Obsidian 库、iCloud、Dropbox 里的文件夹,就由同步盘负责传到其他电脑。其他电脑填同一个根目录名下的同名项目即可共用。": "Every project's memory is stored under \"root/project name\". Configure once and it applies to all projects, including ones opened later. Pick a folder in an Obsidian vault, iCloud or Dropbox and the sync service carries it to your other computers, where a project with the same name shares it.",
-  "选择或更改时,现有记忆会并进新位置,旧目录原样保留不删。项目已单独设过位置的,换根目录时也会改过去;清除根目录只是不再自动套用,各项目保持当前位置。": "When you pick or change the root, existing memory is merged into the new location and the old folder is kept. Projects with their own location are moved too when the root changes. Clearing the root only stops auto-applying; projects stay where they are."
+  "选择或更改时,现有记忆会并进新位置,旧目录原样保留不删。项目已单独设过位置的,换根目录时也会改过去;清除根目录只是不再自动套用,各项目保持当前位置。": "When you pick or change the root, existing memory is merged into the new location and the old folder is kept. Projects with their own location are moved too when the root changes. Clearing the root only stops auto-applying; projects stay where they are.",
+  "检测到 Obsidian 库": "Obsidian vaults found",
+  "使用这个库": "Use this vault",
+  "使用中": "In use",
+  "记忆会存到库里的 claude-memory 文件夹,同步由你在 Obsidian 里配的同步方式负责。": "Memory is stored in the vault's claude-memory folder; syncing is handled by whatever sync you set up in Obsidian."
 }

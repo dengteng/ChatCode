@@ -51,7 +51,9 @@ export interface SessionInfo {
 // "default" 解析成 claude-opus-4-8[1m](1M),而 "claude-fable-5[1m]" 反过来解析成不带 [1m] 的 claude-fable-5。
 // provider/model:非 Claude provider(DeepSeek 等)的模型才带,value 形如 "deepseek/deepseek-chat"。
 // vision: 该模型收不收图片。不写则按 provider 的声明来(见 canSendImage);设置里的模型表可手填覆盖。
-export interface ModelInfo { value: string; resolvedModel?: string; displayName: string; description?: string; provider?: string; model?: string; contextWindow?: number; vision?: boolean; supportedEffortLevels?: EffortLevel[] }
+export interface ModelInfo { value: string; resolvedModel?: string; displayName: string; description?: string; provider?: string; model?: string; contextWindow?: number; vision?: boolean; supportedEffortLevels?: EffortLevel[]; isDefault?: boolean }
+// isDefault:后台配了 claude 清单时,菜单里没有独立的 default 行,「默认」只是清单里某一条身上的标记(sidecar 定:用户设的,没设/被摘了就是清单第一条)。
+export const isDefaultRow = (m: ModelInfo) => m.value === "default" || !!m.isDefault;
 
 // effort 档位(SDK EffortLevel)。模型支持哪几档看 ModelInfo.supportedEffortLevels,没有 = 不支持 effort
 export const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
@@ -62,7 +64,13 @@ export function sessionModel(session: Session): ModelInfo | undefined {
   const m = session.info.model;
   // 走 modelInList 而不是自己再写一遍精确匹配:别名(opus[1m])、被去重掉的固定 id 都要能找回来。
   // 找不到的代价不只是名字难看 —— vision / contextWindow 都挂在这条上,查空会按 provider 默认拦图片。
-  return m ? modelInList(session.models, m) : session.models.find((x) => x.value === "default");
+  return m ? modelInList(session.models, m) : session.models.find(isDefaultRow);
+}
+
+// 「新会话默认模型」实际指列表里哪一条:用户存的那个还在列表里就是它;没选过、或已被后台摘了/隐藏了,就是标了默认的那条。
+export function homeModelRow(models: ModelInfo[], homeModel: string): ModelInfo | undefined {
+  const hit = homeModel && homeModel !== "default" ? modelInList(models, homeModel) : undefined;
+  return hit ?? models.find(isDefaultRow);
 }
 
 // 能不能往这个会话发图片。模型表里显式写了就听它的,否则看 provider 声明;都没有一律放行 ——
@@ -169,8 +177,11 @@ export interface ApiRetry { attempt: number; max: number; status: number | null 
 // 且按模型名分桶(子 agent 的 haiku 也占一桶),所以这里以模型 id 为准兜底。
 // info.model 只在 SDK init(首条消息后才发)才有值。空窗期回退到 models 列表的默认行,
 // 而不是干等显示"连接中"。有值时优先用列表里的 displayName,退回原始 id。
-function modelInList(models: ModelInfo[], modelValue: string): ModelInfo | undefined {
-  const hit = models.find((m) => m.value === modelValue || m.resolvedModel === modelValue || m.model === modelValue);
+export function modelInList(models: ModelInfo[], modelValue: string): ModelInfo | undefined {
+  // 老会话存的 "default":后台配了清单后菜单里没有独立的 default 行,它指的就是标了默认的那条 ——
+  // 不映射的话模型条 / 上下文窗口 / vision 全查空,底栏直接显示裸字 "default"。
+  const hit = models.find((m) => m.value === modelValue || m.resolvedModel === modelValue || m.model === modelValue)
+    ?? (modelValue === "default" ? models.find(isDefaultRow) : undefined);
   if (hit || !modelValue) return hit;
   // 精确匹配落空的常见原因:菜单已把同一个模型的多条入口去重(见 sidecar 的 dedupeModels),
   // 只剩别名那条,而老会话存的是被去掉的固定 id(claude-opus-5 / claude-haiku-4-5-20251001)。
@@ -191,7 +202,7 @@ function modelInList(models: ModelInfo[], modelValue: string): ModelInfo | undef
 export function modelLabel(session: Session): string {
   const byId = session.info.model ? modelInList(session.models, session.info.model) : undefined;
   if (session.info.model) return byId ? modelRow(session.models, byId).name : session.info.model;
-  const def = session.models.find((m) => m.value === "default") ?? session.models[0];
+  const def = session.models.find(isDefaultRow) ?? session.models[0];
   return def ? modelRow(session.models, def).name : "";
 }
 
@@ -250,7 +261,7 @@ export function modelProvider(m: ModelInfo): string {
 export function modelRow(models: ModelInfo[], m: ModelInfo): { name: string; note: string } {
   // 名字一律是纯模型名(modelName 对 default 也只给「Opus 5」),「默认」作为标注单独给出 ——
   // 菜单这一行是唯一需要区分"哪条是默认项"的地方,别的地方(模型条/气泡头)只想知道跑的是谁。
-  return { name: modelName(models, m).replace(/\s*[(（].*$/, "").trim(), note: m.value === "default" ? i18n.t("默认") : "" };
+  return { name: modelName(models, m).replace(/\s*[(（].*$/, "").trim(), note: isDefaultRow(m) ? i18n.t("默认") : "" };
 }
 
 // 某个具体模型 id → 展示名(如 "claude-opus-4-8" → "Opus 4.8"、"deepseek-v4-pro" → "DeepSeek V4 Pro")。
@@ -285,7 +296,7 @@ export function contextWindowOf(session: Session): number {
   // 而列表里的 value 带前缀("deepseek/deepseek-v4-pro")——加 m.model 匹配兜底。
   const cur = session.info.model
     ? modelInList(session.models, session.info.model)
-    : (session.models.find((m) => m.value === "default") ?? session.models[0]);
+    : (session.models.find(isDefaultRow) ?? session.models[0]);
   const id = cur?.resolvedModel ?? session.info.model ?? ""; // 列表还没到时退回 info.model
   // 列表里有窗口(我们自己维护的表,含 sidecar 给 SDK 模型补的)就以它为准;没有的才退回
   // 会话实时上报的 modelUsage。不取两者最大值 —— session.contextWindow 未拿到实时值前是 200k

@@ -134,6 +134,21 @@ export async function syncMemoryTo(cwd: string, root: string, name: string): Pro
 export const MEMORY_ROOT_KEY = "ChatCode-memory-sync-root";
 export const getMemoryRoot = () => localStorage.getItem(MEMORY_ROOT_KEY) ?? "";
 
+// Obsidian 自己记着所有库的位置(obsidian.json),设置里据此一键选用,不用用户自己找目录。最近用过的排前面。
+export const VAULT_MEMORY_DIR = "claude-memory"; // 库里放记忆的文件夹名
+export function parseObsidianVaults(raw: string): string[] {
+  try {
+    const vs = Object.values(JSON.parse(raw).vaults ?? {}) as { path?: string; ts?: number }[];
+    return vs.filter((v) => v.path).sort((a, b) => (b.ts ?? 0) - (a.ts ?? 0)).map((v) => v.path!.replace(/\/+$/, ""));
+  } catch { return []; }
+}
+export async function detectObsidianVaults(): Promise<string[]> {
+  const home = (await homeDir()).replace(/\/$/, "");
+  const paths = parseObsidianVaults(await readText(`${home}/Library/Application Support/obsidian/obsidian.json`));
+  const alive = await Promise.all(paths.map((p) => invoke<unknown[]>("read_dir_meta", { path: p }).then((r) => r.length > 0, () => false))); // 库目录已删的不列
+  return paths.filter((_, i) => alive[i]);
+}
+
 const rootApplied = new Set<string>(); // `${根目录}\n${cwd}`:本次运行已套过的,自动补套不重复读盘
 
 // 把全局根目录套到这批项目上(逐个走 syncMemoryTo:迁移现有记忆 + 写 autoMemoryDirectory)。

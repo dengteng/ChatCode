@@ -1,6 +1,6 @@
 // memory.ts 合并逻辑自检。跑法:
 //   npx esbuild src/memory.check.ts --bundle --format=esm | node --input-type=module
-import { mergeIndex, scanMemories } from "./memory";
+import { mergeIndex, scanMemories, parseObsidianVaults } from "./memory";
 
 let n = 0;
 const eq = (a: unknown, b: unknown, msg: string) => {
@@ -12,6 +12,10 @@ eq(mergeIndex("", "- [A](a.md) — x\n"), "- [A](a.md) — x\n", "目标为空:�
 eq(mergeIndex("- [A](a.md) — x\n", "- [A](a.md) — x\n"), "- [A](a.md) — x\n", "完全相同:原样不动");
 eq(mergeIndex("- [A](a.md) — x\n", "- [B](b.md) — y\n"), "- [A](a.md) — x\n- [B](b.md) — y\n", "两边各有一条:并集,目标在前");
 eq(mergeIndex("- [A](a.md) — x", "  - [A](a.md) — x  \n\n- [B](b.md) — y"), "- [A](a.md) — x\n- [B](b.md) — y\n", "去重忽略首尾空白,空行不搬");
+
+eq(parseObsidianVaults('{"vaults":{"a":{"path":"/v/old/","ts":1},"b":{"path":"/v/new","ts":9},"c":{"ts":5}}}'), ["/v/new", "/v/old"], "Obsidian 库:最近用的在前,去尾斜杠,没 path 的丢掉");
+eq(parseObsidianVaults("坏的"), [], "obsidian.json 坏了/不存在:空列表");
+eq(parseObsidianVaults("{}"), [], "没有 vaults 字段:空列表");
 
 // scanMemories 静默补索引:假 Tauri 后端(内存文件系统),invoke 走 window.__TAURI_INTERNALS__
 const fs = new Map<string, string>();

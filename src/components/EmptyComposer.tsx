@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { FolderOpen, ArrowUp, X, ChevronDown, Info, Folder, File, CornerLeftUp, Sparkles, History } from "lucide-react";
-import { BUILTIN_COMMANDS, modelName, modelRow, modelProvider, providerBrand } from "../types";
+import { BUILTIN_COMMANDS, modelName, modelRow, modelProvider, providerBrand, homeModelRow } from "../types";
 import { ModelLogo } from "./Avatar";
 import { useStore } from "../store";
 import { openImageWindow } from "../popout";
@@ -97,7 +97,7 @@ export function EmptyComposer() {
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
   }, [modelMenu, histOpen]);
-  const curModel = state.homeModels.find((m) => m.value === state.homeModel);
+  const curModel = homeModelRow(state.homeModels, state.homeModel);
   const modelText = curModel ? modelName(state.homeModels, curModel)
     : (state.homeModel === "default" ? t("默认模型") : state.homeModel);
 
@@ -364,14 +364,14 @@ export function EmptyComposer() {
                 {state.homeModels.map((m) => {
                   const row = modelRow(state.homeModels, m), prov = modelProvider(m);
                   return (
-                    <div key={m.value} className={`palette-item model-item ${m.value === state.homeModel ? "sel" : ""}`}
+                    <div key={m.value} className={`palette-item model-item ${m === curModel ? "sel" : ""}`}
                       title={m.description}
                       onMouseDown={(e) => { e.preventDefault(); setHomeModel(m.value); setModelMenu(false); }}>
                       <ModelLogo provider={prov} />
                       <span className="muted">{providerBrand(prov)} -</span>
                       <b className="model-name">{row.name}</b>
                       {row.note && <span className="muted">({row.note})</span>}
-                      {m.value === state.homeModel && <span className="muted">{t(" · 当前")}</span>}
+                      {m === curModel && <span className="muted">{t(" · 当前")}</span>}
                     </div>
                   );
                 })}

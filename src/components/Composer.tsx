@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Folder, File, CornerLeftUp, RotateCw, ChevronDown, X, Sparkles, Clock } from "lucide-react";
+import { Folder, File, CornerLeftUp, RotateCw, ChevronDown, X, Sparkles, Clock, Send } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Session } from "../types";
 import { BUILTIN_COMMANDS, EFFORT_LEVELS, type EffortLevel, modelLabel, modelRow, modelProvider, providerBrand, contextWindowOf, canSendImage, sessionProvider, sessionModel, shortModelName } from "../types";
@@ -211,7 +211,7 @@ function scoreEntry(e: FileEntry, q: string): number {
 // a: 输入区是 contentEditable —— 图片以内联标签插在光标处,和文本混排,方向键可在其间移动
 export function Composer({ session }: { session: Session }) {
   const { t } = useTranslation();
-  const { state, sendMessage, respondPermission, interrupt, runTerminal, reopenSession, setModel, clearContext, requestModels, setPermissionPreset, dispatch, enqueuePending, cancelPending, cancelQueued, setEffort } = useStore();
+  const { state, sendMessage, respondPermission, interrupt, runTerminal, reopenSession, setModel, clearContext, requestModels, setPermissionPreset, dispatch, enqueuePending, cancelPending, sendPendingNow, cancelQueued, setEffort } = useStore();
   const edRef = useRef<HTMLDivElement>(null);
   const imgData = useRef(new Map<string, Img>()); // chip id -> 图片数据
   const idc = useRef(0);
@@ -612,13 +612,8 @@ export function Composer({ session }: { session: Session }) {
   const usage = sessionProvider(session) === "kimi" ? state.usageKimi : state.usage;
   const limitResetAt = rollReset(usage.session.resetAt, "5h");
 
-  // 模型菜单的行:原列表一条不动(顺序、条目都保持),把当前选中的那条**复制**一份钉在最前面。
-  // 不是"把它挪上去":挪的话列表会随选择变形,用户记的位置每次都不一样;而且当前模型可能压根不在
-  // 可见区(列表长、选中项滚在屏幕外),第一眼看不到自己在用谁。
-  const menuModels = useMemo(() => {
-    const cur = sessionModel(session);
-    return cur ? [cur, ...session.models] : session.models;
-  }, [session.models, session.info.model]);
+  // 模型菜单的行 = 原列表,每个模型只出现一次(「默认」「当前」都只是挂在某一行上的标记,不再另复制一行)。
+  const menuModels = session.models;
 
   // effort 档位。levels 空 = 当前模型不支持 effort(第三方/haiku),档位行和标签都不出。
   // 标签显示 CLI 实际发的档位:自动档显示「自动 high」(plan 模式下会是 xhigh);
@@ -646,7 +641,7 @@ export function Composer({ session }: { session: Session }) {
     // 每次打开都刷新:运行中会话的列表是启动快照,用户后来改 settings 新增/改窗口的模型不在其中
     // (症状:切到新模型后名字显示原始 id、上下文窗口回退 200k)。重拉即更新 session.models。
     requestModels(session.id);
-    setPalIdx(0);
+    setPalIdx(Math.max(0, menuModels.findIndex((m) => m === sessionModel(session)))); // 光标落在当前模型上
     setModelMenu(true);
   }
 
@@ -1316,6 +1311,12 @@ export function Composer({ session }: { session: Session }) {
               {p.at
                 ? <span className="pending-note">{t("{{clock}} 发出", { clock: clockOf(p.at) })}</span>
                 : /^\/\S+$/.test(p.text.trim()) && <span className="pending-note">{t("本轮结束后执行")}</span>}
+              {/* 立即发送:只在模型没在说话、也没在压缩时给(即后台任务续跑等待 / 定时未到点)。
+                  压缩中插一轮压缩就白做;斜杠命令不给 —— CLI 这时会把它当纯文本吃掉(见 store 的 compact_settle 注释) */}
+              {session.status !== "running" && !compacting && !/^\/\S+$/.test(p.text.trim()) && (
+                <button className="pending-cancel" title={t("不等后台任务，现在就发")}
+                  onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); sendPendingNow(session.id, p.pid); } }}><Send size={13} /></button>
+              )}
               <button className="pending-cancel" title={t("取消这条待发消息")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); cancelPending(session.id, p.pid); } }}><X size={13} /></button>
             </div>
           ))}
@@ -1365,8 +1366,7 @@ export function Composer({ session }: { session: Session }) {
             </div>
           )}
           <div className="palette-scroll">
-            {/* 一条一行:logo + 厂商 + 模型名(含版本号)+ 括号补充。完整 description 留在 title 里。
-                第 0 行是当前模型的副本(见 menuModels),和原列表里那条指向同一个 value,选哪个都一样 */}
+            {/* 一条一行:logo + 厂商 + 模型名(含版本号)+ 括号补充。完整 description 留在 title 里。 */}
             {menuModels.map((m, i) => {
               const row = modelRow(session.models, m), prov = modelProvider(m);
               return (
@@ -1379,8 +1379,7 @@ export function Composer({ session }: { session: Session }) {
                   <span className="muted">{providerBrand(prov)} -</span>
                   <b className="model-name">{row.name}</b>
                   {row.note && <span className="muted">({row.note})</span>}
-                  {/* 按对象身份比,不比 value:info.model 存的可能是别名(opus[1m])或被去重掉的固定 id,
-                      比字符串会漏标。钉在最前面那条和原列表里的是同一个对象,两处都会带上「当前」 */}
+                  {/* 按对象身份比,不比 value:info.model 存的可能是别名(opus[1m])或被去重掉的固定 id,比字符串会漏标 */}
                   {m === sessionModel(session) && <span className="muted">{t(" · 当前")}</span>}
                 </div>
               );

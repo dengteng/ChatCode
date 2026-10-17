@@ -2,7 +2,7 @@
 // 前端(浏览器/Tauri webview)连 ws://127.0.0.1:8975,每个 session 独立跑一个 SDK query,天然支持并行任务。
 import { WebSocketServer } from "ws";
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { PROVIDERS, providerOf, modelArg, envForModel, COLLAB, collabOn, collabOpts, extraModels, resolvedProvider, endpointsOf, variantsOf, setProxyPort, isCnMachine, sanitizeCatalogModels, sanitizeClaudeCatalog, applyClaudeCatalog, capModelFamilies } from "./providers.mjs";
+import { PROVIDERS, providerOf, modelArg, envForModel, COLLAB, collabOn, collabOpts, extraModels, resolvedProvider, endpointsOf, variantsOf, setProxyPort, isCnMachine, sanitizeCatalogModels, sanitizeClaudeCatalog, applyClaudeCatalog, visibleCatalog, effectiveDefault, defaultArg, claudeBaseId, capModelFamilies } from "./providers.mjs";
 import { accumulate, emptySpend, priceTable, ledgerAdd, ledgerStats } from "./spend.mjs";
 import { startProxy } from "./openai-proxy.mjs";
 import { capToolResults } from "./logcap.mjs";
@@ -1260,6 +1260,7 @@ const EN_DICT = {
   "错误: {{err}}": "Error: {{err}}",
   "{{title}}：Agent 请求执行 {{tool}}": "{{title}}: agent requests to run {{tool}}",
   "{{title}} 已完成": "{{title}} finished",
+  "模型正在回复,这条等本轮结束会自动发出": "The model is still replying; this message goes out automatically when the turn ends",
 };
 function tr(s, params) {
   let out = LANG === "en" && EN_DICT[s] ? EN_DICT[s] : s;
@@ -1453,7 +1454,21 @@ async function reportModels(ws, sessionId, q) {
   // 广播而非单播:改 settings/key 或重开会话时,所有客户端(桌面/手机)的该会话列表都同步更新,
   // 不再只发给触发的那个连接 —— 否则别的端一直用旧快照(kimi 新增模型选了却显示旧窗口)。
   const cur = loadIndex().find((e) => e.id === sessionId)?.model;
-  const claudeRows = cat.length ? applyClaudeCatalog([...shown, ...manual], cat, cur) : [...shown, ...manual];
+  // 严格模式(清单里至少一条没隐藏):菜单就是清单本身,每个模型只出现一次,按清单顺序;
+  // SDK 的别名行(default / opus[1m] / sonnet…)一律不要 —— 它们会和清单行指向同一个模型,
+  // 又冒出一条名字一模一样的。「默认」只是给其中一条打个 isDefault 标记(用户设的,没设或被摘了就是清单第一条)。
+  const strict = visibleCatalog(loadSettings()).length > 0;
+  let claudeRows;
+  if (strict) {
+    const def = effectiveDefault(visibleCatalog(loadSettings()), loadSettings().defaultModel);
+    claudeRows = manualModels.map((m) => (m.value === def ? { ...m, isDefault: true } : m));
+    // 会话正在用、却已不在清单里的(后来被摘了/隐藏了):留着,别让人在菜单里找不到自己在用谁
+    const curId = cur && cur !== "default" ? claudeBaseId({ value: cur }) : "";
+    if (curId && !claudeRows.some((m) => claudeBaseId(m) === curId)) {
+      const curRow = [...shown, ...CLAUDE_MANUAL_MODELS].find((m) => m.value !== "default" && (m.value === cur || claudeBaseId(m) === curId));
+      if (curRow) claudeRows.push(curRow);
+    }
+  } else claudeRows = cat.length ? applyClaudeCatalog([...shown, ...manual], cat, cur) : [...shown, ...manual];
   // 配了 claude 组就不再按系列截前 3 个:留哪些已经由后台说了算
   broadcast({ type: "models", sessionId, models: capModelFamilies(dedupeModels([...claudeRows, ...extraModels(loadSettings())]), cat.length ? Infinity : 3, cur ? [cur] : []).map((m) => ({
     ...m, description: m.value === "default" && collabOn("default", loadSettings()) ? tr("Sonnet 5.5 主持 · Opus 顾问 · Haiku 子 agent") : localizeModelDesc(m.description),
@@ -3029,6 +3044,29 @@ wss.on("connection", (ws) => {
         broadcastMsgQueue(m.sessionId, sess);
         break;
       }
+      // 手机排队条上的「立即发送」:不等到点 / 不等出队,现在就把这条送进去。模型正在说话时不放 ——
+      // 会并进当前这一轮;那时的待发本轮跑完就自动出队,不用急。会话不在内存里(定时孤儿)也能发:
+      // deliverUserMessage 会按 index 记录把会话拉起来。
+      case "send_queued_now": {
+        const sess = sessions.get(m.sessionId);
+        if (!sess) {
+          const items = timedOrphans.get(m.sessionId) ?? [];
+          const i = items.findIndex((x) => x.pid === m.pid);
+          if (i < 0) return;
+          const [next] = items.splice(i, 1);
+          if (!items.length) timedOrphans.delete(m.sessionId);
+          saveTimed();
+          deliverUserMessage(null, next.m);
+          break;
+        }
+        if (sess.running) { send(ws, { type: "system_note", sessionId: m.sessionId, text: tr("模型正在回复,这条等本轮结束会自动发出") }); break; }
+        const i = sess.msgQueue.findIndex((x) => x.pid === m.pid);
+        if (i < 0) return;
+        const [next] = sess.msgQueue.splice(i, 1);
+        broadcastMsgQueue(m.sessionId, sess);
+        deliverUserMessage(null, next.m);
+        break;
+      }
       // 桌面前端的待发队列是纯前端状态(不进 sess.msgQueue —— 它那套出队要处理后台任务续跑等边界),
       // 手机看不到。这里纯转发它的队列快照给别端只读显示,不存:发送方自己有真实状态,存了反而要
       // 处理它断线后的清理。手机排的走 sess.msgQueue(broadcastMsgQueue),两条通路不重叠。
@@ -3099,6 +3137,14 @@ wss.on("connection", (ws) => {
         );
         break;
       }
+      case "set_default_model": {
+        // 客户端「新会话默认模型」变了:存进 sidecar,菜单里的「默认」标记和新会话的 default 都跟着它走。
+        // 不存无效值:空 / "default" = 用户没自己选过,回到清单里排第一的。
+        const s0 = loadSettings(), { defaultModel: _old, ...rest } = s0;
+        const next = typeof m.model === "string" && m.model && m.model !== "default" ? { ...rest, defaultModel: m.model } : rest;
+        if (next.defaultModel !== s0.defaultModel) saveSettings(next);
+        break;
+      }
       case "get_models": {
         reportModels(ws, m.sessionId, sessions.get(m.sessionId)?.q);
         // 顺手看一眼远程清单。打开模型菜单是唯一能确定「用户此刻正在挑模型」的时机,
@@ -3139,7 +3185,7 @@ wss.on("connection", (ws) => {
           // 被拒不能吞:协作模式挂着 advisor 时,CLI 对它模型目录里没有的 id(如 claude-haiku-5-5)会拒绝 setModel,
           // 而同一个 id 用 --model 启动却能跑。吞掉的话界面显示已切换,下一轮照旧是老模型。
           // 改为下一条消息前 resume 重启(spawnAgent 从 index 读新模型进 options),上下文不丢。
-          sess?.q?.setModel?.(m.model === "default" ? (collabOn(m.model, loadSettings()) ? COLLAB.main : undefined) : modelArg(m.model))?.then?.(
+          sess?.q?.setModel?.(m.model === "default" ? defaultArg(loadSettings()) : modelArg(m.model))?.then?.(
             () => { sess.modelRestart = false; syncEffort(sess, m.sessionId); },
             (e) => {
               console.error(`[model] setModel(${m.model}) 被拒,下一条消息前重启 query: ${String(e?.message || e).slice(0, 200)}`);

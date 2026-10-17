@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useReducer, useRef, useS
 import { flushSync } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import type { AccountUsage, AuthStatus, ClosedEntry, EffortLevel, GitCommitDetail, GitDiffData, GitInfo, GitLogData, IndexEntry, LimitUsage, ModelInfo, PermissionSuggestion, ResumeChoice, SearchResult, Session, SessionGroup, SessionInfo, Spend, SshHost, TimelineItem, Wallet } from "./types";
-import { sessionProvider, modelName, modelLabel } from "./types";
+import { sessionProvider, modelName, modelLabel, modelInList } from "./types";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { toast, dismissToast } from "./components/Toast";
 import i18n, { getLang } from "./i18n";
@@ -752,6 +752,7 @@ interface Api {
   // at:定时发送的时刻(ms),到点前不出队;不给就是普通排队(agent 一空闲就发)
   enqueuePending: (id: string, item: { blocks: any[]; text: string; html?: string; imgs?: Record<string, { media_type: string; data: string }>; at?: number }) => boolean;
   cancelPending: (id: string, pid: string) => void;
+  sendPendingNow: (id: string, pid: string) => void;   // 跳过出队闸(后台任务续跑等待 / 定时未到点),立刻发出这条待发
   cancelQueued: (id: string, pid: string) => void; // 取消 sidecar 队列里的待发(额度续跑 / 手机排的)
   setCollab: (on: boolean) => void; // 协作模式开关(存 sidecar,对之后新起的会话生效)
   setAutoResume: (on: boolean) => void; // 额度恢复时自动接着跑(存 sidecar)
@@ -840,6 +841,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initial);
   const wsRef = useRef<WebSocket | null>(null);
   const stateRef = useRef(state);
+  // 新会话用哪个模型:用户存的默认模型。没选过,或已被后台清单摘了/隐藏了(列表里找不到),都回到 default(= 清单默认)。
+  // 列表还没到时(homeModels 为空)没法判断,原样放行。老会话不走这里,不受影响。
+  const homeModelArg = (): string | undefined => {
+    const { homeModel, homeModels } = stateRef.current;
+    if (!homeModel || homeModel === "default") return undefined;
+    return !homeModels.length || modelInList(homeModels, homeModel) ? homeModel : undefined;
+  };
   stateRef.current = state;
   // commit 自动总结的待响应 promise(按 sessionId 存,一个会话同时最多一个弹窗)
   const commitWaiters = useRef(new Map<string, { resolve: (s: string) => void; reject: (e: Error) => void }>());
@@ -1037,8 +1045,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             // 首页选的模型要立刻落进 info.model(同 reopenSession 的做法)。不落的话这里是空,
             // 随后 sdk_init 只回裸 id(deepseek-v4-flash),sdk_init 里那个"带斜杠才保留"的判断就守不住,
             // provider 归属丢失 → sessionProvider 兜底判成 claude → DeepSeek 会话也显示 5h/周用量条。
-            const homeModel = stateRef.current.homeModel;
-            if (homeModel && homeModel !== "default") sess.info.model = homeModel;
+            const homeModel = homeModelArg();
+            if (homeModel) sess.info.model = homeModel;
             const fromEmpty = !!pendingFirst.current; // 这条会话来自空态输入框(有暂存的首条消息)
             // 空态 → 会话:让空态输入框"变形扩宽"成会话输入框。用浏览器原生 View Transition(合成器 morph,
             // 不动 width、不 layout thrashing),两个输入框共享 view-transition-name 由浏览器配对插值。
@@ -1199,11 +1207,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     startSessionWithMessage(cwd, blocks) {
       const base = cwd.trim();
       pendingFirst.current = blocks;
-      const model = stateRef.current.homeModel;
-      api.createSession(base, null, undefined, null, !base, model && model !== "default" ? model : undefined); // 无目录 = 闲聊会话
+      api.createSession(base, null, undefined, null, !base, homeModelArg()); // 无目录 = 闲聊会话
     },
-    requestHomeModels() { send({ type: "get_models", sessionId: HOME_MODELS_ID }); },
-    setHomeModel(model) { dispatch({ type: "set_home_model", model }); },
+    // sidecar 要知道用户的默认模型:菜单里的「默认」标记、新会话的 default 都由它定。先告知再要列表,列表里的标记才是新的
+    requestHomeModels() { send({ type: "set_default_model", model: stateRef.current.homeModel }); send({ type: "get_models", sessionId: HOME_MODELS_ID }); },
+    setHomeModel(model) { dispatch({ type: "set_home_model", model }); send({ type: "set_default_model", model }); send({ type: "get_models", sessionId: HOME_MODELS_ID }); },
     setHomeEffort(effort) { dispatch({ type: "set_home_effort", effort }); },
     setEffort(id, effort) {
       dispatch({ type: "patch", id, patch: { effort } }); // 乐观更新;sidecar 读回 CLI 实际档位后广播 effort 对齐
@@ -1275,6 +1283,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setCollab(on) { send({ type: "set_collab", on }); },
     cancelPending(id, pid) {
       dispatch({ type: "remove_pending", id, pid });
+    },
+    // 后台任务挂着时 CLI 其实是空闲的,后台任务是它的子进程,插一轮进去不会杀掉它 —— 出队闸(bgWait)拦的是
+    // "跑完后再做 X"这种排法,想现在就问进度的,点一下按钮直接放行。模型正在说话时不放:会并进当前轮。
+    sendPendingNow(id, pid) {
+      const s = stateRef.current.sessions[id];
+      const p = s?.pending?.find((x) => x.pid === pid);
+      if (!p || s?.status === "running") return;
+      dispatch({ type: "remove_pending", id, pid });
+      api.sendMessage(id, p.blocks, { html: p.html, imgs: p.imgs });
     },
     respondPermission(id, requestId, behavior, message, remember) {
       // message:deny 时回给 agent 的文本(AskUserQuestion 用它把用户的选择传回)
