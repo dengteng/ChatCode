@@ -284,16 +284,23 @@
     ],
     "gemini": [
       {
-        "model": "gemini-2.5-pro",
-        "displayName": "Gemini 2.5 Pro",
-        "description": "gemini-2.5-pro · 最强",
-        "contextWindow": 1000000
+        "model": "gemini-4-argon",
+        "displayName": "Gemini 4 Argon",
+        "description": "gemini-4-argon · 最强",
+        "contextWindow": 1048576
       },
       {
         "model": "gemini-3.8-flash",
         "displayName": "Gemini 3.8 Flash",
         "description": "gemini-3.8-flash · 快",
         "contextWindow": 1048576
+      },
+      {
+        "model": "gemini-2.5-pro",
+        "displayName": "Gemini 2.5 Pro",
+        "description": "gemini-2.5-pro · 最强",
+        "contextWindow": 1000000,
+        "hidden": true
       },
       {
         "model": "gemini-2.5-flash",
