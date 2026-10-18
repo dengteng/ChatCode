@@ -3,7 +3,7 @@
 #
 # 需要的 Secrets(Settings → Secrets and variables → Actions):
 #   TT_NOTIFY_KEY     tt-center 的机器 key,scopes 要含 cron、chatcode、llm:deepseek(DeepSeek key 从它现领)、
-#                     model-catalog(合并后 catalog-sync.yml 用它把改动同步进后台清单)
+#                     model-catalog(合并后 catalog-sync.yml 用它把改动同步进后台清单;Claude 新模型也用它直接写进后台)
 # 还要在 Settings → Actions → General 勾上「Allow GitHub Actions to create and approve pull requests」。
 name: model-watch
 
@@ -40,16 +40,18 @@ jobs:
             -d '{"slug":"chatcode.model-watch","event":"start","name":"ChatCode 模型巡检","schedule":"0 1 * * *","tz":"UTC","graceMin":240}' \
             "$TT/api/cron/ping" || true
 
-      # 上一个 PR 还没处理,就先不跑:免得把人还没看的改动覆盖掉
-      - name: 有没处理的 PR 就跳过
+      # 上一个 PR 还没处理,第三方就先不对比(脚本里判):免得把人还没看的改动覆盖掉。Claude 那路照跑
+      - name: 有没有没处理的 PR
         id: open
         env:
           GH_TOKEN: ${{ github.token }}
         run: echo "count=$(gh pr list --head "$BRANCH" --state open --json number -q length)" >> "$GITHUB_OUTPUT"
 
+      # Claude 那路有变化会直接 POST 给 tt-center 写进后台 claude 组(TT_KEY 要带 model-catalog scope)
       - name: 对比 models.dev
         id: diff
-        if: steps.open.outputs.count == '0'
+        env:
+          OPEN_PRS: ${{ steps.open.outputs.count }}
         run: node scripts/model-watch.mjs model-watch-report.json "$RUNNER_TEMP/seen.json"
 
       # 模型走 DeepSeek 的 Anthropic 兼容端点。key 不存 GitHub,每次从 tt-center 现领
@@ -145,10 +147,8 @@ jobs:
         # 模型名来自 models.dev(外部数据),走 env 传,不直接拼进脚本
         env:
           DETAIL: ${{ steps.diff.outputs.detail }}
-          OPEN_PRS: ${{ steps.open.outputs.count }}
         run: |
           ev=$([ "${{ job.status }}" = success ] && echo ok || echo fail)
-          [ -n "$DETAIL" ] || [ "${OPEN_PRS:-0}" = 0 ] || DETAIL="上次的模型巡检 PR 还没处理,本轮跳过对比"
           jq -n --arg ev "$ev" --arg out "$DETAIL $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
             '{slug:"chatcode.model-watch", event:$ev, schedule:"0 1 * * *", tz:"UTC", output:$out}' |
             curl -s -m 10 -o /dev/null -H "x-notify-key: $TT_KEY" -H 'content-type: application/json' -d @- "$TT/api/cron/ping" || true

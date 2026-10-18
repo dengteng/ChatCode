@@ -30,3 +30,21 @@ assert.ok(r.seen.deepseek.includes("deepseek-new"), "报过的进已见表");
 const again = diff(ours, md, r.seen, "2026-10-05");
 assert.equal(again.added.deepseek, undefined, "报过一次就不再报");
 console.log("✓ model-watch diff");
+
+// Claude 一路:对比对象是后台 claude 组;库里没有 claude 组时不管
+{
+  const { CLAUDE_SOURCE, claudeOurs, claudeRow } = await import("./model-watch.mjs");
+  assert.equal(claudeOurs({ providers: { deepseek: [] } }), null, "后台没有 claude 组就不对比");
+  const ours = claudeOurs({ providers: { claude: [{ model: "claude-sonnet-5" }, { model: "claude-old", hidden: true }] } });
+  const md = { anthropic: { models: {
+    a: m("claude-sonnet-5-5", { name: "Claude Sonnet 5.5", limit: { context: 1000000 }, modalities: { input: ["text", "image"], output: ["text"] } }),
+    b: m("claude-sonnet-5", { status: "deprecated" }),
+    c: m("claude-gone-before"),
+  } } };
+  const c = diff(ours, md, { claude: ["claude-gone-before"] }, "2026-10-18", CLAUDE_SOURCE);
+  assert.deepEqual(c.added.claude.map(claudeRow), [{ model: "claude-sonnet-5-5", displayName: "Sonnet 5.5", contextWindow: 1000000, vision: true }]);
+  assert.deepEqual(c.retired.claude.map((x) => x.id), ["claude-sonnet-5"], "弃用的设隐藏;已隐藏的不报");
+  assert.equal(c.added.claude.some((x) => x.id === "claude-gone-before"), false, "见过的(后台删过的)不再加回来");
+  assert.equal(c.added.deepseek, undefined, "Claude 那一路不碰第三方");
+  console.log("✓ model-watch claude");
+}

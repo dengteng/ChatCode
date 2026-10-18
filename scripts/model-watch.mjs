@@ -34,6 +34,26 @@ export const SOURCES = {
   gemini: { from: ["google"] },
 };
 
+// Claude 单独一路:菜单在 tt-center 后台「模型清单」的 claude 组,providers.mjs 里没有,开不了 PR。
+// 对比对象换成后台那组(公开下发接口读),新模型 / 该下架的直接 POST 给 tt-center 写进去(新的默认显示,下架的只设隐藏)。
+export const CLAUDE_SOURCE = { claude: { from: ["anthropic"] } };
+const TT = process.env.TT || "https://api.dengteng.xyz";
+
+// 后台 claude 组 → oursOf 同样的形状。库里还没存清单(没有 claude 组)返回 null:那时 Claude 菜单走 SDK,不归巡检管
+export function claudeOurs(catalog) {
+  const list = catalog?.providers?.claude;
+  if (!Array.isArray(list) || !list.length) return null;
+  return { claude: { all: new Set(list.map((m) => m.model)), hidden: new Set(list.filter((m) => m.hidden).map((m) => m.model)) } };
+}
+
+// models.dev 的条目 → 后台清单的一行。名字去掉 "Claude " 前缀,和菜单里「Opus 5.5」的叫法一致
+export const claudeRow = (m) => ({
+  model: m.id,
+  displayName: String(m.name || m.id).replace(/^Claude\s+/i, ""),
+  ...(m.context ? { contextWindow: m.context } : {}),
+  vision: !!m.vision,
+});
+
 // 能当 ChatCode 对话模型的:会调工具、只出文字。生图 / 语音 / 向量模型接进来也用不了。
 const usable = (m) => m?.tool_call === true && JSON.stringify(m?.modalities?.output || ["text"]) === '["text"]';
 
@@ -67,10 +87,10 @@ const brief = (m) => ({
 });
 
 // 纯函数,方便 check。md = models.dev 的 api.json;seen = { provider: [id…] };today = "YYYY-MM-DD"
-export function diff(ours, md, seen, today) {
+export function diff(ours, md, seen, today, sources = SOURCES) {
   const since = new Date(Date.parse(today) - RECENT_DAYS * 86400_000).toISOString().slice(0, 10);
   const added = {}, retired = {}, nextSeen = {};
-  for (const [id, src] of Object.entries(SOURCES)) {
+  for (const [id, src] of Object.entries(sources)) {
     const theirs = new Map();
     for (const pid of src.from) {
       for (const m of Object.values(md?.[pid]?.models || {})) {
@@ -107,16 +127,47 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (!r.ok) throw new Error(`models.dev HTTP ${r.status}`);
   const md = await r.json();
   const seen = fs.existsSync(SEEN_FILE) ? JSON.parse(fs.readFileSync(SEEN_FILE, "utf8")) : {};
-  const { added, retired, seen: next } = diff(oursOf(), md, seen, new Date().toISOString().slice(0, 10));
+  const today = new Date().toISOString().slice(0, 10);
+  const n = (o) => Object.values(o).reduce((s, l) => s + l.length, 0);
+  const names = (o) => Object.entries(o).map(([id, l]) => `${id}: ${l.map((m) => m.id).join(", ")}`);
+  const notes = [];
+
+  // 第三方:上个 PR 还没处理(OPEN_PRS > 0)就不对比,免得把人还没看的改动覆盖掉;已见表原样留着
+  let added = {}, retired = {}, next = { ...seen };
+  if (+(process.env.OPEN_PRS || 0) > 0) notes.push("上次的模型巡检 PR 还没处理,第三方本轮跳过对比");
+  else {
+    const d = diff(oursOf(), md, seen, today);
+    added = d.added; retired = d.retired; next = { ...seen, ...d.seen }; // d.seen 只有第三方几家,claude 那项在下面另算
+  }
+
+  // Claude:和 PR 无关,每轮都对比,有变化直接写进后台。写失败就抛错(心跳报失败),已见表也不会更新,下轮重试
+  const cat = await fetch(`${TT}/api/public/model-catalog?project=chat-code`, { signal: AbortSignal.timeout(30_000) }).then((x) => x.ok ? x.json() : null).catch(() => null);
+  const ours = claudeOurs(cat);
+  if (!ours) notes.push("Claude:后台还没有 claude 组(或清单拉不到),本轮不对比");
+  else {
+    const c = diff(ours, md, seen, today, CLAUDE_SOURCE);
+    next.claude = c.seen.claude;
+    const add = (c.added.claude || []).map(claudeRow), hide = (c.retired.claude || []).map((x) => x.id);
+    if (add.length || hide.length) {
+      if (!process.env.TT_KEY) throw new Error("Claude 有变化但没有 TT_KEY,写不进后台");
+      const res = await fetch(`${TT}/api/model-catalog/claude?project=chat-code`, {
+        method: "POST", headers: { "x-notify-key": process.env.TT_KEY, "content-type": "application/json" },
+        body: JSON.stringify({ add, hide }), signal: AbortSignal.timeout(30_000),
+      });
+      if (!res.ok) throw new Error(`Claude 写进后台失败:HTTP ${res.status} ${await res.text()}`);
+      const got = await res.json();
+      notes.push(`Claude 已写进后台(新的直接显示,下架的设隐藏):${(got.changes || []).join(", ") || "无改动"}`);
+    }
+  }
+
   fs.writeFileSync(reportFile, JSON.stringify({ added, retired }, null, 2) + "\n");
   fs.writeFileSync(seenOut, JSON.stringify(next, null, 2) + "\n");
-  const n = (o) => Object.values(o).reduce((s, l) => s + l.length, 0);
   console.log(`新模型 ${n(added)} 个,该下架 ${n(retired)} 个`);
-  const names = (o) => Object.entries(o).map(([id, l]) => `${id}: ${l.map((m) => m.id).join(", ")}`);
   for (const s of names(added)) console.log(`  + ${s}`);
   for (const s of names(retired)) console.log(`  - ${s}`);
+  for (const s of notes) console.log(`  ${s}`);
   // detail 给 tt-center 心跳看(网页、手机的定时任务明细都直接显示它):带上模型名,不用再翻 Actions 日志。
-  // summary 仍只是计数,PR 标题用它,不让一长串名字撑爆标题。
-  const detail = [`新模型 ${n(added)} 个,该下架 ${n(retired)} 个`, ...names(added).map((s) => `+ ${s}`), ...names(retired).map((s) => `- ${s}`)].join("; ");
+  // summary 仍只是计数,PR 标题用它,不让一长串名字撑爆标题。changed 只看第三方:Claude 已经写完,不走 PR
+  const detail = [`新模型 ${n(added)} 个,该下架 ${n(retired)} 个`, ...names(added).map((s) => `+ ${s}`), ...names(retired).map((s) => `- ${s}`), ...notes].join("; ");
   if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `changed=${n(added) + n(retired) > 0}\nsummary=新模型 ${n(added)} 个,该下架 ${n(retired)} 个\ndetail=${detail}\n`);
 }
