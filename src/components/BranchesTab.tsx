@@ -467,9 +467,9 @@ function BranchSpine({ local, remote, remoteSha, remotes, pushSpecs, current, fo
   useLayoutEffect(measure);
   const b = local.find((x) => x.name === focus);
   const isCur = focus === current;
-  // 顶排顺序:main → 其余按名排。**不掺当前分支** —— 切一次分支就整排重洗的话,
-  // 刚点的那个标签会从手指底下跑到最左边,下一次要点谁得重新找。位置固定,肌肉记忆才立得住。
-  const rank = (x: GitBranch) => (x.name === "main" ? 0 : 1);
+  // 顶排顺序:main → 当前分支 → 其余按名排。当前分支固定第二格(就是 main 时它占第一格):
+  // 分支一多,当前那条按名排会被挤到横向滚动区外面,一眼看不到自己在哪条上。没有 main 时当前分支排第一。
+  const rank = (x: GitBranch) => (x.name === "main" ? 0 : x.name === current ? 1 : 2);
   const localSorted = [...local].sort((x, y) => rank(x) - rank(y) || x.name.localeCompare(y.name));
   // 上游那条 lane 同理排最左:它是当前分支真正映射到的远程分支,和上面第一格的 chip 对齐着读。
   // sort 稳定,其余远端保持 remotes 的原顺序。
