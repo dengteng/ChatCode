@@ -4,7 +4,7 @@
   "_comment:private": "开源但不发 npm(这是个 app 不是库),private 留着防手滑 npm publish",
   "private": true,
   "_comment:version": "三处版本号保持一致:这里 / src-tauri/tauri.conf.json / src-tauri/Cargo.toml。tauri.conf.json 是真源(打进 app 的那份),src/version.ts 的 APP_VERSION 直接 import 它、不用手改",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "type": "module",
   "scripts": {
     "dev": "concurrently -n sidecar,web \"npm run sidecar:dev\" \"vite\"",

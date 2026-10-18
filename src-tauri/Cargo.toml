@@ -3,7 +3,7 @@
 # 只改一处 tauri 会找不到编出来的二进制,打包直接失败。
 name = "ChatCode"
 # 版本号四处保持一致:这里 / tauri.conf.json / package.json / src/cloud.ts 的 APP_VERSION
-version = "1.0.1"
+version = "1.0.2"
 edition = "2021"
 license = "MIT"
 
