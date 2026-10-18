@@ -280,7 +280,7 @@ function strictPins(vis, main) {
       ANTHROPIC_DEFAULT_HAIKU_MODEL: fb("haiku"), ANTHROPIC_DEFAULT_FABLE_MODEL: fb("fable"),
       ANTHROPIC_SMALL_FAST_MODEL: fb("haiku"), // 后台小任务,不钉的话 CLI 自己去打清单外的 Haiku
     },
-    haiku: fb("haiku"), opus: pick("opus"),
+    sonnet: fb("sonnet"), opus: pick("opus"),
   };
 }
 // 「default」背后实际跑谁(新建会话 / 切回默认时用)。严格模式取清单默认;否则同从前:协作开着是 Sonnet,关了交给 CLI。
@@ -465,11 +465,10 @@ export function isCnMachine(tz, lang) {
 }
 
 // 协作模式(设置 collab,默认开):Sonnet 主持写代码,Opus 当顾问(服务端 advisor 工具,CLI 的
-// --advisor,只在计划/卡住/收尾时被叫),子 agent 一律 Haiku 去探索。只对 Claude provider 生效;
+// --advisor,只在计划/卡住/收尾时被叫),子 agent 一律 Sonnet 去探索。只对 Claude provider 生效;
 // 用户显式选了 Opus/Fable 当主模型就不再挂 Opus 顾问(自己咨询自己)。
 // 子 agent 走 env CLAUDE_CODE_SUBAGENT_MODEL(CLI 没有 --subagents 参数,这是它的等价物),优先级高于 Agent 工具参数和 agent 定义。
-// ponytail: 子 agent 写死 claude-haiku-5-5(别名 haiku 在当前 CLI 里还指向 4.5);账号没开通会 404,关掉开关即可。
-export const COLLAB = { main: "sonnet", advisor: "opus", sub: "claude-haiku-5-5" };
+export const COLLAB = { main: "sonnet", advisor: "opus", sub: "sonnet" };
 export const collabOn = (savedModel, settings) => settings.collab !== false && providerOf(savedModel) === "claude";
 export function collabOpts(savedModel, settings) {
   const vis = providerOf(savedModel) === "claude" ? visibleCatalog(settings) : [];
@@ -477,11 +476,11 @@ export function collabOpts(savedModel, settings) {
     // 严格模式:主模型不再被强制成 Sonnet,就是用户选的(没选 = 清单默认);别名一律钉到清单里。
     // 老会话用着清单外的模型时 main 仍是它自己,不动它。协作开关只管顾问 + 子 agent 要不要挂。
     const main = !savedModel || savedModel === "default" ? effectiveDefault(vis, settings.defaultModel) : modelArg(savedModel);
-    const { pins, haiku, opus } = strictPins(vis, main);
+    const { pins, sonnet, opus } = strictPins(vis, main);
     if (settings.collab === false) return { main, env: pins };
     return {
       main,
-      env: { ...pins, CLAUDE_CODE_SUBAGENT_MODEL: haiku },
+      env: { ...pins, CLAUDE_CODE_SUBAGENT_MODEL: sonnet },
       settings: opus && !/opus|fable/i.test(main) ? { advisorModel: opus } : undefined,
     };
   }

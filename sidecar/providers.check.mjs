@@ -10,10 +10,10 @@ import assert from "node:assert";
 import fs from "node:fs";
 import { envForModel, resolvedProvider, endpointsOf, variantsOf, isCnMachine, sanitizeCatalogModels, sanitizeClaudeCatalog, applyClaudeCatalog, collabOpts, effectiveDefault, defaultArg, visibleCatalog, PROVIDERS, capModelFamilies } from "./providers.mjs";
 
-// 协作模式:默认 Sonnet 主持 + Opus 顾问 + Haiku 子 agent;第三方 provider 与关闭开关时一律不插手
+// 协作模式:默认 Sonnet 主持 + Opus 顾问 + Sonnet 子 agent;第三方 provider 与关闭开关时一律不插手
 let c = collabOpts("default", {});
 assert.strictEqual(c.main, "sonnet"); assert.strictEqual(c.settings.advisorModel, "opus");
-assert.strictEqual(c.env.CLAUDE_CODE_SUBAGENT_MODEL, "claude-haiku-5-5");
+assert.strictEqual(c.env.CLAUDE_CODE_SUBAGENT_MODEL, "sonnet");
 c = collabOpts("opus", {});
 assert.strictEqual(c.main, "opus"); assert.strictEqual(c.settings, undefined, "主模型已是 Opus,不再挂 Opus 顾问");
 assert.strictEqual(collabOpts("claude-fable-5-1", {}).settings, undefined);
@@ -38,7 +38,7 @@ console.log("✓ 协作模式就位");
   let k = collabOpts("default", S);
   assert.strictEqual(k.main, "claude-fable-5-1", "default 不再被强制成 sonnet");
   assert.strictEqual(k.settings, undefined, "主模型是 Fable,不挂 Opus 顾问");
-  assert.strictEqual(k.env.CLAUDE_CODE_SUBAGENT_MODEL, "claude-haiku-5-5");
+  assert.strictEqual(k.env.CLAUDE_CODE_SUBAGENT_MODEL, "claude-sonnet-5", "子 agent 取清单里第一个 sonnet");
   assert.strictEqual(k.env.ANTHROPIC_DEFAULT_OPUS_MODEL, "claude-opus-5-5", "opus 别名钉到清单里第一个没隐藏的 opus,不是被隐藏的 4.8");
   assert.strictEqual(k.env.ANTHROPIC_DEFAULT_SONNET_MODEL, "claude-sonnet-5");
   assert.strictEqual(k.env.ANTHROPIC_DEFAULT_HAIKU_MODEL, "claude-haiku-5-5", "haiku 别名不能漏到被隐藏的 4.5");
@@ -52,7 +52,8 @@ console.log("✓ 协作模式就位");
   assert.strictEqual(k.main, "claude-sonnet-5-5", "老会话用着清单外的模型:不动它"); assert.strictEqual(k.env.ANTHROPIC_DEFAULT_OPUS_MODEL, "claude-opus-5-5");
   const noHaiku = { claudeCatalog: cat("claude-opus-5-5", "claude-sonnet-5") };
   k = collabOpts("default", noHaiku);
-  assert.strictEqual(k.main, "claude-opus-5-5"); assert.strictEqual(k.env.CLAUDE_CODE_SUBAGENT_MODEL, "claude-opus-5-5", "清单里没 haiku:退回主模型,不去碰清单外的");
+  assert.strictEqual(k.main, "claude-opus-5-5"); assert.strictEqual(k.env.CLAUDE_CODE_SUBAGENT_MODEL, "claude-sonnet-5");
+  assert.strictEqual(collabOpts("default", { claudeCatalog: cat("claude-opus-5-5", "claude-haiku-5-5") }).env.CLAUDE_CODE_SUBAGENT_MODEL, "claude-opus-5-5", "清单里没 sonnet:子 agent 退回主模型,不去碰清单外的");
   assert.strictEqual(k.env.ANTHROPIC_SMALL_FAST_MODEL, "claude-opus-5-5");
   k = collabOpts("default", { claudeCatalog: cat("claude-sonnet-5", "claude-haiku-5-5") });
   assert.strictEqual(k.settings, undefined, "清单里没 opus:不挂顾问");

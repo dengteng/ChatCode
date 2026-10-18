@@ -826,7 +826,7 @@
   "额度用尽后自动继续": "Auto-continue after usage limit",
   "额度恢复时自动接着跑": "Resume automatically when the limit resets",
   "协作模式": "Collaboration mode",
-  "Opus 当顾问(只在计划、卡住、收尾时被叫),子 agent 用 Haiku 去探索,模型都取自后台模型清单;主模型用你选的那个。没拿到后台清单时,还会让 Sonnet 当主模型。只对 Claude 生效,对新起的会话生效;选了 Opus/Fable 当主模型时不挂 Opus 顾问": "Opus advises (called only when planning, stuck or finishing) and sub-agents use Haiku to explore, both taken from the backend model list; the main model is the one you pick. Without the backend list, Sonnet also leads as the main model. Claude only; applies to new sessions. No Opus advisor when Opus/Fable is the main model.",
+  "Opus 当顾问(只在计划、卡住、收尾时被叫),子 agent 用 Sonnet 去探索,模型都取自后台模型清单;主模型用你选的那个。没拿到后台清单时,还会让 Sonnet 当主模型。只对 Claude 生效,对新起的会话生效;选了 Opus/Fable 当主模型时不挂 Opus 顾问": "Opus advises (called only when planning, stuck or finishing) and sub-agents use Sonnet to explore, both taken from the backend model list; the main model is the one you pick. Without the backend list, Sonnet also leads as the main model. Claude only; applies to new sessions. No Opus advisor when Opus/Fable is the main model.",
   "被中断的那一轮自动补发「继续」": "The interrupted turn gets a “Continue” sent for it",
   "模型列表": "Model list",
   "远程模型清单": "Remote model catalog",

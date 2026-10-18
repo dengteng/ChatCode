@@ -1,7 +1,7 @@
 // 协作模式自检(自带 sidecar,起真 CLI,发一句话,花极少额度):
 //   node sidecar/collab.e2e.mjs
 // 看 CLI 实际用的主模型(init.model)、Opus 顾问有没有被叫(advisor 块 + modelUsage 里出现 opus)、
-// 子 agent 是不是 Haiku 5.5(modelUsage 里出现 haiku-5-5)。
+// 子 agent 是不是 Sonnet(modelUsage 里出现 sonnet)。
 import { spawn } from "node:child_process";
 import path from "node:path";
 import os from "node:os";
@@ -41,7 +41,7 @@ setTimeout(() => {
     if (s.type === "assistant") for (const b of s.message.content) if (b.name === "advisor") advisor = true;
     if (s.type === "result") {
       const used = Object.keys(s.modelUsage || {});
-      const okMain = /sonnet/.test(initModel || ""), okAdv = advisor && used.some((k) => /opus/.test(k)), okSub = used.some((k) => /haiku-5-5/.test(k));
+      const okMain = /sonnet/.test(initModel || ""), okAdv = advisor && used.some((k) => /opus/.test(k)), okSub = used.some((k) => /sonnet/.test(k));
       bye(`${okMain && okAdv && okSub ? "✓" : "✗"} 主模型=${initModel} advisor被叫=${advisor} modelUsage=${used.join(",")}`, okMain && okAdv && okSub ? 0 : 1);
     }
   });

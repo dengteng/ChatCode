@@ -435,7 +435,7 @@ function AccountTab() {
       <div className="provider-row setting-row">
         <div className="provider-id"><div>
           <b>{t("协作模式")}</b>
-          <div className="muted">{t("Opus 当顾问(只在计划、卡住、收尾时被叫),子 agent 用 Haiku 去探索,模型都取自后台模型清单;主模型用你选的那个。没拿到后台清单时,还会让 Sonnet 当主模型。只对 Claude 生效,对新起的会话生效;选了 Opus/Fable 当主模型时不挂 Opus 顾问")}</div>
+          <div className="muted">{t("Opus 当顾问(只在计划、卡住、收尾时被叫),子 agent 用 Sonnet 去探索,模型都取自后台模型清单;主模型用你选的那个。没拿到后台清单时,还会让 Sonnet 当主模型。只对 Claude 生效,对新起的会话生效;选了 Opus/Fable 当主模型时不挂 Opus 顾问")}</div>
         </div></div>
         <div className="provider-actions">
           <button type="button" role="switch" aria-checked={collab} aria-label={t("协作模式")}
