@@ -134,7 +134,8 @@ export const PROVIDERS = {
       // Qwen3.8 Flash(2026-08-26 发布)。原生多模态,vision: true 覆盖 provider 级的 false。
       // 未写 price:同家现有条目都没写价,官方价格页没查到就不写(见顶部 price 说明)。
       { value: "qwen/qwen3.8-flash",     model: "qwen3.8-flash",     displayName: "Qwen3.8 Flash",     description: "qwen3.8-flash · 快 · 看图", provider: "qwen", contextWindow: 1_000_000, vision: true },
-      { value: "qwen/qwen3-coder-plus",  model: "qwen3-coder-plus",  displayName: "Qwen3 Coder Plus",  description: "qwen3-coder-plus · 编码", provider: "qwen", contextWindow: 1_000_000 },
+      // 2026-10-20 下架:models.dev 标 deprecated。加 hidden,老会话仍可用。
+      { value: "qwen/qwen3-coder-plus",  model: "qwen3-coder-plus",  displayName: "Qwen3 Coder Plus",  description: "qwen3-coder-plus · 编码", provider: "qwen", contextWindow: 1_000_000, hidden: true },
       { value: "qwen/qwen3-coder-flash", model: "qwen3-coder-flash", displayName: "Qwen3 Coder Flash", description: "qwen3-coder-flash · 快", provider: "qwen", contextWindow: 1_000_000 },
     ],
   },
@@ -142,12 +143,16 @@ export const PROVIDERS = {
     id: "minimax", label: "MiniMax", transport: "anthropic", subscriptionUsage: false, vision: false,
     baseUrl: "https://api.minimax.io/anthropic",
     baseUrlCN: "https://api.minimaxi.com/anthropic",
-    smallFast: "MiniMax-M2",
+    smallFast: "MiniMax-M3.1-Flash",
     models: [
       // MiniMax-M3(2026-06-01 发布)。原生多模态,vision: true 覆盖 provider 级的 false。
       // 未写 price:同家现有条目都没写价,官方价格页没查到就不写(见顶部 price 说明)。
       { value: "minimax/MiniMax-M3", model: "MiniMax-M3", displayName: "MiniMax M3", description: "MiniMax-M3 · 最强 · 看图", provider: "minimax", contextWindow: 1_000_000, vision: true },
-      { value: "minimax/MiniMax-M2", model: "MiniMax-M2", displayName: "MiniMax M2", description: "MiniMax-M2 · 编码", provider: "minimax", contextWindow: 200_000 },
+      // MiniMax-M3.1-Flash(2026-10-19 发布)。新一代 flash 档,原生多模态,vision: true 覆盖 provider 级的 false。
+      // 未写 price:同家现有条目都没写价(见顶部 price 说明)。
+      { value: "minimax/MiniMax-M3.1-Flash", model: "MiniMax-M3.1-Flash", displayName: "MiniMax M3.1 Flash", description: "MiniMax-M3.1-Flash · 快 · 看图", provider: "minimax", contextWindow: 1_000_000, vision: true },
+      // 2026-10-20 下架:models.dev 标 deprecated,被 MiniMax-M3.1-Flash 取代。加 hidden,老会话仍可用。
+      { value: "minimax/MiniMax-M2", model: "MiniMax-M2", displayName: "MiniMax M2", description: "MiniMax-M2 · 编码", provider: "minimax", contextWindow: 200_000, hidden: true },
     ],
   },
 
