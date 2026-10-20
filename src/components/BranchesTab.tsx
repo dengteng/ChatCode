@@ -236,8 +236,9 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
       {!isCur && item(t("切换到它"), () => run(`git switch ${q(ref)}`))}
       {!isCur && dItem(`merge:${ref}`, t("合并进 {{current}}", { current }), `git merge ${q(ref)}`)}
       {!isCur && dItem(`rebase:${ref}`, t("rebase 当前到它"), `git rebase ${q(ref)}`)}
-      {isCur && up && ahead > 0 && item("push", () => run("git push"))}
-      {isCur && up && ahead > 0 && behind > 0 && dItem("fpush", t("force push（--force-with-lease）"), "git push --force-with-lease")}
+      {/* 显式 refspec:裸 git push 在本地名 ≠ 上游名时(oss → origin/main)直接 fatal */}
+      {isCur && up && ahead > 0 && item("push", () => run(pushCmd(ref, up)))}
+      {isCur && up && ahead > 0 && behind > 0 && dItem("fpush", t("force push（--force-with-lease）"), pushCmd(ref, up).replace("git push", "git push --force-with-lease"))}
       {isCur && up && behind > 0 && item("pull", () => run("git pull"))}
       {isCur && up && behind > 0 && dItem("reset", t("用远程覆盖本地"), `git fetch ${q(remoteName)} && git reset --hard ${q(up)}`)}
       {!up && item(t("推送并跟踪"), () => run(`git push -u ${q(remoteName)} ${q(ref)}`))}
