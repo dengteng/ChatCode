@@ -1074,6 +1074,7 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
               {dirty && commitBtn}</span>
               <span className="branch-sep">-</span>
               <span className="branch-grp">{seg(t("远程"), branch?.upstream || t("未跟踪"), behind)}
+              {branch?.unrelated && <span className="branch-lead">{t("·无共同历史")}</span>}
               {btn2 && <button className={`branch-inline-btn hi ${pushing ? "is-busy" : ""}`} disabled={pushing}
                 {...btnPress(() => { if (pushing) return; setPushing(true); runTerminal(session.id, btn2.cmd); })}>
                 <span>{btn2.name}</span>

@@ -229,7 +229,7 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
     const isCur = ref === current;
     const up = b?.upstream, ahead = b?.ahead || 0, behind = b?.behind || 0;
     return <>
-      <div className="bmenu-head">{ref}{isCur && <span className="muted"> {t("当前")}</span>}{up ? <span className="muted"> → {up}{ahead ? ` ↑${ahead}` : ""}{behind ? ` ↓${behind}` : ""}</span> : <span className="muted"> {t("未跟踪")}</span>}</div>
+      <div className="bmenu-head">{ref}{isCur && <span className="muted"> {t("当前")}</span>}{up ? <span className="muted"> → {up}{ahead ? ` ↑${ahead}` : ""}{behind ? ` ↓${behind}` : ""}{b?.unrelated ? ` · ${t("无共同历史")}` : ""}</span> : <span className="muted"> {t("未跟踪")}</span>}</div>
       {isCur && dirty && item(t("查看改动（{{count}}）", { count: changed.length }), () => run("git diff"))}
       {isCur && dirty && item("commit", () => { onCommit(); closeMenu(); })}
       {isCur && dirty && dItem("discard", t("丢弃改动（含未跟踪文件）"), DISCARD_CMD)}
@@ -510,7 +510,7 @@ function BranchSpine({ local, remote, remoteSha, remotes, pushSpecs, current, fo
   const beamShow = beamLanes.length ? beamLanes : lanes;
 
   const tagTitle = (x: GitBranch) =>
-    `${x.name}${x.name === current ? t("（当前）") : ""}${x.gone ? t(" · 上游 {{up}} 已在远程删除", { up: x.upstream }) : x.upstream ? `${t(" · 上游 {{up}}", { up: x.upstream })}${x.upstreamAuthor ? t("（{{author}}）", { author: x.upstreamAuthor }) : ""}${x.ahead ? ` ↑${x.ahead}` : ""}${x.behind ? ` ↓${x.behind}` : ""}` : t(" · 未跟踪")}${t(" · 点击切换到它,右键查看操作")}`;
+    `${x.name}${x.name === current ? t("（当前）") : ""}${x.gone ? t(" · 上游 {{up}} 已在远程删除", { up: x.upstream }) : x.upstream ? `${t(" · 上游 {{up}}", { up: x.upstream })}${x.upstreamAuthor ? t("（{{author}}）", { author: x.upstreamAuthor }) : ""}${x.ahead ? ` ↑${x.ahead}` : ""}${x.behind ? ` ↓${x.behind}` : ""}${x.unrelated ? t(" · 与上游无共同历史,别 pull/push") : ""}` : t(" · 未跟踪")}${t(" · 点击切换到它,右键查看操作")}`;
 
   // 扇出:主干竖着下来到 FORK_Y,横向摊到各 tab 中心,再落一小段到 tab 顶。拐角走 6px 圆角
   // —— 直角在 1.5px 线宽上会顶出个小方块,圆角才读得出是"从主干分出去的"。
@@ -537,7 +537,7 @@ function BranchSpine({ local, remote, remoteSha, remotes, pushSpecs, current, fo
       <div className="brz-band" ref={bandRef} onScroll={measure}>
         {localSorted.map((x) => (
           <button key={x.name} data-ref={x.name}
-            className={`brz-tag local ${x.name === current ? "cur" : ""} ${x.name === focus ? "focus" : ""} ${x.gone ? "gone" : ""} ${picking && picking !== x.name ? "pick-target" : ""} ${picking === x.name ? "pick-self" : ""}`}
+            className={`brz-tag local ${x.name === current ? "cur" : ""} ${x.name === focus ? "focus" : ""} ${x.gone || x.unrelated ? "gone" : ""} ${picking && picking !== x.name ? "pick-target" : ""} ${picking === x.name ? "pick-self" : ""}`}
             title={tagTitle(x)}
             // 一律 onMouseDown,不用 onClick:WKWebView 里输入框聚焦时,落在别处的第一次点击只用来切焦点、
             // 不派发 click —— 表现就是"要点两次才生效"(菜单项早前踩过同一个坑)。

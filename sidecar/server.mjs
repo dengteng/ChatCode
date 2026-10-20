@@ -732,16 +732,22 @@ async function gitInfo(cwd, sessionId) {
   const remoteRows = remote.stdout.split("\n").filter(Boolean).map((line) => line.split("\t"));
   const shaByRemote = new Map(remoteRows.map(([name, sha]) => [name, sha]));
   const authorByRemote = new Map(remoteRows.map(([name, , author]) => [name, author]));
-  const local = locals.stdout.split("\n").filter(Boolean).map((line) => {
+  const local = await Promise.all(locals.stdout.split("\n").filter(Boolean).map(async (line) => {
     const [name, upstream, track, sha] = line.split("\t");
+    const counts = trackCounts(track);
+    // 和上游没有共同祖先(开源时重起历史,本地却还跟着新仓库)时,git 把两边全部提交都算成 ahead/behind,
+    // 显示成 ↑287 ↓172 像是有活要干,点 pull/push 就是合并两条不相干的历史。数字清零、单独标 unrelated。
+    // 只有两边都非零才可能,这时才多跑一次 merge-base(以 1 退出 = 没有共同祖先)。
+    if (counts.ahead && counts.behind && !(await execOut("git", ["merge-base", `refs/heads/${name}`, upstream], repo)).ok)
+      Object.assign(counts, { ahead: 0, behind: 0, unrelated: true });
     return { name, upstream: upstream || undefined, sha, upstreamSha: upstream ? shaByRemote.get(upstream) : undefined,
-      upstreamAuthor: upstream ? authorByRemote.get(upstream) || undefined : undefined, ...trackCounts(track) };
-  });
+      upstreamAuthor: upstream ? authorByRemote.get(upstream) || undefined : undefined, ...counts };
+  }));
   const curName = current.stdout.trim();
   const cur = local.find((b) => b.name === curName);
   // 顺手喂给 gitBrief 的缓存:面板每 15s 就跑一次这条 status,发消息那一刻没必要再扫一遍工作树。
   {
-    const marks = [cur?.ahead && `ahead ${cur.ahead}`, cur?.behind && `behind ${cur.behind}`, cur?.gone && "gone"].filter(Boolean);
+    const marks = [cur?.ahead && `ahead ${cur.ahead}`, cur?.behind && `behind ${cur.behind}`, cur?.gone && "gone", cur?.unrelated && "no common history"].filter(Boolean);
     cacheStatus(repo, cur?.sha, curName + (cur?.upstream ? `...${cur.upstream}` : "") + (marks.length ? ` [${marks.join(", ")}]` : ""),
       status.stdout.split("\n").filter(Boolean));
   }

@@ -359,7 +359,8 @@ export interface SshHost { id?: string; label?: string; host: string; username?:
 
 // upstreamAuthor:上游远程分支最新提交的作者名(远程那头"谁最后动的")
 // gone:配了上游但远程分支已被删(git 的 [gone]),此时 ahead/behind 都是 0,不单独标会伪装成"已同步"
-export interface GitBranch { name: string; upstream?: string; ahead?: number; behind?: number; sha?: string; upstreamSha?: string; upstreamAuthor?: string; gone?: boolean }
+// unrelated:和上游没有共同祖先,sidecar 已把 ahead/behind 清零(否则是两边全部提交数,点 pull/push 会合并两条不相干的历史)
+export interface GitBranch { name: string; upstream?: string; ahead?: number; behind?: number; sha?: string; upstreamSha?: string; upstreamAuthor?: string; gone?: boolean; unrelated?: boolean }
 // 分支 Tab:提交拓扑图数据(git_log)与两 ref 对比(git_diff)
 export interface GitCommit { hash: string; parents: string[]; author: string; date: string; subject: string }
 export interface GitLogData { commits: GitCommit[]; heads: { name: string; sha: string; remote: boolean }[] }
