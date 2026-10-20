@@ -94,7 +94,8 @@
     "MiniMax-M2.5-highspeed",
     "MiniMax-M2.7",
     "MiniMax-M2.7-highspeed",
-    "MiniMax-M3"
+    "MiniMax-M3",
+    "MiniMax-M3.1-Flash"
   ],
   "grok": [
     "grok-4.20-0309-non-reasoning",
