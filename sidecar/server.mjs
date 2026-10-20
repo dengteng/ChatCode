@@ -8,7 +8,7 @@ import { startProxy } from "./openai-proxy.mjs";
 import { capToolResults } from "./logcap.mjs";
 import { blobGet, isBlobRef, isInlineImg, externalizeImages, inlineImages } from "./blobs.mjs";
 import { createBgTracker } from "./bgtasks.mjs";
-import { HIST_ROUNDS, historyChunk, usageBase } from "./histpage.mjs";
+import { HIST_ROUNDS, historyChunk, mobileBubbles, usageBase } from "./histpage.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -475,27 +475,7 @@ function recentUserTasksFromLog(id, limit = 8) {
 // 最近 10 条原始消息 ≈ 1 个气泡,所以手机只看到一条。改成按气泡切。
 // 同时剥掉重内容:工具入参(可能是整份文件)、tool_result 正文、thinking —— 这些是"点开气泡才看的详情",
 // 列表阶段不传,既修气泡数量又大幅缩小 payload(避免大会话卡死/OOM)。
-function bubbleRole(m) {
-  // 复刻手机 extractLines 的角色判断:返回该消息属于 'user' / 'agent'(含工具/note) / null(不显示)
-  if (!m) return null;
-  if (m.type === "user") {
-    const c = m.message?.content;
-    if (typeof c === "string") return c ? "user" : null;
-    if (Array.isArray(c)) {
-      const hasBubble = c.some((b) => b?.type === "text" || isInlineImg(b) || isBlobRef(b));
-      return hasBubble ? "user" : null; // 纯 tool_result 的 user 消息不成泡
-    }
-    return null;
-  }
-  if (m.type === "assistant") {
-    const c = m.message?.content;
-    if (Array.isArray(c) && c.some((b) => b?.type === "text" || b?.type === "tool_use")) return "agent";
-    return null;
-  }
-  if (m.type === "result" && m.subtype && m.subtype !== "success") return "agent";
-  if (m.type === "system_note" || m.type === "session_error") return "agent";
-  return null;
-}
+// 气泡怎么算在 histpage.mjs(mobileBubbles),这里只管剥重内容、压图。
 function trimHeavy(m) {
   if (m.type === "assistant" && Array.isArray(m.message?.content)) {
     const content = m.message.content
@@ -559,17 +539,10 @@ const isCaptionEcho = (msg) => msg?.type === "user" && Array.isArray(msg.message
   && msg.message.content.some((b) => b.type === "text" && /^\[Image: original .*to original image/.test(b.text || ""))
   && !msg.message.content.some((b) => b.type === "image" || b.type === "tool_result");
 
+// 回 { messages, more }:more 让手机直接知道前面还有没有,不用拿回来的气泡数去猜
 async function buildMobileHistory(log, limit) {
-  const bubbles = []; // { kind, msgs:[] }
-  for (const m of log) {
-    const role = bubbleRole(m);
-    if (!role) continue; // tool_result / system / rate_limit 等不成泡,直接丢
-    if (role === "user") { bubbles.push({ kind: "user", msgs: [m] }); continue; }
-    let last = bubbles[bubbles.length - 1];
-    if (!last || last.kind !== "agent") { last = { kind: "agent", msgs: [] }; bubbles.push(last); }
-    last.msgs.push(m);
-  }
-  return Promise.all(bubbles.slice(-limit).flatMap((b) => b.msgs).map(trimHeavy).map(shrinkImages));
+  const { messages, more } = mobileBubbles(log, limit);
+  return { messages: await Promise.all(messages.map(trimHeavy).map(shrinkImages)), more };
 }
 
 // ---------- 对话检索 / Git 项目状态 ----------
@@ -2945,7 +2918,7 @@ wss.on("connection", (ws) => {
         const entry = loadIndex().find((e) => e.id === m.sessionId);
         if (!entry) return;
         const log = readLog(entry.id).filter((msg) => !isCaptionEcho(msg));
-        buildMobileHistory(log, m.limit || 20).then((messages) => send(ws, { type: "history", sessionId: entry.id, messages }));
+        buildMobileHistory(log, m.limit || 20).then((h) => send(ws, { type: "history", sessionId: entry.id, ...h }));
         break;
       }
       case "reopen_session": {
@@ -2958,7 +2931,7 @@ wss.on("connection", (ws) => {
         // 整份日志可达数十 MB(含全尺寸 base64 图/整份文件的工具入参)，一次性发给手机会 OOM 闪退或被 relay 丢帧卡加载。桌面不传 limit，仍取全量。
         // 手机那份要转缩略图(异步),桌面同步走原路。history 晚一点到不影响后面的 session_ctx 等包。
         if (!m.choice && !m.haveHistory) {
-          if (m.limit) buildMobileHistory(log, m.limit).then((messages) => send(ws, { type: "history", sessionId: entry.id, messages }));
+          if (m.limit) buildMobileHistory(log, m.limit).then((h) => send(ws, { type: "history", sessionId: entry.id, ...h }));
           else if (m.paged) {
             // 桌面:只发最近几十轮,更早的按需 history_older 要(见 histpage.mjs)。
             // base = 没发的那段的用量合计,前端拿它当底数,右下角 token 总数不随分页变小

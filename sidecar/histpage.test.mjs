@@ -1,6 +1,6 @@
 // 历史分页自检:node sidecar/histpage.test.mjs
 import assert from "node:assert";
-import { historyChunk, countRounds, usageBase } from "./histpage.mjs";
+import { historyChunk, countRounds, usageBase, mobileBubbles } from "./histpage.mjs";
 
 // 造 5 轮:每轮 = 真人消息 + assistant(tool_use) + tool_result + result
 const log = [{ type: "system", subtype: "init" }];
@@ -39,5 +39,30 @@ assert.strictEqual(d.messages[0].message.content, "第1轮");
 // 用量底数:前 3 轮(切点前)= 3 × (110 入 / 1 出 / 0.5 刀),静默回合不算
 const base = usageBase(log, a.before);
 assert.deepStrictEqual(base, { costUsd: 1.5, inputTokens: 330, outputTokens: 3, cacheWrite: 0, cacheRead: 300, workMs: 6000 });
+
+// 手机气泡:压缩接续摘要、/compact 回显手机不显示,也不能算泡 —— 否则手机拿到的比要的少,
+// 误判「到头了」,压缩点之前的消息翻不出来
+{
+  const u = (content) => ({ type: "user", message: { content } });
+  const a = (text) => ({ type: "assistant", message: { content: [{ type: "text", text }] } });
+  const mlog = [
+    u("最早的问题"), a("最早的回答"),
+    u("第二个问题"), a("第二个回答"),
+    u([{ type: "text", text: "<local-command-caveat>Caveat…</local-command-caveat>" }]),
+    u("<command-name>/compact</command-name>\n<command-message>compact</command-message>\n<command-args></command-args>"),
+    u("<local-command-stdout>Compacted </local-command-stdout>"),
+    u([{ type: "text", text: "This session is being continued from a previous conversation that ran out of context." }]),
+    a("接着干"),
+    u("压缩后的问题"), a("压缩后的回答"),
+  ];
+  // 泡:问1 答1 问2 答2 /compact 接着干 问3 答3 = 8 个(/compact 命令本身手机显示成「/compact」,算泡)
+  const r = mobileBubbles(mlog, 4);
+  assert.deepStrictEqual(r.messages.map((m) => m.message.content[0]?.text ?? m.message.content).slice(-2), ["压缩后的问题", "压缩后的回答"]);
+  assert.strictEqual(r.more, true);
+  assert.ok(!r.messages.some((m) => JSON.stringify(m).includes("local-command") || JSON.stringify(m).includes("being continued")));
+  assert.strictEqual(mobileBubbles(mlog, 8).more, false);
+  assert.strictEqual(mobileBubbles(mlog, 7).more, true);
+  assert.strictEqual(mobileBubbles(mlog, 8).messages[0].message.content, "最早的问题");
+}
 
 console.log("✓ histpage 自检通过");
