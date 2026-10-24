@@ -97,7 +97,11 @@ export const PROVIDERS = {
         balanceApi: { path: "/v1/users/me/balance", pick: (j) => ({ balance: Number(j?.data?.available_balance), currency: "CNY" }) },
         smallFast: "kimi-k2.6",
         models: [
-          { value: "kimi/kimi-k3",                 model: "kimi-k3",                 displayName: "Kimi K3",             description: "kimi-k3 · 最强", provider: "kimi", contextWindow: 1_048_576, price: { in: 20, out: 100, cacheRead: 2, currency: "¥" } },
+          // Kimi K3.1 Pro(2026-10-23 发布)。新一代旗舰,取代 K3。原生多模态,vision: true 覆盖 provider 级的 false。
+          // 出厂价抄自 platform.kimi.com/docs/pricing/chat(2026-10-24 核对):in ¥13 / out ¥68 / cacheRead ¥1.3。
+          { value: "kimi/kimi-k3.1-pro", model: "kimi-k3.1-pro", displayName: "Kimi K3.1 Pro", description: "kimi-k3.1-pro · 最强 · 看图", provider: "kimi", contextWindow: 1_048_576, vision: true, price: { in: 13, out: 68, cacheRead: 1.3, currency: "¥" } },
+          // 2026-10-23 下架:被 K3.1 Pro 取代(新一代旗舰)。加 hidden,老会话仍可用。
+          { value: "kimi/kimi-k3",                 model: "kimi-k3",                 displayName: "Kimi K3",             description: "kimi-k3 · 最强", provider: "kimi", contextWindow: 1_048_576, hidden: true, price: { in: 20, out: 100, cacheRead: 2, currency: "¥" } },
           { value: "kimi/kimi-k2.7-code",          model: "kimi-k2.7-code",          displayName: "Kimi K2.7 Code",      description: "kimi-k2.7-code · 编码", provider: "kimi", contextWindow: 262_144, price: { in: 6.5, out: 27, cacheRead: 1.3, currency: "¥" } },
           { value: "kimi/kimi-k2.7-code-highspeed", model: "kimi-k2.7-code-highspeed", displayName: "Kimi K2.7 Code 高速", description: "kimi-k2.7-code-highspeed · 快", provider: "kimi", contextWindow: 262_144, price: { in: 13, out: 54, cacheRead: 2.6, currency: "¥" } },
           { value: "kimi/kimi-k2.6",               model: "kimi-k2.6",               displayName: "Kimi K2.6",           description: "kimi-k2.6 · 通用", provider: "kimi", contextWindow: 262_144, price: { in: 6.5, out: 27, cacheRead: 1.1, currency: "¥" } },
