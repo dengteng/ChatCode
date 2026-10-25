@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
+import { Sparkles, LoaderCircle } from "lucide-react";
 import { Button } from "./ui/button";
 import { useApi } from "../store";
 
@@ -45,6 +46,16 @@ export function CommitDialog({ scope, sessionId, onSubmit, onCancel }: { scope: 
     return () => { alive = false; };
   };
   useEffect(() => runSuggest(false), []); // eslint-disable-line react-hooks/exhaustive-deps
+  // 「重新AI生成」:小结拼出来不对时,让模型读上次提交至今的真实 diff 重写。用户主动点的,直接覆盖输入框。
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiErr, setAiErr] = useState("");
+  const runAi = () => {
+    setAiBusy(true); setAiErr("");
+    suggestCommit(sessionId, true, true)
+      .then((msg) => { touched.current = false; setValue(msg); })
+      .catch((e) => setAiErr(String(e?.message || e)))
+      .finally(() => setAiBusy(false));
+  };
   const done = () => { const m = value.trim(); if (!m) return; remember(scope, m); onSubmit(m); };
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onCancel(); }}>
@@ -59,8 +70,14 @@ export function CommitDialog({ scope, sessionId, onSubmit, onCancel }: { scope: 
           }} />
         {/* 输入框正下方一行:左=最近提交标签,右=取消/提交。历史条目列在这行下方。 */}
         <div className="commit-actions-row">
-          <div className="commit-history-title">{history.length > 0 ? t("最近提交") : ""}</div>
+          {aiErr ? <div className="commit-suggest-hint err" title={aiErr}>{aiErr}</div>
+            : <div className="commit-history-title">{history.length > 0 ? t("最近提交") : ""}</div>}
           <div className="commit-actions-btns">
+            <Button variant="outline" disabled={aiBusy} title={t("让 AI 读上次提交至今的改动，重写提交说明")}
+              onMouseDown={(e) => { e.preventDefault(); if (!aiBusy) runAi(); }}>
+              {aiBusy ? <LoaderCircle className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+              {aiBusy ? t("AI 生成中…") : t("重新AI生成")}
+            </Button>
             {/* mousedown:避开 WKWebView 首击只聚焦不触发的坑 */}
             <Button variant="ghost" onMouseDown={(e) => { e.preventDefault(); onCancel(); }}>{t("取消")}</Button>
             <Button disabled={!value.trim()} onMouseDown={(e) => { e.preventDefault(); done(); }}>{t("提交")}</Button>

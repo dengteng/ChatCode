@@ -788,7 +788,7 @@ interface Api {
   requestGitCommitDetail: (id: string, hash: string) => void;
   requestGitFileDiff: (id: string, from: string, to: string, file: string) => void;
   compareBranches: (id: string, base: string, head: string) => void;
-  suggestCommit: (id: string, force?: boolean) => Promise<string>; // commit 弹窗:总结待提交改动;无新对话复用缓存,force 强制重跑
+  suggestCommit: (id: string, force?: boolean, ai?: boolean) => Promise<string>; // commit 弹窗:总结待提交改动;无新对话复用缓存,force 强制重跑;ai = 让模型读 diff 重写
   askBtw: (id: string, text: string) => Promise<string>; // 抽屉侧问:走 CLI 的 side_question,任务跑着也能问,不排队、不进主线上下文
   deleteSession: (id: string) => void;
   renameSession: (id: string, title: string) => void;
@@ -1405,11 +1405,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     requestGitCommitDetail(id, hash) { send({ type: "git_commit_detail", sessionId: id, hash }); },
     requestGitFileDiff(id, from, to, file) { send({ type: "git_file_diff", sessionId: id, from, to, file }); },
     compareBranches(id, base, head) { send({ type: "git_compare", sessionId: id, base, head }); },
-    suggestCommit(id, force) {
+    suggestCommit(id, force, ai) {
       return new Promise<string>((resolve, reject) => {
         commitWaiters.current.get(id)?.reject(new Error(i18n.t("已被新的请求取代"))); // 旧的未决请求作废
         commitWaiters.current.set(id, { resolve, reject });
-        send({ type: "commit_suggest", sessionId: id, force: !!force });
+        send({ type: "commit_suggest", sessionId: id, force: !!force, ai: !!ai });
       });
     },
     askBtw(id, text) {

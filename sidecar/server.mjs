@@ -977,6 +977,39 @@ async function dirtyFiles(root) {
   const r = await execOut("git", ["--no-optional-locks", "status", "--porcelain"], root, null, 2500);
   return r.ok ? r.stdout.split("\n").filter((l) => l.length > 3).map((l) => l.slice(3).replace(/^"|"$/g, "").replace(/.* -> /, "")) : [];
 }
+// commit 弹窗「重新AI生成」:小结拼出来不对时,让模型直接读「上次提交至今」的真实改动重写一条。
+// 范围和提交命令 `git add -A` 一致 = HEAD 到工作区 + 未跟踪文件。走 side_question(同 btw):不进主线、不跑工具;
+// 会话没有活着的 agent 进程(项目详情面板的假会话)就借用量探针那个常驻 CLI。
+// ponytail: diff 超过 BUDGET 直接截断,模型只看到 stat + 前半截;真要覆盖巨型改动再改成分文件摘要。
+async function aiCommitMessage(cwd, id) {
+  const root = await repoRoot(cwd);
+  const BUDGET = 40000;
+  const [stat, diff, untracked] = await Promise.all([
+    execOut("git", ["diff", "HEAD", "--stat"], root),
+    execOut("git", ["diff", "HEAD", "-U2"], root),
+    execOut("git", ["ls-files", "--others", "--exclude-standard"], root),
+  ]);
+  if (!stat.ok) throw new Error(stat.stderr.trim().slice(0, 200) || tr("读取改动失败"));
+  const newFiles = untracked.stdout.split("\n").filter(Boolean);
+  let body = diff.ok ? diff.stdout : "";
+  for (const f of newFiles) {
+    if (body.length > BUDGET) break;
+    try { body += `\n+++ 新文件 ${f}\n${fs.readFileSync(path.join(root, f), "utf8").slice(0, 3000)}`; } catch {}
+  }
+  if (!stat.stdout.trim() && !newFiles.length) throw new Error(tr("没有待提交的改动"));
+  const prompt = "根据下面「上次提交至今」的全部代码改动,写一条 git commit 说明。只输出说明本身,不要解释、不要代码块。\n"
+    + `要求:${LANG === "en" ? "English" : "中文"};写用户能感知到的改了什么/修了什么,不写文件名和实现细节;`
+    + "一件事就一行(≤60字);多件互不相关的事每件一行、以「- 」开头;不写测试、打包、格式化这类例行动作。\n\n"
+    + `## 改动统计\n${stat.stdout}${newFiles.length ? `新文件:\n${newFiles.join("\n")}\n` : ""}\n## 改动内容\n${body.slice(0, BUDGET)}`;
+  const q = sessions.get(id)?.q;
+  const host = typeof q?.askSideQuestion === "function" ? q : ensureUsageProbe()?.q;
+  if (typeof host?.askSideQuestion !== "function") throw new Error(tr("没有可用的 agent 进程"));
+  const r = await host.askSideQuestion(prompt);
+  const text = String(r?.response ?? "").trim().replace(/^```\w*\n?|\n?```$/g, "").trim();
+  // 上游报错(CLI 版本太旧/额度用完)也是装在 response 里正常回来的,不拦就被当成提交说明填进框
+  if (!text || r?.synthetic || /^API Error\b/.test(text)) throw new Error(text || tr("生成失败"));
+  return text;
+}
 
 // 纯交互式 shell:cwd 命中只是因为用户在这个目录开了个终端,不是"会话跑起来的进程",
 // 列出来只会淹没真正想找的那个,而且误杀掉是用户自己的终端。
@@ -1240,6 +1273,10 @@ const EN_DICT = {
   "{{title}}：Agent 请求执行 {{tool}}": "{{title}}: agent requests to run {{tool}}",
   "{{title}} 已完成": "{{title}} finished",
   "模型正在回复,这条等本轮结束会自动发出": "The model is still replying; this message goes out automatically when the turn ends",
+  "读取改动失败": "Failed to read changes",
+  "没有待提交的改动": "Nothing to commit",
+  "没有可用的 agent 进程": "No agent process available",
+  "生成失败": "Generation failed",
 };
 function tr(s, params) {
   let out = LANG === "en" && EN_DICT[s] ? EN_DICT[s] : s;
@@ -2827,6 +2864,12 @@ wss.on("connection", (ws) => {
       }
       case "commit_suggest": { // commit 弹窗打开时:汇总各轮 AI 已写的「本轮小结」回填输入框(不再二次调 AI,秒回)
         const cwd = resolveCwd(m.sessionId);
+        if (m.ai) { // 「重新AI生成」:读真实 diff 调模型,慢但准
+          aiCommitMessage(cwd, m.sessionId).then(
+            (message) => send(ws, { type: "commit_suggest", sessionId: m.sessionId, ok: true, message }),
+            (e) => send(ws, { type: "commit_suggest", sessionId: m.sessionId, ok: false, error: String(e?.message || e) }));
+          break;
+        }
         buildCommitMessage(cwd, m.sessionId, !!m.force).then((message) =>
           send(ws, { type: "commit_suggest", sessionId: m.sessionId, ok: !!message, message, error: message ? undefined : tr("暂无可汇总的改动小结") }));
         break;
