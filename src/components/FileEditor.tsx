@@ -56,8 +56,24 @@ function tagLines(src: string): string {
 }
 
 /** 注进 iframe 的定位脚本。父页面 postMessage 行号过来 —— sandbox 无 allow-same-origin,
- *  iframe 处于不透明源,父页面碰不到它的 DOM,只能靠 postMessage 让它自己滚。 */
-const SCROLL_RUNTIME = `<script>
+ *  iframe 处于不透明源,父页面碰不到它的 DOM,只能靠 postMessage 让它自己滚。
+ *  y = 上一份预览的滚动位置:每次改源码 srcDoc 都换新、iframe 整页重载,不恢复就跳回顶部。
+ *  DOMContentLoaded 先滚一次少闪一下,load 后(样式/图片到齐、页面撑满)再滚一次才准;
+ *  load 之前不回报 —— 页面没撑满时 scrollTo 被夹小,会把父页面记的位置冲掉。
+ *  ponytail: 只认 window 滚动,页面自己用 body/容器 overflow 滚的那类不管。 */
+const scrollRuntime = (y: number) => `<script>
+(function () {
+  var y = ${y}, t;
+  function restore() { if (y) scrollTo(0, y); }
+  document.addEventListener("DOMContentLoaded", restore);
+  addEventListener("load", function () {
+    restore();
+    addEventListener("scroll", function () {
+      clearTimeout(t);
+      t = setTimeout(function () { parent.postMessage({ ccScroll: scrollY }, "*"); }, 100);
+    }, { passive: true });
+  });
+})();
 addEventListener("message", function (e) {
   var line = e.data && e.data.ccLine; if (!line) return;
   var hit = null;
@@ -199,6 +215,17 @@ export function FileEditor({ path, name, onClose, windowed, remote }: { path: st
     return () => { alive = false; };
   }, [refKey, dir]);
 
+  // html 预览最近一次的滚动位置(iframe 自己回报,见 scrollRuntime)。用 ref 不用 state:
+  // 滚一下就重建 srcDoc 会整页重载。htmlDoc 重建时(改了源码)顺手读最新值带进新文档。
+  const htmlScroll = useRef(0);
+  useEffect(() => {
+    const on = (e: MessageEvent) => {
+      if (e.source === frameRef.current?.contentWindow && typeof e.data?.ccScroll === "number") htmlScroll.current = e.data.ccScroll;
+    };
+    window.addEventListener("message", on);
+    return () => window.removeEventListener("message", on);
+  }, []);
+
   const htmlDoc = useMemo(() => {
     if (!preview || !isHtml || previewText === null) return "";
     const got = (tag: string, attr: "href" | "src") => {
@@ -228,7 +255,7 @@ export function FileEditor({ path, name, onClose, windowed, remote }: { path: st
         const hit = got(tag, "src");
         if (!hit) return tag;
         return tag.replace(/(\bsrc\s*=\s*["'])[^"']*(["'])/i, `$1${dataUrl(hit.r, hit.data)}$2`);
-      }) + SCROLL_RUNTIME + SELECTABLE_STYLE;
+      }) + scrollRuntime(htmlScroll.current) + SELECTABLE_STYLE;
   }, [preview, isHtml, previewText, assets]);
 
   // md 预览里的图片:相对路径换成读回来的 base64。html 那边是改字符串(见 htmlDoc),md 走的是
