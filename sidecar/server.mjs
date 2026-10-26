@@ -978,10 +978,9 @@ async function dirtyFiles(root) {
   return r.ok ? r.stdout.split("\n").filter((l) => l.length > 3).map((l) => l.slice(3).replace(/^"|"$/g, "").replace(/.* -> /, "")) : [];
 }
 // commit 弹窗「重新AI生成」:小结拼出来不对时,让模型直接读「上次提交至今」的真实改动重写一条。
-// 范围和提交命令 `git add -A` 一致 = HEAD 到工作区 + 未跟踪文件。走 side_question(同 btw):不进主线、不跑工具;
-// 会话没有活着的 agent 进程(项目详情面板的假会话)就借用量探针那个常驻 CLI。
+// 范围和提交命令 `git add -A` 一致 = HEAD 到工作区 + 未跟踪文件。走用量探针的 side_question:不跑工具、不进任何会话。
 // ponytail: diff 超过 BUDGET 直接截断,模型只看到 stat + 前半截;真要覆盖巨型改动再改成分文件摘要。
-async function aiCommitMessage(cwd, id) {
+async function aiCommitMessage(cwd) {
   const root = await repoRoot(cwd);
   const BUDGET = 40000;
   const [stat, diff, untracked] = await Promise.all([
@@ -997,12 +996,13 @@ async function aiCommitMessage(cwd, id) {
     try { body += `\n+++ 新文件 ${f}\n${fs.readFileSync(path.join(root, f), "utf8").slice(0, 3000)}`; } catch {}
   }
   if (!stat.stdout.trim() && !newFiles.length) throw new Error(tr("没有待提交的改动"));
-  const prompt = "根据下面「上次提交至今」的全部代码改动,写一条 git commit 说明。只输出说明本身,不要解释、不要代码块。\n"
+  const prompt = "根据下面「上次提交至今」的全部代码改动,写一条 git commit 说明。只依据下面的 diff,diff 里没有的事一律不写。只输出说明本身,不要解释、不要代码块。\n"
     + `要求:${LANG === "en" ? "English" : "中文"};写用户能感知到的改了什么/修了什么,不写文件名和实现细节;`
     + "一件事就一行(≤60字);多件互不相关的事每件一行、以「- 」开头;不写测试、打包、格式化这类例行动作。\n\n"
     + `## 改动统计\n${stat.stdout}${newFiles.length ? `新文件:\n${newFiles.join("\n")}\n` : ""}\n## 改动内容\n${body.slice(0, BUDGET)}`;
-  const q = sessions.get(id)?.q;
-  const host = typeof q?.askSideQuestion === "function" ? q : ensureUsageProbe()?.q;
+  // 只借用量探针:side_question 会带上宿主会话的整段对话,借会话进程问,模型会把对话里聊过、
+  // 却不在 diff 里的事(别的任务、已提交的旧活)也写进说明。探针从不收 prompt,上下文是空的。
+  const host = ensureUsageProbe()?.q;
   if (typeof host?.askSideQuestion !== "function") throw new Error(tr("没有可用的 agent 进程"));
   const r = await host.askSideQuestion(prompt);
   const text = String(r?.response ?? "").trim().replace(/^```\w*\n?|\n?```$/g, "").trim();
@@ -2865,7 +2865,7 @@ wss.on("connection", (ws) => {
       case "commit_suggest": { // commit 弹窗打开时:汇总各轮 AI 已写的「本轮小结」回填输入框(不再二次调 AI,秒回)
         const cwd = resolveCwd(m.sessionId);
         if (m.ai) { // 「重新AI生成」:读真实 diff 调模型,慢但准
-          aiCommitMessage(cwd, m.sessionId).then(
+          aiCommitMessage(cwd).then(
             (message) => send(ws, { type: "commit_suggest", sessionId: m.sessionId, ok: true, message }),
             (e) => send(ws, { type: "commit_suggest", sessionId: m.sessionId, ok: false, error: String(e?.message || e) }));
           break;
