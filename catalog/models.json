@@ -286,6 +286,12 @@
         "contextWindow": 1050000
       },
       {
+        "model": "gpt-6.1-terra",
+        "displayName": "GPT-6.1 Terra",
+        "description": "gpt-6.1-terra · 通用",
+        "contextWindow": 1050000
+      },
+      {
         "model": "gpt-6-luna",
         "displayName": "GPT-6 Luna",
         "description": "gpt-6-luna · 快",

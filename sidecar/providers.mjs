@@ -182,6 +182,9 @@ export const PROVIDERS = {
       // GPT-6.1 Sol(2026-09-29 发布)与 GPT-6 Luna(2026-09-22 发布),models.dev 口径。
       // 未写 price:同家现有条目都没写价,官方价格页没查到就不写(见顶部 price 说明)。
       { value: "openai/gpt-6.1-sol", model: "gpt-6.1-sol", displayName: "GPT-6.1 Sol", description: "gpt-6.1-sol · 最强", provider: "openai", contextWindow: 1_050_000 },
+      // GPT-6.1 Terra(2026-10-26 发布)。OpenAI 新一代中档,主打计算机使用/编码代理,比 Sol 便宜一半、快约 3 倍。
+      // 未写 price:同家现有条目都没写价,官方价格页没查到就不写(见顶部 price 说明)。
+      { value: "openai/gpt-6.1-terra", model: "gpt-6.1-terra", displayName: "GPT-6.1 Terra", description: "gpt-6.1-terra · 通用", provider: "openai", contextWindow: 1_050_000 },
       { value: "openai/gpt-6-luna",  model: "gpt-6-luna",  displayName: "GPT-6 Luna",  description: "gpt-6-luna · 快", provider: "openai", contextWindow: 1_050_000 },
       { value: "openai/gpt-5-codex", model: "gpt-5-codex", displayName: "GPT-5 Codex", description: "gpt-5-codex · 编码", provider: "openai", contextWindow: 400_000 },
       // 2026-10-05 下架:被 GPT-6.1 Sol 取代(新一代旗舰)。加 hidden,老会话仍可用。
