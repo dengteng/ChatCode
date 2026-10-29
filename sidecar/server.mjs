@@ -2202,10 +2202,15 @@ function spawnAgent(ws, sess, { id, resume }) {
   syncEffort(sess, id, false); // 只读回实际档位(options 已带上),不重复推
 
   sess.loopDone = (async () => {
+    let firstInit = true;
     try {
       for await (let msg of q) {
         if (gen !== sess.generation) break; // 已被重启,停止转发旧循环消息
         if (msg.type === "system" && msg.subtype === "init") {
+          // 同一进程每轮都发 init,子 agent 回报后的续跑轮也发。前端要靠它分清「换了进程」和「同进程续跑」:
+          // 只有换进程才清后台任务清单。续跑轮也清的话,还有子 agent 在跑,那轮 result 照样被当成全部完成。
+          msg = { ...msg, freshProcess: firstInit };
+          firstInit = false;
           sess.sdkSessionId = msg.session_id;
           const idx = loadIndex();
           const entry = idx.find((e) => e.id === id);

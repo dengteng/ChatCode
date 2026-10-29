@@ -535,7 +535,9 @@ function handleSdkMessage(dispatch: (a: Action) => void, id: string, msg: any, l
     // 但**不能**顺手清 bgWait:后台任务的续跑轮自己也会先发一条 init,清了就等于在续跑刚起步时开闸,
     // 待发队列立刻放一条进去 → 撞进那一轮被当纯文本读掉(/compact 于是压根没执行)。
     // 闩锁照旧由续跑的 result 清;进程真的换了、续跑不会来了,有下面 20 秒空闲兜底放闸。
-    dispatch({ type: "patch", id, patch: { bgTasks: [] } });
+    // 只有换了进程(sidecar 标 freshProcess)才清。同进程每轮都发 init,子 agent 回报后的续跑轮也发:
+    // 那时还有别的子 agent 在跑,清了的话这轮 result 读到空清单,就点绿✅、响「任务完成」,气泡也变完成态。
+    if (msg.freshProcess !== false) dispatch({ type: "patch", id, patch: { bgTasks: [] } });
     // 实时 init = CLI 真的跑起来了,断连状态到此解除。少了这一步,重连成功后底部仍挂着
     // 「会话已断开 · 点此重连」(输入框根本不渲染),用户只能得出"点了没反应"的结论 ——
     // status 得等下一条 result 才会变,而没有输入框就永远发不出下一轮。
