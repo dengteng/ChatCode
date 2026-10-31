@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { Session } from "../types";
 import { BUILTIN_COMMANDS, EFFORT_LEVELS, type EffortLevel, modelLabel, modelRow, modelProvider, providerBrand, contextWindowOf, canSendImage, sessionProvider, sessionModel, shortModelName } from "../types";
 import { ModelLogo } from "./Avatar";
-import { useStore, fetchBlob, sessionBusy, PENDING_MAX } from "../store";
+import { useStore, fetchBlob, clientDiag, sessionBusy, PENDING_MAX } from "../store";
 import { UsageBar, rollReset, fmtReset } from "./UsageBar";
 import { openImageWindow } from "../popout";
 import { onEdgeGlow } from "../lib/edgeGlow";
@@ -603,6 +603,32 @@ export function Composer({ session }: { session: Session }) {
     document.addEventListener("keydown", onKey);
     return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
   }, [schedMenu]);
+
+  // 偶发「点输入框没反应、打字也进不去」,重启 App 才好,现场一直没抓到。点在输入框范围内却没拿到焦点时:
+  // 记下点中的是谁、焦点在哪、编辑器状态,再主动 focus 一次自救。挂 document 捕获阶段:被别的层盖住时
+  // mousedown 根本到不了编辑器,只有这里收得到。
+  // ponytail: 查清根因后删掉这段和 sidecar 的 client_diag
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      const ed = edRef.current;
+      if (!ed || e.button !== 0) return;
+      const r = ed.getBoundingClientRect();
+      if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) return;
+      const hit = e.target as HTMLElement | null;
+      if (hit?.closest?.(".img-tag")) return; // 点图片标签是开大图,本来就不聚焦
+      setTimeout(() => {
+        if (document.activeElement === ed || ed.contains(document.activeElement)) return;
+        const desc = (el: Element | null) => el ? `${el.tagName.toLowerCase()}.${String((el as HTMLElement).className || "").trim().replace(/\s+/g, ".")}` : "null";
+        const before = `hit=${desc(hit)} active=${desc(document.activeElement)} hasFocus=${document.hasFocus()} vis=${document.visibilityState}`
+          + ` body=${document.body.className || "-"} bodyUS=${document.body.style.userSelect || "-"} edUS=${getComputedStyle(ed).webkitUserSelect}`
+          + ` editable=${ed.isContentEditable} prevented=${e.defaultPrevented}`;
+        ed.focus();
+        clientDiag(`composer-nofocus ${before} refocus=${document.activeElement === ed ? "ok" : "fail"}`);
+      }, 60);
+    };
+    document.addEventListener("mousedown", onDown, true);
+    return () => document.removeEventListener("mousedown", onDown, true);
+  }, []);
 
   // 换会话时收起:Composer 不随会话 remount,菜单会挂在新会话上还显示旧列表
   useEffect(() => { setModelMenu(false); setSchedMenu(false); }, [session.id]);

@@ -3444,6 +3444,10 @@ wss.on("connection", (ws) => {
         authStatus().then((status) => send(ws, { type: "auth_status", status }));
         break;
       }
+      case "client_diag": { // 前端偶发故障的现场(见 store.tsx clientDiag)。追加写:sidecar.log 每次启动被覆盖,重启修好了证据也没了
+        try { fs.appendFileSync(path.join(DATA_DIR, "client-diag.log"), `${new Date().toISOString()} ${String(m.text).slice(0, 2000)}\n`); } catch {}
+        break;
+      }
       case "auth_action": {
         // provider: 'claude'|'github', action: 'login'|'logout' —— 拉起系统 Terminal 跑交互式命令
         const cmd = authCommand(m.provider, m.action);

@@ -822,6 +822,9 @@ let fullHit: { id: string; p: Promise<string | null> } | null = null; // 原图�
 const blobWaiters = new Map<string, (v: string | null) => void>();
 const dropBlob = (id: string, full: boolean) => { if (full) { if (fullHit?.id === id) fullHit = null; } else blobCache.delete(id); };
 
+/** 前端现场追加进 sidecar 的 ~/.ChatCode/client-diag.log(不随重启覆盖)。只给偶发、难复现的问题留证据用。 */
+export const clientDiag = (text: string) => blobSend?.({ type: "client_diag", text });
+
 export function fetchBlob(key: string, mediaType: string, full: boolean): Promise<string | null> {
   const id = `${key}:${full ? "full" : "thumb"}`;
   // 原图这一格同时兼作"飞行中"去重:连点两下不会发两次请求
