@@ -666,7 +666,9 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 /* 表格外层:只做定位锚,不吃滚动 —— 横向滚表格时右上角的复制按钮才不会跟着跑掉(复用 .code-copy 观感) */
 .md-table-wrap { position: relative; }
 .md-table-wrap:hover .code-copy { opacity: 1; }
-.md th, .md td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; }
+/* min-width:自动布局按「最小内容宽」分配,中文的最小内容宽是 1 个字,短列会被长列挤成一字一行。
+   兜底 4 个字宽,超宽了外层 overflow-x 横滚 */
+.md th, .md td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; min-width: 4em; }
 .md th { background: var(--code-bg); font-weight: 600; }
 
 .line-tool { align-items: flex-start; }

@@ -282,16 +282,15 @@ const CASUAL_INSTRUCTION =
   "若用户确实需要处理某个项目,再请对方给出该项目的实际路径。";
 
 // 从落盘日志汇总各轮「本轮小结」。容忍模型给行首加了 markdown 强调符。相邻重复只保留一条。
-// 只保留「本轮真的改过文件」的小结:一轮里出现过改文件的工具调用(Write/Edit/MultiEdit/NotebookEdit)才算 ——
-// 纯提问/解释/诊断那种没动文件的轮次即便留了小结也不汇进 commit 信息(commit 是给"文件改动"配说明的)。
+// 这里只初筛「本轮跑过可能改文件的工具」,是否真改了仓库文件由 buildCommitMessage 对照 git status 终判。
 // `\**` 出现在标签两侧各一次:模型写 `**本轮小结**：xxx`(强调只包标签、冒号在外)相当常见,
 // 弱一点的模型尤其爱这么写。少认这一种,commit 汇总就整条空掉、悄悄退回"拿用户原话凑"。
 const SUMMARY_RE = /^[\s>*#`\-]*本轮小结\**\s*[：:]\**\s*(.+?)\s*\**$/;
 const FILE_EDIT_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
 // agent 自己跑的提交命令(独立成条,躲过 echo "git commit" 这类字符串误伤)
 const GIT_COMMIT_RE = /(?:^|&&|\|\||;|\|)\s*git\s+(?:-C\s+\S+\s+)?commit\b/;
-// 返回 [{ text, files }]:files 是这一轮改过的文件路径,给 buildCommitMessage 按仓库过滤用
-// (同一会话里可能有几轮跑去改了别的项目的代码,那些小结不该混进本仓库的 commit)。
+// 返回 [{ text, files, from, to }]:files 是这一轮 Edit 类工具改过的文件路径,from/to 是这一轮的起止时间,
+// 给 buildCommitMessage 判「这轮改的东西还在不在待提交改动里」用。
 // 条目数 = 小结条数,和以前一致 —— 水位(COMMIT_WM)是按条数存的,口径不能变。
 // agent 的提交落在哪个目录:`git -C X commit` 取 X,否则取同一条命令里 commit 之前最后一个 `cd X`;都没有 = null(会话目录)。
 // 不分目录的话,在别的仓库 commit 一次(一个会话顺手改了后端、改了别的服务)就把本仓库还没提交的小结全清掉。
@@ -315,12 +314,13 @@ function collectRoundSummaries(id, ownCommit = () => true) {
   let roundChanged = false; // 当前这一轮(自上条真人消息起)有没有改过文件
   let roundCommitted = false; // 这一轮 agent 自己提交过:本轮随后的小结也已进仓库,不收
   let roundFiles = []; // 本轮改过的文件(和 out 里的条目共享引用:轮末再改的文件也算进这一轮)
+  let roundFrom; // 本轮开始时间
   for (const msg of readLog(id)) {
     if (msg?.type === "user") {
       // 工具结果也走 type:"user"(带 tool_result),不算新一轮;真人 prompt(字符串或纯 text/image 块)才重置
       const c = msg.message?.content;
       const isToolResult = Array.isArray(c) && c.some((b) => b?.type === "tool_result");
-      if (!isToolResult) { roundChanged = false; roundCommitted = false; roundFiles = []; } // 新数组,别 clear:已 push 的条目还引用着旧的
+      if (!isToolResult) { roundChanged = false; roundCommitted = false; roundFiles = []; roundFrom = msg.timestamp; } // 新数组,别 clear:已 push 的条目还引用着旧的
       continue;
     }
     if (msg?.type !== "assistant" || !Array.isArray(msg.message?.content)) continue;
@@ -337,16 +337,15 @@ function collectRoundSummaries(id, ownCommit = () => true) {
         if (ownCommit(cdir)) { out.length = 0; roundCommitted = true; }
         else roundChanged = true; // 提交的是别的仓库:不清本仓库的小结,这一轮照常算改过
       }
-      // 用 Bash 改文件(sed -i / python 脚本 / 重定向)也是改文件,只是拿不到路径。只认 Edit 类工具的话,
-      // 这种轮次的小结整条被丢,弹窗退回"拿用户原话凑"。哪些 Bash 只读不写分不清,
-      // ponytail: 一律算改过,靠小结约定把关(纯提问/诊断轮本就不该写小结);files 不加 = 不按仓库过滤
+      // 用 Bash 改文件(sed -i / python 脚本 / 重定向)也是改文件,只是拿不到路径。先算改过,
+      // 终判看这一轮期间有没有待提交文件的 mtime 落进来(buildCommitMessage)
       else if (b?.type === "tool_use" && b.name === "Bash") roundChanged = true;
     }
     if (!roundChanged || roundCommitted) continue; // 本轮还没动过文件 / 已提交过 → 这条里的小结先不收
     const text = msg.message.content.filter((b) => b.type === "text").map((b) => b.text).join("\n");
     for (const line of text.split("\n")) {
       const mm = line.match(SUMMARY_RE);
-      if (mm) { const s = mm[1].trim(); if (s && out[out.length - 1]?.text !== s) out.push({ text: s, files: roundFiles }); }
+      if (mm) { const s = mm[1].trim(); if (s && out[out.length - 1]?.text !== s) out.push({ text: s, files: roundFiles, from: roundFrom, to: msg.timestamp }); }
     }
   }
   return out;
@@ -446,27 +445,6 @@ function lastUserFromLog(id) {
     }
   }
   return "";
-}
-// 从落盘日志取最近若干条「用户任务」文本(给 commit 自动总结当线索)。时间正序返回。
-// 只要用户真正下达的任务:跳过纯工具结果、空消息、以及 /compact 之类的斜杠命令。
-function recentUserTasksFromLog(id, limit = 8) {
-  const log = readLog(id);
-  const tasks = [];
-  for (let i = log.length - 1; i >= 0 && tasks.length < limit; i--) {
-    const msg = log[i];
-    if (msg?.type !== "user") continue;
-    const c = msg.message?.content;
-    let t = "";
-    if (typeof c === "string") t = c;
-    else if (Array.isArray(c)) {
-      if (c.some((b) => b.type === "tool_result")) continue; // 纯工具结果不是用户任务
-      t = c.filter((b) => b.type === "text").map((b) => b.text).join(" ");
-    }
-    t = t.trim();
-    if (!t || t.startsWith("/") || /^<(local-command|command-name|system-reminder)/.test(t)) continue; // 斜杠命令的回显/系统注入不是用户任务
-    tasks.push(t.slice(0, 300)); // 单条截断,防止某次超长输入把 prompt 撑爆
-  }
-  return tasks.reverse();
 }
 
 // 手机端历史:按"气泡"取最近 N 个,并剥掉重内容。
@@ -931,30 +909,31 @@ function underRoot(file, cwd, root) {
   return a === root || a.startsWith(root + path.sep);
 }
 // commit 信息 = 汇总各轮 AI 已写好的「本轮小结」(距上次提交的部分)。纯文本处理,不再跑一次 LLM。
-// force=true 时忽略水位,汇总本会话全部小结(手动「重新汇总」)。都没有小结时回退到最近用户任务清单。
+// 只收改动还在待提交文件里的轮次:启动服务、查数据、改仓库外文件的小结都不该进 commit。
+// force=true 时忽略水位,汇总本会话全部小结。都对不上时退到文件清单。
 // 提交是否落在 root 这个仓库里(null = 会话目录,当作本仓库)
 const ownCommitIn = (cwd, root) => (d) => !d || underRoot(d, cwd, root);
 async function buildCommitMessage(cwd, id, force) {
   const root = await repoRoot(cwd);
   const own = ownCommitIn(cwd, root);
   const all = collectRoundSummaries(id, own);
+  const dirty = await dirtyFiles(root);
+  const hit = (f) => { const rel = path.relative(root, realpath(path.resolve(cwd, f))); return dirty.some((d) => rel === d || (d.endsWith("/") && rel.startsWith(d))); };
+  const mtimes = dirty.map((d) => { try { return fs.statSync(path.join(root, d)).mtimeMs; } catch { return Infinity; } });
+  // Bash 改的文件日志里没路径,看这一轮期间有没有待提交文件被改过。前后留 2 秒:落盘和记日志时间有先后。
+  // ponytail: 文件后来又被改过一次,mtime 就不落在早先那轮了,那轮小结会漏;同仓库并行的会话会误收。要更准得逐轮快照 git 状态。
+  const touched = (e) => { const a = Date.parse(e.from) - 2000, b = Date.parse(e.to) + 2000; return mtimes.some((t) => t >= a && t <= b); };
   // 水位是条数计数:agent 自己提交后旧小结被丢弃、总数变少,旧水位可能比总数还大 —— 失效就从头算,别一刀切没
   // (过滤放在 slice 之后:水位存的是「全部小结」里的位置,先过滤会让下标对不上)
   const wm = loadCommitWm()[id] || 0;
   const from = force || wm > all.length ? 0 : wm;
-  // 只留改动落在本仓库里的轮次:一轮同时改了本仓库和别的项目也留(确有本仓库的改动)。
-  // files 为空 = 拿不到路径(旧日志/新工具),判断不了就别扔。
-  const pending = all.slice(from)
-    .filter((e) => !e.files.length || e.files.some((f) => underRoot(f, cwd, root)))
-    .map((e) => e.text);
+  const pending = all.slice(from).filter((e) => e.files.some(hit) || touched(e)).map((e) => e.text);
   const join = (a) => (a.length === 1 ? a[0] : a.map((s) => `- ${s}`).join("\n"));
   if (pending.length) return join(pending);
   // 本会话没动过这些文件(改动是别的会话 / 手动改的):看其他会话的小结,谁的改动文件落在当前未提交文件里就取谁的。
   // 不用水位 —— 「文件仍是脏的」本身就说明那轮改动还没进仓库。只在本会话无小结时才扫,避免白读大日志。
-  const dirty = await dirtyFiles(root);
   if (dirty.length) {
-    const hit = (f) => { const rel = path.relative(root, realpath(path.resolve(cwd, f))); return dirty.some((d) => rel === d || (d.endsWith("/") && rel.startsWith(d))); };
-    const minM = Math.min(...dirty.map((d) => { try { return fs.statSync(path.join(root, d)).mtimeMs; } catch { return Infinity; } }));
+    const minM = Math.min(...mtimes);
     const others = [];
     for (const e of loadIndex()) {
       if (e.id === id) continue;
@@ -963,18 +942,13 @@ async function buildCommitMessage(cwd, id, force) {
     }
     if (others.length) return join(others);
   }
-  // 兜底:旧会话没留小结 / 本轮无产出 —— 用最近几条用户任务凑一条,仍然不调 AI
-  // 每条只取首行、截到 40 字:原话常常多行多段,原样拼进来长短悬殊、换行错乱
-  const tasks = recentUserTasksFromLog(id).slice(-5)
-    .map((t) => { const l = t.split("\n").map((x) => x.trim()).find(Boolean) || ""; return l.length > 40 ? l.slice(0, 40) + "…" : l; });
-  if (tasks.length) return join(tasks);
-  // 连用户任务都没有(全新会话接手别人的改动):退到文件清单,至少不是空框
+  // 没有对得上的小结:只报文件清单,想要更好的说明点弹窗里的「重新AI生成」
   const names = dirty.map((d) => path.basename(d.replace(/\/$/, "")));
   return names.length ? `修改 ${names.slice(0, 3).join("、")}${names.length > 3 ? ` 等 ${names.length} 个文件` : ""}` : "";
 }
 // 未提交文件(相对仓库根;未跟踪目录带尾 /)
 async function dirtyFiles(root) {
-  const r = await execOut("git", ["--no-optional-locks", "status", "--porcelain"], root, null, 2500);
+  const r = await execOut("git", ["--no-optional-locks", "-c", "core.quotepath=off", "status", "--porcelain"], root, null, 2500); // quotepath:中文文件名不转义,否则对不上
   return r.ok ? r.stdout.split("\n").filter((l) => l.length > 3).map((l) => l.slice(3).replace(/^"|"$/g, "").replace(/.* -> /, "")) : [];
 }
 // commit 弹窗「重新AI生成」:小结拼出来不对时,让模型直接读「上次提交至今」的真实改动重写一条。
