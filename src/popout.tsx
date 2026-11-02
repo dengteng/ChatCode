@@ -84,8 +84,14 @@ export function Popout({ kind, params }: { kind: "editor" | "image"; params: URL
   };
   useEffect(() => {
     // Esc 关窗只给图片预览用。编辑器窗口不绑:编辑代码时很容易误点 Esc 把整个窗口关掉、丢失现场。
+    // 全屏时 Esc 先退出全屏(和浏览器、预览 app 一致),不全屏才关窗。
     if (kind !== "image") return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
+    const onKey = async (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      const win = getCurrentWindow();
+      if (await win.isFullscreen().catch(() => false)) win.setFullscreen(false).catch(() => {});
+      else close();
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [kind]);

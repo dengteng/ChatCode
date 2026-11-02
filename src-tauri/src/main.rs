@@ -935,9 +935,21 @@ fn main() {
                     return; // 主窗关闭 = 退出 App,照常走
                 }
                 api.prevent_close();
-                let _ = window.hide();
                 let w = window.clone();
                 std::thread::spawn(move || {
+                    // 全屏中直接 hide:macOS 退不出那个全屏空间,留下一块屏幕大小的黑色残影窗,
+                    // 点不中也关不掉,只能退出 App。先退出全屏,等退出动画走完(tao 在 windowDidExitFullScreen
+                    // 才把 is_fullscreen 置 false),再 hide + 销毁。最多等 2 秒,防动画卡住时永远关不了。
+                    if w.is_fullscreen().unwrap_or(false) {
+                        let _ = w.set_fullscreen(false);
+                        for _ in 0..40 {
+                            std::thread::sleep(std::time::Duration::from_millis(50));
+                            if !w.is_fullscreen().unwrap_or(false) {
+                                break;
+                            }
+                        }
+                    }
+                    let _ = w.hide();
                     std::thread::sleep(std::time::Duration::from_millis(120));
                     let _ = w.destroy();
                 });
