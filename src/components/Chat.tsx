@@ -1,5 +1,6 @@
-import { createContext, useContext, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, isValidElement, type ComponentProps, type ReactNode } from "react";
-import { GitFork, GitBranch, ChevronRight, ChevronDown, Folder, Server, Puzzle, Plug, ArrowDown, Wrench, Check, Copy, X, CircleHelp, Lock, Image as ImageIcon, MessageSquare, Ban, Pin, Pencil, TriangleAlert, Loader2, Brain, RotateCcw, CornerDownRight, Paperclip, MessageCircleQuestion } from "lucide-react";
+import { createContext, Fragment, useContext, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, isValidElement, type ComponentProps, type ReactNode } from "react";
+import { GitFork, GitBranch, ChevronRight, ChevronDown, Folder, Server, Puzzle, Plug, ArrowDown, Wrench, Check, Copy, X, CircleHelp, Lock, Image as ImageIcon, MessageSquare, Ban, Pin, Pencil, TriangleAlert, Loader2, Brain, RotateCcw, CornerDownRight, Paperclip, MessageCircleQuestion, Reply } from "lucide-react";
+import { splitQuote, stripQuote, type Quote } from "../lib/quote";
 import { createPortal } from "react-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -373,6 +374,11 @@ function CopyBtn({ text, className = "term-copy" }: { text: string; className?: 
 // 插在输入框里最后停留的光标处 —— Composer 用 lastCaret 快照记着,不是一律追加到末尾。
 function pasteToComposer(text: string) {
   window.dispatchEvent(new CustomEvent("cc-insert-snippet", { detail: { text } }));
+}
+
+// 引用某条消息继续问:输入框上方挂一条引用条(可取消),发送时打头带上 <reply-to>,见 lib/quote.ts
+function quoteToComposer(q: Quote) {
+  window.dispatchEvent(new CustomEvent("cc-set-quote", { detail: q }));
 }
 
 // 气泡右上角的"贴到输入框":放在复制按钮左边,一键把整条内容变成输入框里的引用 chip
@@ -1180,7 +1186,7 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
               const p = groups[k];
               if ("user" in p) {
                 anchor = p.user.ts;
-                anchorText = ((p.user as any).blocks as any[]).filter((b) => b.type === "text").map((b) => b.text).join("").trim();
+                anchorText = stripQuote(((p.user as any).blocks as any[]).filter((b) => b.type === "text").map((b) => b.text).join("")).trim();
                 break;
               }
             }
@@ -1188,7 +1194,7 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
               // 这条消息后的 agent 回合被打断(interrupt → result.aborted)时,气泡下方给出 重试/编辑/复制。
               const nextG = groups[gi + 1];
               const aborted = !!nextG && "agent" in nextG && nextG.agent.some((it) => it.kind === "result" && (it as any).aborted);
-              const uText = ((g.user as any).blocks as any[]).filter((b) => b.type === "text").map((b) => b.text).join("").trim();
+              const uText = stripQuote(((g.user as any).blocks as any[]).filter((b) => b.type === "text").map((b) => b.text).join("")).trim();
               return (
               <div key={gi} className="msg-row msg-row-user" data-ts={g.user.ts}>
                 <UserAvatar />
@@ -1203,6 +1209,7 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
                       <button title={t("重试:重新发起这条消息")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); sendOrQueue((g.user as any).blocks, uText); } }}><RotateCcw size={13} /></button>
                       {/* 有发送时的 composer 快照(本会话内发的)→ 图片+引用 chip 全还原;历史老消息只有 blocks → 图片可还原、引用退化为文本 */}
                       <button title={t("编辑:回填到输入框")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); const u = g.user as any; window.dispatchEvent(new CustomEvent("cc-fill-composer", { detail: u.composerHtml != null ? { html: u.composerHtml, imgs: u.composerImgs } : { blocks: u.blocks } })); } }}><Pencil size={13} /></button>
+                      {uText && <button title={t("引用这条消息继续问")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); quoteToComposer({ from: t("我的消息 {{clock}}", { clock: fmtClock(g.user.ts) }), ts: g.user.ts, text: uText }); } }}><Reply size={13} /></button>}
                       <button title={t("复制内容")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); copyText(uText).then((ok) => ok && toast(t("已复制"), "success")); } }}><Copy size={13} /></button>
                     </div>
                   )}
@@ -1267,6 +1274,8 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
                       {turnText(g.agent) && (
                         <div className="msg-redo-row agent-actions">
                           <button data-tip={t("顺便问问")} aria-label={t("顺便问问:整条回复带进 btw 输入框")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); stashBtwDraft(turnCopyText(g.agent)); } }}><MessageCircleQuestion size={13} /></button>
+                          {/* 引用:ts 用这一行的 data-ts,引用卡片点回来时按它定位 */}
+                          <button data-tip={t("引用")} aria-label={t("引用这条回复继续问")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); const ts = g.agent[0]?.ts ?? anchor; quoteToComposer({ from: t("{{name}} 的回复 {{clock}}", { name: nameOf(turnModel), clock: fmtClock(ts) }), ts, text: turnCopyText(g.agent) }); } }}><Reply size={13} /></button>
                           <button data-tip={t("贴到输入框")} aria-label={t("贴到输入框:整条回复变成一个引用 chip")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); pasteToComposer(turnCopyText(g.agent)); } }}><Paperclip size={13} /></button>
                           {/* 富文本复制:HTML 取屏幕上那份渲染结果(表格粘到飞书/Word 还是表格),纯文本退回 Markdown 原文 */}
                           <button data-tip={t("复制整条回复")} aria-label={t("复制整条回复")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault();
@@ -2008,6 +2017,24 @@ const SLASH_REF = /^\/([A-Za-z][\w:-]*)(?=[\s,.，。]|$)/;
 // 正文里把 #skill 和行首 /command 就地渲染成 tag。names 来自被剥掉的 "Use the X skill."
 // 触发句 —— 只认真正会被调用的那些,普通话题标签(#今天)保持纯文本。
 // tag 之外的普通文本再过一遍 Linkify:自己发的消息里贴的路径/链接,与 agent 回复、终端输出一样能 hover 出操作菜单。
+// 用户气泡里的引用卡片:点一下滚回被引用的那条消息并闪一下。
+// 那条被窗口化裁掉了(没渲染)就只提示,不去硬加载历史。
+function QuoteCard({ from, ts, text }: { from: string; ts: number; text: string }) {
+  const { t } = useTranslation();
+  const jump = () => {
+    const el = ts ? document.querySelector<HTMLElement>(`.msg-row[data-ts="${ts}"]`) : null;
+    if (!el) { toast(t("原消息不在当前视图里,往上加载更早消息后再点")); return; }
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.remove("quote-flash"); void el.offsetWidth; el.classList.add("quote-flash");
+  };
+  return (
+    <div className="quote-card" title={text} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); e.stopPropagation(); jump(); } }}>
+      <div className="quote-card-from"><Reply size={11} /> {from}</div>
+      <div className="quote-card-text">{text}</div>
+    </div>
+  );
+}
+
 function RefText({ text, skills, cwd }: { text: string; skills: string[]; cwd: string }) {
   const out: ReactNode[] = [];
   let rest = text, k = 0;
@@ -2039,13 +2066,21 @@ function Item({ item, cwd, onPermission, onAgentClick, agentLabel }: { item: Tim
       return (
         <div className="line line-user bubble">
           <div className="line-body user-msg">
-            {shownBlocks.map((b, i) =>
-              b.type === "text" ? <span key={i} className="user-text"><RefText text={b.text} skills={usedSkills} cwd={cwd} /></span>
+            {shownBlocks.map((b, i) => {
+              if (b.type === "text") {
+                // 打头的 <reply-to> 渲染成引用卡片,不把标签原文露给用户
+                const { quote, rest } = splitQuote(b.text);
+                return <Fragment key={i}>
+                  {quote && <QuoteCard from={quote.from} ts={quote.ts} text={quote.text} />}
+                  {rest && <span className="user-text"><RefText text={rest} skills={usedSkills} cwd={cwd} /></span>}
+                </Fragment>;
+              }
               // 刚发的图带内联 base64;历史里的只有 blob 引用,hover/点击时才去 sidecar 取
-              : b.type === "image" ? <ImgTag key={i} label={t("图片{{n}}", { n: ++imgN })}
+              return b.type === "image" ? <ImgTag key={i} label={t("图片{{n}}", { n: ++imgN })}
                   src={b.source.type === "base64" ? `data:${b.source.media_type};base64,${b.source.data}` : undefined}
                   blob={b.source.type === "cc_blob" ? { key: b.source.key, mediaType: b.source.media_type } : undefined} />
-              : null)}
+              : null;
+            })}
           </div>
           {/* 时间 + 输入 token 同在气泡内 meta 行,时间在左 */}
           <div className="bubble-meta">

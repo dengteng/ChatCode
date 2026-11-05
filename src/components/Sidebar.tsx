@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { stripQuote } from "../lib/quote";
 import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
@@ -184,12 +185,12 @@ export function Sidebar({ onSearch, onOpenSettings, update, onShowUpdate }:
       for (let i = s.timeline.length - 1; i >= 0; i--) {
         const t = s.timeline[i];
         if (t.kind !== "user") continue;
-        const txt = t.blocks.filter((b) => b.type === "text").map((b: any) => b.text).join(" ").trim();
+        const txt = stripQuote(t.blocks.filter((b) => b.type === "text").map((b: any) => b.text).join(" ")).trim();
         if (txt) return txt;
         if (t.blocks.some((b) => b.type === "image")) return "[图片]";
       }
     }
-    return e.lastUser ?? "";
+    return stripQuote(e.lastUser ?? "").trim();
   };
 
 

@@ -901,5 +901,11 @@
   "检测到 Obsidian 库": "Obsidian vaults found",
   "使用这个库": "Use this vault",
   "使用中": "In use",
-  "记忆会存到库里的 claude-memory 文件夹,同步由你在 Obsidian 里配的同步方式负责。": "Memory is stored in the vault's claude-memory folder; syncing is handled by whatever sync you set up in Obsidian."
+  "记忆会存到库里的 claude-memory 文件夹,同步由你在 Obsidian 里配的同步方式负责。": "Memory is stored in the vault's claude-memory folder; syncing is handled by whatever sync you set up in Obsidian.",
+  "引用这条回复继续问": "Quote this reply and follow up",
+  "引用这条消息继续问": "Quote this message and follow up",
+  "我的消息 {{clock}}": "My message {{clock}}",
+  "{{name}} 的回复 {{clock}}": "{{name}} reply {{clock}}",
+  "取消引用": "Remove quote",
+  "原消息不在当前视图里,往上加载更早消息后再点": "The original message isn't loaded. Load earlier messages, then click again"
 }

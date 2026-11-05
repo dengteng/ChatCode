@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Folder, File, CornerLeftUp, RotateCw, ChevronDown, X, Sparkles, Clock, Send } from "lucide-react";
+import { Folder, File, CornerLeftUp, RotateCw, ChevronDown, X, Sparkles, Clock, Send, Reply } from "lucide-react";
+import { quoteBlock, type Quote } from "../lib/quote";
 import { invoke } from "@tauri-apps/api/core";
 import type { Session } from "../types";
 import { BUILTIN_COMMANDS, EFFORT_LEVELS, type EffortLevel, modelLabel, modelRow, modelProvider, providerBrand, contextWindowOf, canSendImage, sessionProvider, sessionModel, shortModelName } from "../types";
@@ -133,6 +134,8 @@ const draftStore = new Map<string, { html: string; imgs: Record<string, Img> }>(
 // 这里只存**不进时间线**的那些(!终端命令、/model、/clear …);发给 agent 的消息不往这存,
 // 它们由时间线本身供给历史 —— 这个 Map 是内存的,关掉 app 就空了,时间线会随会话恢复回来。
 const histStore = new Map<string, HistEntry[]>();
+// 引用条(气泡下方点「引用」挂上来的那条)同样按会话分开存,切走再切回来还在
+const quoteStore = new Map<string, Quote>();
 
 // 纯文本 → 编辑器 HTML。换行走 <br>;尖括号必须转义 —— 历史消息里一段字面 `<div>` 直接塞进
 // innerHTML 会被当标签吃掉,回显出来就少一截。
@@ -226,6 +229,8 @@ export function Composer({ session }: { session: Session }) {
   const schedMenuRef = useRef<HTMLDivElement>(null);
   const schedBtnRef = useRef<HTMLButtonElement>(null);
   const [text, setText] = useState("");     // 纯文本镜像(驱动命令面板/占位符,不回写编辑器)
+  const [quote, setQuoteState] = useState<Quote | null>(null);
+  const setQuote = (q: Quote | null) => { if (q) quoteStore.set(session.id, q); else quoteStore.delete(session.id); setQuoteState(q); };
   const [imgCount, setImgCount] = useState(0);
   const [preview, setPreview] = useState<{ src: string; left: number; top: number } | null>(null); // 悬浮预览
   const [suggestion, setSuggestion] = useState(""); // 基于历史的灰字自动建议(光标后的补全)
@@ -848,9 +853,11 @@ export function Composer({ session }: { session: Session }) {
   useEffect(() => {
     const onSnip = (e: Event) => { const d = (e as CustomEvent).detail; if (typeof d?.text === "string" && d.text.trim()) insertSnippetChip(d.text, !!d.end); };
     const onFill = (e: Event) => fillComposer((e as CustomEvent).detail);
+    const onQuote = (e: Event) => { const d = (e as CustomEvent).detail; if (d?.text) { setQuote(d); restoreCaret(); } };
     window.addEventListener("cc-insert-snippet", onSnip);
     window.addEventListener("cc-fill-composer", onFill);
-    return () => { window.removeEventListener("cc-insert-snippet", onSnip); window.removeEventListener("cc-fill-composer", onFill); };
+    window.addEventListener("cc-set-quote", onQuote);
+    return () => { window.removeEventListener("cc-insert-snippet", onSnip); window.removeEventListener("cc-fill-composer", onFill); window.removeEventListener("cc-set-quote", onQuote); };
   }, [session.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // at:定时发送的时刻(ms)。给了就一律进待发队列,到点再发。
@@ -916,6 +923,8 @@ export function Composer({ session }: { session: Session }) {
     });
     walk(ed); flush();
     if (blocks.length === 0) return;
+    // 引用单独占第一个 text block,打头发出(格式见 lib/quote.ts);发出或排上队后才清掉引用条
+    if (quote) blocks.unshift({ type: "text", text: quoteBlock(quote) });
     const outBlocks = expandSkillTags(blocks, session.info.skills ?? []);
     const snap = snapshot(); // 快照编辑器(含图片/引用 chip 的 html),给"编辑"按钮完整还原
     // agent 正在工作、上一轮还挂着后台任务在续跑(轮次未彻底了结)、或正在压缩上下文:
@@ -927,14 +936,14 @@ export function Composer({ session }: { session: Session }) {
         toast(t("待发已满（最多 {{n}} 条）", { n: PENDING_MAX }));
         return;
       }
-      pushHistory(snap); clearEditor();
+      pushHistory(snap); clearEditor(); setQuote(null);
       return;
     }
     // 断连没发出去:原文留在框里,重连后按一次回车就重发(和"待发已满"同一套约定)
     if (!sendMessage(session.id, outBlocks, { html: snap.html, imgs: snap.imgs })) { toast(t("与后端断开,消息没发出去 —— 正在重连,稍后重发")); return; }
     if (compactCmd) dispatch({ type: "compact_start", id: session.id }); // 进度条要排在 /compact 这条消息之后
     pushHistory(snap); // 先快照(含图片),再清空
-    clearEditor();
+    clearEditor(); setQuote(null);
   }
 
   function scheduleSend(at: number) {
@@ -1252,6 +1261,7 @@ export function Composer({ session }: { session: Session }) {
   useEffect(() => {
     const ed = edRef.current;
     const d = draftStore.get(session.id);
+    setQuoteState(quoteStore.get(session.id) ?? null);
     histIdx.current = -1; histDraft.current = null; // 历史是按会话分的,翻到第几条也别跟过来
     if (ed) {
       ed.innerHTML = d?.html ?? "";
@@ -1506,7 +1516,16 @@ export function Composer({ session }: { session: Session }) {
         </div>
       )}
       <div className="star-border">
-      <div className={`input-box sb-inner input-glow ${shellMode ? "shell-mode" : ""} ${hasActions ? "has-actions" : ""} ${busy && !isEmpty ? "two-actions" : ""}`} onMouseMove={onEdgeGlow}>
+      <div className={`input-box sb-inner input-glow ${quote ? "has-quote" : ""} ${shellMode ? "shell-mode" : ""} ${hasActions ? "has-actions" : ""} ${busy && !isEmpty ? "two-actions" : ""}`} onMouseMove={onEdgeGlow}>
+        {quote && (
+          // 引用条:挂在输入框顶部,右侧 × 取消。发送时这条作为 <reply-to> 打头带给 agent
+          <div className="quote-bar" title={quote.text}>
+            <Reply size={13} className="quote-bar-ico" />
+            <span className="quote-bar-from">{quote.from}</span>
+            <span className="quote-bar-text">{quote.text.replace(/\s+/g, " ")}</span>
+            <button className="quote-bar-x" title={t("取消引用")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); e.stopPropagation(); setQuote(null); } }}><X size={13} /></button>
+          </div>
+        )}
         {isEmpty && (
           <div className="editor-ph">{pendingPerm ? t("⏎ 允许 · esc 拒绝 · 或输入消息") : t("输入消息")}</div>
         )}
