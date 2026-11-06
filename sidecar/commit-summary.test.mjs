@@ -26,6 +26,8 @@ const tool = (name, input, ts = NOW + 30_000) => ({ type: "assistant", timestamp
 const roundRaw = (file, line, ts = OLD) => [user("干活", ts), tool("Edit", { file_path: file }, ts), said(`好了\n\n${line}`, ts)];
 const round = (file, summary, ts) => roundRaw(file, `本轮小结：${summary}`, ts);
 const bashRound = (command, summary, ts) => [user("干活", ts), tool("Bash", { command }, ts), said(`好了\n\n本轮小结：${summary}`, ts)];
+// 轮末 result 带的轮首/轮末快照对比(server.mjs turnChanges),小结之后才到
+const result = (files, ts) => ({ type: "result", timestamp: iso(ts), changes: { root: repoA, from: "a", to: "b", files } });
 
 const git = (...a) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...a], { cwd: repoA });
 // clean.ts 已提交且没再改;其余全是待提交改动(含中文文件名、未跟踪的);ignored.xlsx 被忽略
@@ -33,7 +35,7 @@ fs.writeFileSync(path.join(repoA, ".gitignore"), "ignored.xlsx\n");
 fs.writeFileSync(path.join(repoA, "clean.ts"), "x");
 fs.writeFileSync(path.join(repoA, "中文.md"), "x");
 git("add", "-A"); git("commit", "-qm", "init");
-for (const f of ["a.ts", "c.ts", "d.ts", "ignored.xlsx"]) fs.writeFileSync(path.join(repoA, f), "y");
+for (const f of ["a.ts", "c.ts", "d.ts", "e.ts", "ignored.xlsx"]) fs.writeFileSync(path.join(repoA, f), "y");
 fs.writeFileSync(path.join(repoA, "中文.md"), "y");
 fs.writeFileSync(path.join(repoB, "b.ts"), "y");
 fs.writeFileSync(path.join(repoC, "f.ts"), "y");
@@ -56,6 +58,9 @@ fs.writeFileSync(path.join(DATA, "sessions", `${SID}.jsonl`), log(
    ...bashRound("nohup uv run python -m webui &", "本地启动控制台不该进", OLD),
    // heredoc 正文里出现 "git commit" 字样(写补丁脚本/测试数据):不是真提交,不能清掉前面的小结
    ...bashRound("cat > /tmp/p.py <<'EOF'\nsub('cd x && git commit -qm y')\nEOF\npython3 /tmp/p.py", "heredoc 里的字样不算提交", NOW),
+   // 有快照的轮次按快照清单认:时间对不上也收;快照说没改就不收,哪怕期间有待提交文件的 mtime 落进来
+   ...bashRound("python3 gen.py", "快照说改了就收", OLD), result([{ file: "e.ts", add: 1, del: 0 }], OLD),
+   ...bashRound("python3 noop.py", "快照说没改就不收", NOW), result([], NOW),
    // 没调任何工具的纯问答轮,即便写了小结也不收
    user("问问"), said("答\n\n本轮小结：纯问答不该进")]));
 // 全部小结都对不上待提交文件:退文件清单,不能拿用户原话凑
@@ -70,7 +75,7 @@ const done = (code) => { srv.kill(); fs.rmSync(tmp, { recursive: true, force: tr
 
 setTimeout(() => { console.error("超时:sidecar 没回包"); done(1); }, 20000);
 const want = new Map([
-  [SID, "- 改了A项目\n- 中文文件名也要认\n- 又改了A项目\n- 粗体标签也要认\n- Bash 改的也要认\n- heredoc 里的字样不算提交"],
+  [SID, "- 改了A项目\n- 中文文件名也要认\n- 又改了A项目\n- 粗体标签也要认\n- Bash 改的也要认\n- heredoc 里的字样不算提交\n- 快照说改了就收"],
   ["s2", "修改 f.ts"],
 ]);
 const onMsg = (raw) => {

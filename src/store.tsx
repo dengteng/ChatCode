@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useReducer, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
-import type { AccountUsage, AuthStatus, ClosedEntry, EffortLevel, GitCommitDetail, GitDiffData, GitInfo, GitLogData, IndexEntry, LimitUsage, ModelInfo, PermissionSuggestion, ResumeChoice, SearchResult, Session, SessionGroup, SessionInfo, Spend, SshHost, TimelineItem, Wallet } from "./types";
+import type { AccountUsage, AuthStatus, ClosedEntry, ContextUsage, EffortLevel, GitCommitDetail, GitDiffData, GitInfo, GitLogData, IndexEntry, LimitUsage, ModelInfo, PermissionSuggestion, ResumeChoice, SearchResult, Session, SessionGroup, SessionInfo, Spend, SshHost, TimelineItem, Wallet } from "./types";
 import { sessionProvider, modelName, modelLabel, modelInList } from "./types";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { toast, dismissToast } from "./components/Toast";
@@ -647,7 +647,7 @@ function handleSdkMessage(dispatch: (a: Action) => void, id: string, msg: any, l
     dispatch({ type: "compact_settle", id }); // 压缩没等到结束信号时兜底收尾,别让进度条一直转
     dispatch({ type: "append", id, item: {
       kind: "result", costUsd: msg.total_cost_usd ?? 0, durationMs: msg.duration_ms ?? 0,
-      usage: msg.usage, isError: msg.is_error ?? false, aborted: msg.aborted ?? false, ts,
+      usage: msg.usage, isError: msg.is_error ?? false, aborted: msg.aborted ?? false, changes: msg.changes, ts,
     } });
     const inTok = (msg.usage?.input_tokens ?? 0) + (msg.usage?.cache_read_input_tokens ?? 0) + (msg.usage?.cache_creation_input_tokens ?? 0);
     const outTok = msg.usage?.output_tokens ?? 0;
@@ -788,7 +788,8 @@ interface Api {
   requestGitLog: (id: string) => void;
   requestGitDiff: (id: string, from: string, to: string) => void;
   requestGitCommitDetail: (id: string, hash: string) => void;
-  requestGitFileDiff: (id: string, from: string, to: string, file: string) => void;
+  requestGitFileDiff: (id: string, from: string, to: string, file: string, tree?: boolean) => void; // tree:from/to 是每轮改动卡片的快照 tree,不是提交
+  contextUsage: (id: string) => Promise<ContextUsage>; // 底栏「上下文」构成面板
   compareBranches: (id: string, base: string, head: string) => void;
   suggestCommit: (id: string, force?: boolean, ai?: boolean) => Promise<string>; // commit 弹窗:总结待提交改动;无新对话复用缓存,force 强制重跑;ai = 让模型读 diff 重写
   askBtw: (id: string, text: string) => Promise<string>; // 抽屉侧问:走 CLI 的 side_question,任务跑着也能问,不排队、不进主线上下文
@@ -859,6 +860,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // 侧问的待响应 promise。按 rid 存而不是按 sessionId:侧问不占主线,同一会话可以连着问好几条,
   // 后一条不该把前一条的回答顶掉(commit 总结那种"一个弹窗一条"的按会话存法在这里不成立)。
   const btwWaiters = useRef(new Map<string, { resolve: (s: string) => void; reject: (e: Error) => void }>());
+  const ctxWaiters = useRef(new Map<string, { resolve: (d: ContextUsage) => void; reject: (e: Error) => void }>()); // 上下文构成面板,按会话存
   // 启动预取只做一次:连上后首个 index 到达时,异步暖各会话 git 分支状态 + 5h/周用量。断线重连会重置。
   const prefetched = useRef(false);
   // 重连后待对表:下一份 index 用来把本地"运行中"和 sidecar 的真状态校齐(见 index 分支)。
@@ -984,6 +986,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           case "commit_suggest": {
             const w = commitWaiters.current.get(m.sessionId);
             if (w) { commitWaiters.current.delete(m.sessionId); m.ok ? w.resolve(m.message) : w.reject(new Error(m.error || i18n.t("生成失败"))); }
+            break;
+          }
+          case "context_usage": {
+            const w = ctxWaiters.current.get(m.sessionId);
+            if (w) { ctxWaiters.current.delete(m.sessionId); m.error ? w.reject(new Error(m.error)) : w.resolve(m.data); }
             break;
           }
           case "btw_reply": {
@@ -1408,7 +1415,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     requestGitLog(id) { send({ type: "git_log", sessionId: id }); },
     requestGitDiff(id, from, to) { send({ type: "git_diff", sessionId: id, from, to }); },
     requestGitCommitDetail(id, hash) { send({ type: "git_commit_detail", sessionId: id, hash }); },
-    requestGitFileDiff(id, from, to, file) { send({ type: "git_file_diff", sessionId: id, from, to, file }); },
+    requestGitFileDiff(id, from, to, file, tree) { send({ type: "git_file_diff", sessionId: id, from, to, file, tree: !!tree }); },
+    contextUsage(id) {
+      return new Promise<ContextUsage>((resolve, reject) => {
+        ctxWaiters.current.get(id)?.reject(new Error(i18n.t("已被新的请求取代")));
+        ctxWaiters.current.set(id, { resolve, reject });
+        send({ type: "context_usage", sessionId: id });
+        setTimeout(() => { const w = ctxWaiters.current.get(id); if (w?.resolve === resolve) { ctxWaiters.current.delete(id); reject(new Error(i18n.t("等待回答超时"))); } }, 20000);
+      });
+    },
     compareBranches(id, base, head) { send({ type: "git_compare", sessionId: id, base, head }); },
     suggestCommit(id, force, ai) {
       return new Promise<string>((resolve, reject) => {

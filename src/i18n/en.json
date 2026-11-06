@@ -907,5 +907,14 @@
   "我的消息 {{clock}}": "My message {{clock}}",
   "{{name}} 的回复 {{clock}}": "{{name}} reply {{clock}}",
   "取消引用": "Remove quote",
-  "原消息不在当前视图里,往上加载更早消息后再点": "The original message isn't loaded. Load earlier messages, then click again"
+  "原消息不在当前视图里,往上加载更早消息后再点": "The original message isn't loaded. Load earlier messages, then click again",
+  "本轮改动 {{n}} 个文件": "{{n}} files changed this turn",
+  "还有 {{n}} 个文件": "{{n}} more files",
+  "上下文构成": "Context breakdown",
+  "点击查看构成": "click for breakdown",
+  "到 {{n}} 自动压缩": "Auto-compacts at {{n}}",
+  "记忆文件": "Memory files",
+  "MCP 工具(按服务)": "MCP tools (by server)",
+  "Skills 说明 · 共 {{n}} 个": "Skill descriptions · {{n}} total",
+  "对话里的工具调用": "Tool calls in conversation"
 }

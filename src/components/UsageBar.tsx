@@ -4,6 +4,7 @@ import type { LimitUsage, Session, Spend, Wallet } from "../types";
 import { contextWindowOf, sessionProvider } from "../types";
 import { useStore, useApi } from "../store";
 import { PERMISSION_PRESETS, presetOf, type PermissionMode } from "../permissions";
+import { ContextPanel } from "./ContextPanel";
 
 // c: 用量条
 //  1) 上下文窗口占比 —— 来自 modelUsage / message_start usage
@@ -26,13 +27,17 @@ export function UsageBar({ session, auto, mode, onPreset }:
   const { fetchedAt, stale } = usage;
   // 刚切过来还没有该 provider 的数据:立刻探一次,别干等下一轮轮询
   useEffect(() => { if (hasLimits && fetchedAt === null) refreshUsage(); }, [prov, hasLimits, fetchedAt]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [ctxAt, setCtxAt] = useState<DOMRect | null>(null); // 上下文构成面板:点「上下文」那格打开,记下那格的位置好贴着弹
+  useEffect(() => setCtxAt(null), [session.id]);
   return (
     <>
       <div className="usage-bar">
         {/* 格式:上下文(最大窗口) [进度条] 已用百分比(无小数);token 绝对值挪到 hover 里 */}
         <Meter label={t("上下文({{w}})", { w: fmt(ctxWindow) })} pct={ctxPct}
           detail={`${Math.round(ctxPct)}%`}
-          title={`${fmt(session.contextTokens)}/${fmt(ctxWindow)} tokens`} warn={ctxPct > 80} />
+          title={`${fmt(session.contextTokens)}/${fmt(ctxWindow)} tokens · ${t("点击查看构成")}`} warn={ctxPct > 80}
+          onClick={(e) => setCtxAt(ctxAt ? null : e.currentTarget.getBoundingClientRect())} />
+        {ctxAt && <ContextPanel sid={session.id} anchor={ctxAt} onClose={() => setCtxAt(null)} />}
         {hasLimits ? <>
           <LimitMeter label="5h" limit={usage.session} fetchedAt={fetchedAt} stale={stale} />
           <LimitMeter label="周" limit={usage.weekly} fetchedAt={fetchedAt} stale={stale} />
@@ -62,9 +67,9 @@ function PermPicker({ mode, auto, onPreset }: { mode: PermissionMode; auto: bool
   );
 }
 
-function Meter({ label, pct, detail, warn, title }: { label: string; pct: number; detail: string; warn?: boolean; title?: string }) {
+function Meter({ label, pct, detail, warn, title, onClick }: { label: string; pct: number; detail: string; warn?: boolean; title?: string; onClick?: (e: React.MouseEvent<HTMLDivElement>) => void }) {
   return (
-    <div className="meter" title={title ?? detail}>
+    <div className={`meter ${onClick ? "meter-click" : ""}`} title={title ?? detail} onClick={onClick}>
       <div className="meter-label">{label}</div>
       <div className="meter-track"><div className={`meter-fill ${warn ? "warn" : ""}`} style={{ width: `${pct}%` }} /></div>
       <div className="meter-label"><span className="meter-detail">{detail}</span></div>

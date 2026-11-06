@@ -14,7 +14,7 @@ import i18n from "../i18n";
 
 // 统一 diff 渲染:把 git 的 unified patch 交给 diff2html,得到行内(word 级)高亮 + 行号的可视化视图。
 // 空 patch = 无文本差异(如仅权限变化/二进制)。样式在 styles.css 的 .d2h-wrap 里对齐主题。
-function DiffHtml({ patch, clipped }: { patch: string; clipped?: boolean }) {
+export function DiffHtml({ patch, clipped }: { patch: string; clipped?: boolean }) {
   const { t } = useTranslation();
   const out = useMemo(
     () => patch.trim() ? diffToHtml(patch, { drawFileList: false, matching: "words", outputFormat: "line-by-line" }) : "",
@@ -480,7 +480,9 @@ function BranchSpine({ local, remote, remoteSha, remotes, pushSpecs, current, fo
   const up = lanes.find((l) => l.isUpstream)?.ref;
   // push 按钮只给当前分支,且只给"确实还有东西可推"的远端(判定见 pushTargets)。
   // ref 还不存在的远端(从没推过)也算可推:那次 push 会把分支建出来。
-  const pushable = isCur && b ? new Set(pushTargets(b, laneRefs, up, remoteSha)) : new Set<string>();
+  // outgoing:本地这条有没有东西要往各远端去(连线末端画不画箭头,见下);pushable 再限定为当前分支
+  const outgoing = new Set(b ? pushTargets(b, laneRefs, up, remoteSha) : []);
+  const pushable = isCur ? outgoing : new Set<string>();
   // 目标分支名一律走 l.push:配了 remote.<名>.push 时它和本地名不一样(main → oss),
   // 拿 focus 去拼就会推到同名那条 —— 正是配置想避开的目标。远端还没这条分支时顺手建出来。
   const pushCmdFor = (l: RepoLane) => l.ref
@@ -580,11 +582,11 @@ function BranchSpine({ local, remote, remoteSha, remotes, pushSpecs, current, fo
             {lanes.map((l, i) => {
               const x = tabX(i), dash = !l.isUpstream;
               const cls = `brz-map-line ${dash ? "dash" : ""}`;
-              const pullOnly = canPull(l) && !canPush(l);
+              // 末端箭头只在「本地确实有东西要往这个远端去」时画(远端还没这条分支也算):已同步、只差 pull 的都画圆点
               return (
                 <g key={l.remote}>
                   <path fill="none" className={cls} d={forkPath(x, FORK_Y)} />
-                  {pullOnly
+                  {l.ref && !outgoing.has(l.ref)
                     ? <circle cx={x} cy={tipY - 2} r={2.5} className={`brz-map-dot ${dash ? "dash" : ""}`} />
                     : <path d={`M ${x - 4} ${tipY - 8} L ${x} ${tipY} L ${x + 4} ${tipY - 8} Z`} className={`brz-map-head ${dash ? "dash" : ""}`} />}
                 </g>

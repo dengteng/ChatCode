@@ -8,6 +8,7 @@ import { startProxy } from "./openai-proxy.mjs";
 import { capToolResults } from "./logcap.mjs";
 import { blobGet, isBlobRef, isInlineImg, externalizeImages, inlineImages } from "./blobs.mjs";
 import { createBgTracker } from "./bgtasks.mjs";
+import { snapTree as snapTreeWith, turnChanges as turnChangesWith } from "./turnsnap.mjs";
 import { HIST_ROUNDS, historyChunk, mobileBubbles, usageBase } from "./histpage.mjs";
 import fs from "node:fs";
 import path from "node:path";
@@ -313,14 +314,21 @@ function collectRoundSummaries(id, ownCommit = () => true) {
   const out = [];
   let roundChanged = false; // 当前这一轮(自上条真人消息起)有没有改过文件
   let roundCommitted = false; // 这一轮 agent 自己提交过:本轮随后的小结也已进仓库,不收
-  let roundFiles = []; // 本轮改过的文件(和 out 里的条目共享引用:轮末再改的文件也算进这一轮)
+  // 本轮改过的文件(和 out 里的条目共享引用:轮末再改的文件、小结之后才到的快照都算进这一轮)。
+  // snap = 这一轮有轮首/轮末快照(result.changes),files 就是准的,不用再按 mtime 猜
+  let round = { files: [], snap: false };
   let roundFrom; // 本轮开始时间
   for (const msg of readLog(id)) {
     if (msg?.type === "user") {
       // 工具结果也走 type:"user"(带 tool_result),不算新一轮;真人 prompt(字符串或纯 text/image 块)才重置
       const c = msg.message?.content;
       const isToolResult = Array.isArray(c) && c.some((b) => b?.type === "tool_result");
-      if (!isToolResult) { roundChanged = false; roundCommitted = false; roundFiles = []; roundFrom = msg.timestamp; } // 新数组,别 clear:已 push 的条目还引用着旧的
+      if (!isToolResult) { roundChanged = false; roundCommitted = false; round = { files: [], snap: false }; roundFrom = msg.timestamp; } // 新对象,别 clear:已 push 的条目还引用着旧的
+      continue;
+    }
+    if (msg?.type === "result" && msg.changes) {
+      round.snap = true;
+      for (const f of msg.changes.files) round.files.push(path.join(msg.changes.root, f.file));
       continue;
     }
     if (msg?.type !== "assistant" || !Array.isArray(msg.message?.content)) continue;
@@ -329,7 +337,7 @@ function collectRoundSummaries(id, ownCommit = () => true) {
       if (b?.type === "tool_use" && FILE_EDIT_TOOLS.has(b.name)) {
         roundChanged = true;
         const p = b.input?.file_path ?? b.input?.notebook_path; // NotebookEdit 用的是 notebook_path
-        if (typeof p === "string" && p) roundFiles.push(p);
+        if (typeof p === "string" && p) round.files.push(p);
       }
       // agent 中途自己 commit 了:之前汇总的小结都已在这次提交里,清空不再汇进弹窗
       const cdir = b?.type === "tool_use" && b.name === "Bash" ? commitDir(String(b.input?.command ?? "")) : undefined;
@@ -345,7 +353,7 @@ function collectRoundSummaries(id, ownCommit = () => true) {
     const text = msg.message.content.filter((b) => b.type === "text").map((b) => b.text).join("\n");
     for (const line of text.split("\n")) {
       const mm = line.match(SUMMARY_RE);
-      if (mm) { const s = mm[1].trim(); if (s && out[out.length - 1]?.text !== s) out.push({ text: s, files: roundFiles, from: roundFrom, to: msg.timestamp }); }
+      if (mm) { const s = mm[1].trim(); if (s && out[out.length - 1]?.text !== s) out.push({ text: s, round, from: roundFrom, to: msg.timestamp }); }
     }
   }
   return out;
@@ -859,8 +867,11 @@ async function gitBrief(cwd, sess) {
     "[系统提示·本地 Git] 与上一轮完全相同:分支、工作区、提交历史均无变化,仍以上一轮那份为准。");
 }
 
+const snapTree = (cwd) => snapTreeWith(execOut, cwd);
+const turnChanges = (from, cwd) => turnChangesWith(execOut, from, cwd);
+
 // 单文件在两 ref 间的 patch 正文(三点语义,和 gitDiff 的文件列表一致)。独立窗口点文件时按需拉,不走终端。
-async function gitFileDiff(cwd, from, to, file) {
+async function gitFileDiff(cwd, from, to, file, tree) {
   const root = await execOut("git", ["rev-parse", "--show-toplevel"], cwd);
   if (!root.ok) return { from, to, file, patch: "", error: "非 git 仓库" };
   // -U999999 = 全文上下文:diff 里带上整份文件,而非只有改动的几行片段(用户要看完整文件)。
@@ -872,8 +883,10 @@ async function gitFileDiff(cwd, from, to, file) {
   // from === "PARENT":单个提交自己改了什么(to = 该提交),走 show,理由同 gitCommit —— 根提交没有 ^;
   // 否则两 ref 三点对比。
   const CLIP_LINES = 2000;
+  // tree:每轮改动卡片的两张快照(snapTree 出的 tree 对象),不是提交,没有合并基,只能两点比
   const run = (ctx) => execOut("git", from === "PARENT"
     ? ["show", "--first-parent", "--format=", ctx, to, "--", file]
+    : tree ? ["diff", ctx, from, to, "--", file]
     : to === "WORKTREE"
     ? ["diff", ctx, from, "--", file]
     : ["diff", ctx, `${from}...${to}`, "--", file], root.stdout.trim());
@@ -920,14 +933,15 @@ async function buildCommitMessage(cwd, id, force) {
   const dirty = await dirtyFiles(root);
   const hit = (f) => { const rel = path.relative(root, realpath(path.resolve(cwd, f))); return dirty.some((d) => rel === d || (d.endsWith("/") && rel.startsWith(d))); };
   const mtimes = dirty.map((d) => { try { return fs.statSync(path.join(root, d)).mtimeMs; } catch { return Infinity; } });
-  // Bash 改的文件日志里没路径,看这一轮期间有没有待提交文件被改过。前后留 2 秒:落盘和记日志时间有先后。
-  // ponytail: 文件后来又被改过一次,mtime 就不落在早先那轮了,那轮小结会漏;同仓库并行的会话会误收。要更准得逐轮快照 git 状态。
-  const touched = (e) => { const a = Date.parse(e.from) - 2000, b = Date.parse(e.to) + 2000; return mtimes.some((t) => t >= a && t <= b); };
+  // 有快照的轮次(result.changes)文件清单是准的,只看 hit。没快照的老日志:Bash 改的文件日志里没路径,
+  // 看这一轮期间有没有待提交文件被改过。前后留 2 秒:落盘和记日志时间有先后。
+  // ponytail: 老日志那条退路里,文件后来又被改过一次,mtime 就不落在早先那轮了,那轮小结会漏。
+  const touched = (e) => { if (e.round.snap) return false; const a = Date.parse(e.from) - 2000, b = Date.parse(e.to) + 2000; return mtimes.some((t) => t >= a && t <= b); };
   // 水位是条数计数:agent 自己提交后旧小结被丢弃、总数变少,旧水位可能比总数还大 —— 失效就从头算,别一刀切没
   // (过滤放在 slice 之后:水位存的是「全部小结」里的位置,先过滤会让下标对不上)
   const wm = loadCommitWm()[id] || 0;
   const from = force || wm > all.length ? 0 : wm;
-  const pending = all.slice(from).filter((e) => e.files.some(hit) || touched(e)).map((e) => e.text);
+  const pending = all.slice(from).filter((e) => e.round.files.some(hit) || touched(e)).map((e) => e.text);
   const join = (a) => (a.length === 1 ? a[0] : a.map((s) => `- ${s}`).join("\n"));
   if (pending.length) return join(pending);
   // 本会话没动过这些文件(改动是别的会话 / 手动改的):看其他会话的小结,谁的改动文件落在当前未提交文件里就取谁的。
@@ -938,7 +952,7 @@ async function buildCommitMessage(cwd, id, force) {
     for (const e of loadIndex()) {
       if (e.id === id) continue;
       try { if (fs.statSync(path.join(SESS_DIR, `${e.id}.jsonl`)).mtimeMs < minM) continue; } catch { continue; } // 日志比最老的脏文件还旧 = 不可能改过它们
-      for (const s of collectRoundSummaries(e.id, own)) if (s.files.some(hit) && !others.includes(s.text)) others.push(s.text);
+      for (const s of collectRoundSummaries(e.id, own)) if (s.round.files.some(hit) && !others.includes(s.text)) others.push(s.text);
     }
     if (others.length) return join(others);
   }
@@ -1251,6 +1265,7 @@ const EN_DICT = {
   "没有待提交的改动": "Nothing to commit",
   "没有可用的 agent 进程": "No agent process available",
   "生成失败": "Generation failed",
+  "会话未启动,发一条消息后再看": "Session not started; send a message first",
 };
 function tr(s, params) {
   let out = LANG === "en" && EN_DICT[s] ? EN_DICT[s] : s;
@@ -2225,6 +2240,11 @@ function spawnAgent(ws, sess, { id, resume }) {
           if (sess.userInterrupted) msg = { ...msg, aborted: true };
           else { const title = loadIndex().find((e) => e.id === id)?.title || tr("会话"); pushOverlay(tr("任务完成"), tr("{{title}} 已完成", { title })); } // 用户主动中断不推
           clearTimeout(sess.interruptWatch); // interrupt() 已经把 result 逼出来了,不用再走强制重启看门狗
+          // 每轮改动卡片:挂在 result 上一起落盘、一起广播。必须在 drainMsgQueue 之前算完:
+          // 排队的下一条一送出去就会拍新的轮首快照。累计的是「这条用户消息起」的改动,后台任务续跑轮的 result 也一样。
+          const changes = await turnChanges(await sess.turnSnap, sess.agentCwd || resolveCwd(id));
+          if (gen !== sess.generation) break;
+          if (changes) msg = { ...msg, changes };
           sess.running = false;
           sess.freshDone = !msg.aborted; // 完成过一轮(非中断)→ 列表绿✅
           sess.userInterrupted = false;
@@ -2452,7 +2472,12 @@ function deliverUserMessage(ws, m) {
     if (!isSlashCmd) sess.hadUserTurn = true; // 光发 /compact 这类命令不算"聊过":上下文里没有可保的内容
     // git 现状放在**用户文本之后**:它可能有几十行,搁最前面会把用户真正问的那句挤到很远;
     // 且这是"事实校正",紧贴问题后面近因更强。取 cwd 必须在上面的 pendingCwd 迁移之后。
-    const brief = isSlashCmd ? null : await gitBrief(sess.agentCwd || resolveCwd(m.sessionId), sess);
+    // 轮首快照(每轮改动卡片)只发起不等:大仓库要拍好几秒,不能挡在「按回车」和「agent 开跑」之间。
+    // 轮末 result 那里再 await。模型出第一个工具调用总要几秒,快照通常早拍完了。
+    // ponytail: 快照比 agent 第一次改文件还慢时,那次改动会被拍进轮首、卡片里漏掉;真碰上再改成先拍完再 pushTurn。
+    const cwd = sess.agentCwd || resolveCwd(m.sessionId);
+    sess.turnSnap = snapTree(cwd);
+    const brief = isSlashCmd ? null : await gitBrief(cwd, sess);
     const content = [...notes.map((text) => ({ type: "text", text })), ...body,
       ...(brief ? [{ type: "text", text: brief }] : [])];
     // 送给 agent 的带注入;日志/回显仍用干净的 userMsg
@@ -2801,6 +2826,15 @@ wss.on("connection", (ws) => {
         send(ws, { type: "search_results", results: findMessages(m.query, m.sessionId, m.kind) });
         break;
       }
+      case "context_usage": { // 底栏「上下文」点开的构成面板。summary 档按上一轮 usage + 本地估算出数,不调模型、不花钱
+        const s = sessions.get(m.sessionId);
+        const reply = (x) => send(ws, { type: "context_usage", sessionId: m.sessionId, ...x });
+        if (!s?.q?.getContextUsage) { reply({ error: tr("会话未启动,发一条消息后再看") }); break; }
+        s.q.getContextUsage({ detail: "summary" }).then(
+          ({ gridRows, ...data }) => reply({ data }), // gridRows 是 /context 那张方格图,面板不画
+          (e) => reply({ error: String(e?.message || e) }));
+        break;
+      }
       case "usage_refresh": { // 前端在限额窗口重置那一刻请求即时刷新,不必干等下一拍轮询
         refreshSubscriptionUsage();
         refreshKimiUsage();
@@ -2855,7 +2889,7 @@ wss.on("connection", (ws) => {
       }
       case "git_file_diff": {
         const cwd = resolveCwd(m.sessionId);
-        gitFileDiff(cwd, m.from, m.to, m.file).then((data) => send(ws, { type: "git_file_diff", sessionId: m.sessionId, ...data }));
+        gitFileDiff(cwd, m.from, m.to, m.file, !!m.tree).then((data) => send(ws, { type: "git_file_diff", sessionId: m.sessionId, ...data }));
         break;
       }
       case "git_compare": {

@@ -26,6 +26,7 @@ import { defaultRuleContent, destinationLabel, suggestionLabel } from "../permis
 import { Composer } from "./Composer";
 import { stashBtwDraft } from "./BtwTab";
 import { CommitDialog } from "./CommitDialog";
+import { TurnChanges } from "./TurnChanges";
 import { GitMapDialog } from "./GitMapDialog";
 import { openImageWindow, openEditorWindow } from "../popout";
 import { isEditable } from "./FileEditor";
@@ -1248,7 +1249,7 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
                       每次上下文一变就把整排卡片顶掉重渲。 */}
                   {isActive
                     ? <ActiveAgentBubble items={g.agent} running showFull={false} cwd={session.termCwd || session.cwd} liveInput={session.contextTokens} anchorTs={anchor} turnStart={anchor || undefined} retry={session.apiRetry} onShowTurn={onShowTurn} onPermission={onPerm} agentLabel={t("{{name}} 的回复", { name: nameOf(turnModel) })} />
-                    : <AgentTurnCard items={g.agent} running={false} showFull cwd={session.termCwd || session.cwd} anchorTs={anchor} bgWait={bgWait} waiting={lastIdle && waitingBg} authCredAt={claudeCredAt} onResend={lastIdle ? onResendLast : undefined} onShowTurn={onShowTurn} onPermission={onPerm} agentLabel={t("{{name}} 的回复", { name: nameOf(turnModel) })} />}
+                    : <AgentTurnCard items={g.agent} running={false} showFull sid={session.id} cwd={session.termCwd || session.cwd} anchorTs={anchor} bgWait={bgWait} waiting={lastIdle && waitingBg} authCredAt={claudeCredAt} onResend={lastIdle ? onResendLast : undefined} onShowTurn={onShowTurn} onPermission={onPerm} agentLabel={t("{{name}} 的回复", { name: nameOf(turnModel) })} />}
                   {/* 建议 chips(左)和复制/贴回按钮(右)同占一行 —— 分两行时按钮被 chips 顶得离气泡老远 */}
                   {!isActive && (
                     <div className="turn-foot">
@@ -1504,13 +1505,17 @@ const BAD_IMAGE = /image in the conversation could not be processed/i;
 // memo:一条长会话里这张卡片有几十份,而每次流式 chunk 都会重渲整个 <Chat>。
 // 历史轮的 props 全是稳定值(见调用处注释),浅比较一过就整棵子树跳过 —— 卡片里有 Markdown 整树渲染,
 // 这是聊天页最贵的一块。注意别再往它的 props 里塞每次新建的对象/数组/箭头函数,塞一个就全废。
-const AgentTurnCard = memo(function AgentTurnCard({ items, running, showFull, cwd, liveInput, anchorTs, bgWait, waiting, turnStart, retry, authCredAt, onResend, onShowTurn, onPermission, agentLabel }: { items: TimelineItem[]; running: boolean; showFull?: boolean; cwd: string; liveInput?: number; anchorTs: number; bgWait?: BgTask[]; waiting?: boolean; turnStart?: number; retry?: ApiRetry | null; authCredAt?: number; onResend?: () => void; onShowTurn: (ts: number) => void; onPermission: OnPermission; agentLabel?: string }) {
+const AgentTurnCard = memo(function AgentTurnCard({ items, running, showFull, sid, cwd, liveInput, anchorTs, bgWait, waiting, turnStart, retry, authCredAt, onResend, onShowTurn, onPermission, agentLabel }: { items: TimelineItem[]; running: boolean; showFull?: boolean; sid?: string; cwd: string; liveInput?: number; anchorTs: number; bgWait?: BgTask[]; waiting?: boolean; turnStart?: number; retry?: ApiRetry | null; authCredAt?: number; onResend?: () => void; onShowTurn: (ts: number) => void; onPermission: OnPermission; agentLabel?: string }) {
   const { t } = useTranslation();
   const { authAction } = useApi();
   // 详情按钮。放这儿而不是让调用方传 () => onShowTurn(anchor):那样每轮都是新函数,memo 白做。
   const onClick = () => onShowTurn(anchorTs);
   // 本轮结算行(耗时/token)。跟着 items 走 —— 原来在调用处现算,每次都是新对象,同样顶掉 memo。
   const settle = useMemo(() => running ? null : aggregateRound(items, anchorTs || items[0]?.ts), [running, items, anchorTs]);
+  // 改动是从这条用户消息起累计的,后台任务续跑轮的 result 也带一份 —— 取最后一份就是整轮的
+  const changes = useMemo(() => {
+    for (let i = items.length - 1; i >= 0; i--) { const it = items[i]; if (it.kind === "result" && it.changes) return it.changes; }
+  }, [items]);
   // 待授权请求就地放在卡片内部,不另起一张卡。AskUserQuestion 改在输入框处强制作答,不塞进卡片。
   const pendingPerms = items.filter((it): it is Extract<TimelineItem, { kind: "permission" }> => it.kind === "permission" && !it.decision && it.toolName !== "AskUserQuestion");
   const fallback = items.find((it): it is Extract<TimelineItem, { kind: "fallback" }> => it.kind === "fallback");
@@ -1604,6 +1609,7 @@ const AgentTurnCard = memo(function AgentTurnCard({ items, running, showFull, cw
           : t("⏳ 请求失败{{code}},正在第 {{n}}/{{max}} 次重试…", { code: retry.status ? `(${retry.status})` : "", n: retry.attempt, max: retry.max })}</div>
       )}
       {!!bgWait?.length && <BgTasksBar tasks={bgWait} />}
+      {!running && sid && !!changes?.files.length && <TurnChanges sid={sid} ch={changes} />}
       {settle && <RoundMeta r={settle} doneTs={!running ? doneTs : undefined} />}
       {(skills.length > 0 || mcps.length > 0) && <SkillMcpTags skills={skills} mcps={mcps} activeSkills={activeSkills} activeMcps={activeMcps} />}
       {/* 详情只由这个箭头触发(不再点整个气泡);圆形外框增大点击面积 */}

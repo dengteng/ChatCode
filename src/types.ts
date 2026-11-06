@@ -25,7 +25,22 @@ export type TimelineItem =
   // /compact 压缩上下文。SDK 只给开始(system/status)与结束(system/compact_boundary),没有百分比,
   // 所以运行中是不定态动画;结束后用 pre/post token 数说明压掉了多少。
   | { kind: "compact"; running: boolean; auto?: boolean; preTokens?: number; postTokens?: number; durationMs?: number; error?: string; ts: number }
-  | { kind: "result"; costUsd: number; durationMs: number; usage: any; isError: boolean; aborted?: boolean; ts: number };
+  | { kind: "result"; costUsd: number; durationMs: number; usage: any; isError: boolean; aborted?: boolean; changes?: TurnChanges; ts: number };
+
+// 每轮改动卡片(sidecar 的 turnChanges):这条用户消息起到本轮 result 为止改了哪些文件。
+// from/to 是轮首/轮末两张工作区快照的 git tree,点文件按这两个看 diff;file 相对仓库根 root。
+export interface TurnChanges { root: string; from: string; to: string; files: { file: string; add: number | null; del: number | null }[] }
+
+// 底栏「上下文」构成面板(SDK getContextUsage 的 summary 档,去掉了方格图)
+export interface ContextUsage {
+  categories: { name: string; tokens: number; isDeferred?: boolean }[];
+  totalTokens: number; maxTokens: number; percentage: number;
+  autoCompactThreshold?: number; isAutoCompactEnabled: boolean;
+  memoryFiles: { path: string; type: string; tokens: number }[];
+  mcpTools: { name: string; serverName: string; tokens: number; isLoaded?: boolean }[];
+  skills?: { totalSkills: number; includedSkills: number; tokens: number; skillFrontmatter: { name: string; source: string; tokens: number }[] };
+  messageBreakdown?: { toolCallsByType: { name: string; callTokens: number; resultTokens: number }[]; attachmentsByType: { name: string; tokens: number }[] };
+}
 
 // 权限建议:SDK 在 canUseTool 里给出,点"允许并记住"时原样回填到 PermissionResult.updatedPermissions。
 // destination 由 SDK 决定(addRules 建议 localSettings,其余建议 session),不需要我们选。
