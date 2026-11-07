@@ -1,6 +1,7 @@
 import { createContext, Fragment, useContext, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, isValidElement, type ComponentProps, type ReactNode } from "react";
-import { GitFork, GitBranch, ChevronRight, ChevronDown, Folder, Server, Puzzle, Plug, ArrowDown, Wrench, Check, Copy, X, CircleHelp, Lock, Image as ImageIcon, MessageSquare, Ban, Pin, Pencil, TriangleAlert, Loader2, Brain, RotateCcw, CornerDownRight, Paperclip, MessageCircleQuestion, Reply } from "lucide-react";
+import { GitFork, GitBranch, ChevronRight, ChevronDown, Folder, Server, Puzzle, Plug, ArrowDown, Wrench, Check, Copy, X, CircleHelp, Lock, Image as ImageIcon, MessageSquare, Ban, Pin, Pencil, TriangleAlert, Loader2, Brain, RotateCcw, CornerDownRight, Paperclip, MessageCircleQuestion, Reply, Star } from "lucide-react";
 import { splitQuote, stripQuote, type Quote } from "../lib/quote";
+import { addFavorite, type Favorite } from "../lib/favorites";
 import { createPortal } from "react-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -380,6 +381,11 @@ function pasteToComposer(text: string) {
 // 引用某条消息继续问:输入框上方挂一条引用条(可取消),发送时打头带上 <reply-to>,见 lib/quote.ts
 function quoteToComposer(q: Quote) {
   window.dispatchEvent(new CustomEvent("cc-set-quote", { detail: q }));
+}
+
+// 收藏:只挂在已完成的消息上(agent 那排按钮本来就只在回合跑完后才渲染),存本机,见 lib/favorites.ts
+function favorite(f: Omit<Favorite, "id" | "savedAt">, sessionId: string) {
+  toast(addFavorite(f, sessionId) ? i18n.t("已收藏到本机，请在设置页面查看收藏内容") : i18n.t("这条已经收藏过了"), "success");
 }
 
 // 气泡右上角的"贴到输入框":放在复制按钮左边,一键把整条内容变成输入框里的引用 chip
@@ -1211,6 +1217,7 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
                       {/* 有发送时的 composer 快照(本会话内发的)→ 图片+引用 chip 全还原;历史老消息只有 blocks → 图片可还原、引用退化为文本 */}
                       <button title={t("编辑:回填到输入框")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); const u = g.user as any; window.dispatchEvent(new CustomEvent("cc-fill-composer", { detail: u.composerHtml != null ? { html: u.composerHtml, imgs: u.composerImgs } : { blocks: u.blocks } })); } }}><Pencil size={13} /></button>
                       {uText && <button title={t("引用这条消息继续问")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); quoteToComposer({ from: t("我的消息 {{clock}}", { clock: fmtClock(g.user.ts) }), ts: g.user.ts, text: uText }); } }}><Reply size={13} /></button>}
+                      {uText && <button title={t("收藏")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); favorite({ msgTs: g.user.ts, session: session.title, cwd: session.cwd, sender: getUserName() || t("我"), text: uText }, session.id); } }}><Star size={13} /></button>}
                       <button title={t("复制内容")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); copyText(uText).then((ok) => ok && toast(t("已复制"), "success")); } }}><Copy size={13} /></button>
                     </div>
                   )}
@@ -1277,6 +1284,7 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
                           <button data-tip={t("顺便问问")} aria-label={t("顺便问问:整条回复带进 btw 输入框")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); stashBtwDraft(turnCopyText(g.agent)); } }}><MessageCircleQuestion size={13} /></button>
                           {/* 引用:ts 用这一行的 data-ts,引用卡片点回来时按它定位 */}
                           <button data-tip={t("引用")} aria-label={t("引用这条回复继续问")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); const ts = g.agent[0]?.ts ?? anchor; quoteToComposer({ from: t("{{name}} 的回复 {{clock}}", { name: nameOf(turnModel), clock: fmtClock(ts) }), ts, text: turnCopyText(g.agent) }); } }}><Reply size={13} /></button>
+                          <button data-tip={t("收藏")} aria-label={t("收藏这条回复")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); favorite({ msgTs: g.agent[0]?.ts ?? anchor, session: session.title, cwd: session.cwd, sender: nameOf(turnModel), text: turnCopyText(g.agent) }, session.id); } }}><Star size={13} /></button>
                           <button data-tip={t("贴到输入框")} aria-label={t("贴到输入框:整条回复变成一个引用 chip")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); pasteToComposer(turnCopyText(g.agent)); } }}><Paperclip size={13} /></button>
                           {/* 富文本复制:HTML 取屏幕上那份渲染结果(表格粘到飞书/Word 还是表格),纯文本退回 Markdown 原文 */}
                           <button data-tip={t("复制整条回复")} aria-label={t("复制整条回复")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault();

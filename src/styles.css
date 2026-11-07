@@ -1879,6 +1879,7 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 .ssh-test-result.fail { color: #d9534f; background: rgba(217,83,79,.08); border-radius: 6px; padding: 4px 8px; margin-left: -2px; }
 .ssh-host-actions { display: flex; gap: 4px; flex-shrink: 0; }
 .ssh-host-actions .danger:hover { color: #d9534f; }
+.fav-text { margin-top: 6px; font-size: 12px; line-height: 1.55; word-break: break-word; max-height: 180px; overflow-y: auto; user-select: text; }
 .ssh-host-form { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; padding: 12px; border: 1px dashed var(--border); border-radius: 10px; }
 .ssh-host-form label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
 .ssh-host-form input { width: 100%; }

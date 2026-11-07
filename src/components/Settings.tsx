@@ -15,13 +15,14 @@ import { EXT_NOTE_ZH } from "../extNotesZh";
 import { openEditorWindow } from "../popout";
 import { MEMORY_ROOT_KEY, VAULT_MEMORY_DIR, getMemoryRoot, applyMemoryRoot, detectObsidianVaults } from "../memory";
 import { btnPress } from "../lib/utils";
+import { loadFavorites, removeFavorite } from "../lib/favorites";
 import { copyText } from "./Chat";
 import { modelLogo } from "./Avatar";
 // 「个人资料」页单独成文件:开源版与内部版这一页装的东西不同,差异全收在那里,本文件两版逐字相同
 import { ProfilePane } from "./ProfilePane";
 import { checkVersion, APP_VERSION, SDK_VERSION, ApiError, type VersionCheck } from "../version";
 
-type Tab = "appearance" | "account" | "profile" | "github" | "ssh" | "extensions" | "memory" | "notify" | "about";
+type Tab = "appearance" | "account" | "profile" | "github" | "ssh" | "extensions" | "memory" | "favorites" | "notify" | "about";
 
 // 滑杆填充长度。原生 accent-color 的填充只走到 thumb 圆心 —— 拉到底也差半个 thumb,看着像"拉不到头"。
 // 这里算到 thumb 的右边沿:最小值时填充正好被 thumb 盖住(看着空),最大值时铺满整条(看着满)。
@@ -52,7 +53,7 @@ export function Settings({ onClose, initialTab, theme, onPickTheme, customBg, cu
         <div className="settings-body">
           <nav className="settings-nav">
             {/* 这个 tab 装的是 个人资料 + 账号/登录/同步(SHOW_ACCOUNT 关掉时就只剩头像昵称,名字随之改回「个人资料」) */}
-            {([["profile", "个人资料"],["account", "大模型"], ["github", "GitHub连接"], ["ssh", "SSH连接"], ["extensions", "Plugin/MCP/Skills"], ["memory", "记忆"], ["appearance", "语言与主题"], ["notify", "通知提醒"], ["about", "关于"]] as [Tab, string][]).map(([k, label]) => (
+            {([["profile", "个人资料"],["account", "大模型"], ["github", "GitHub连接"], ["ssh", "SSH连接"], ["extensions", "Plugin/MCP/Skills"], ["memory", "记忆"], ["favorites", "收藏夹"], ["appearance", "语言与主题"], ["notify", "通知提醒"], ["about", "关于"]] as [Tab, string][]).map(([k, label]) => (
               <button key={k} type="button" className={tab === k ? "sel" : ""} {...btnPress(() => setTab(k))}>{t(label)}</button>
             ))}
           </nav>
@@ -64,6 +65,7 @@ export function Settings({ onClose, initialTab, theme, onPickTheme, customBg, cu
             {tab === "ssh" && <SshTab />}
             {tab === "extensions" && <ExtensionsTab />}
             {tab === "memory" && <MemorySettingsTab />}
+            {tab === "favorites" && <FavoritesTab />}
             {tab === "notify" && <NotifyTab />}
             {tab === "about" && <AboutTab />}
           </div>
@@ -242,6 +244,36 @@ function NotifyTab() {
         {t("完成时播放提示音")}
       </label>
       <p className="settings-note">{t("任务跑完、或者会话等你授权时,Dock 里的图标会跳一下、并响一声。窗口正在前台时系统本来就不跳,但提示音照响。两项都不需要系统通知权限;桌面通知另归系统管,不受这里影响。")}</p>
+    </section>
+  );
+}
+
+// 收藏夹:气泡下方星标收进来的消息,只存本机(lib/favorites.ts)。新收藏的排最前。
+function FavoritesTab() {
+  const { t } = useTranslation();
+  const [list, setList] = useState(loadFavorites);
+  const fmt = (ts: number) => new Date(ts).toLocaleString();
+  return (
+    <section className="settings-section">
+      <h4>{t("收藏夹")}</h4>
+      {list.length === 0 && <p className="muted">{t("还没有收藏。在已完成的消息下方点星标即可收藏。")}</p>}
+      <div className="ssh-host-list">
+        {list.map((f) => (
+          <div className="ssh-host-row fav-row" key={f.id}>
+            <div className="ssh-host-meta">
+              <b>{f.sender}</b> <span className="muted">· {f.session || t("未命名会话")}</span>
+              <div className="muted" title={f.cwd}>{f.cwd}</div>
+              <div className="muted">{t("消息时间 {{a}} · 收藏于 {{b}}", { a: fmt(f.msgTs), b: fmt(f.savedAt) })}</div>
+              <div className="fav-text md"><Markdown remarkPlugins={[remarkGfm]}>{f.text}</Markdown></div>
+            </div>
+            <div className="ssh-host-actions">
+              <button className="ghost" title={t("复制内容")} {...btnPress(() => copyText(f.text).then((ok) => ok && toast(t("已复制"), "success")))}><Copy size={13} /></button>
+              <button className="ghost danger" title={t("取消收藏")} {...btnPress(() => setList(removeFavorite(f.id)))}><Trash2 size={13} /></button>
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className="settings-note">{t("收藏只存在本机,暂不跨电脑同步。")}</p>
     </section>
   );
 }
