@@ -4,6 +4,7 @@ import { X } from "lucide-react";
 import { useStore } from "../store";
 import { brandName } from "./Avatar";
 import { btnPress } from "../lib/utils";
+import { focusMessage } from "./Chat";
 
 // 搜索结果横跨多天,只给 HH:mm 分不清哪天;今天的省掉日期,其余带 MM-DD
 function fmtWhen(iso?: string) {
@@ -61,7 +62,7 @@ export function SearchPanel({ onClose }: { onClose: () => void }) {
           if (!state.sessions[r.sessionId]) reopenSession(r.sessionId); else dispatch({ type: "activate", id: r.sessionId });
           // 光切会话不够,还得滚到那条消息:Chat 接住这个事件,按 ts 定位并高亮(会话还在回放历史时它会重试)
           const ts = r.ts ? +new Date(r.ts) : 0;
-          if (ts) window.dispatchEvent(new CustomEvent("cc-focus-msg", { detail: { id: r.sessionId, ts } }));
+          if (ts) focusMessage(r.sessionId, ts);
           onClose();
         })}>
           <span className="search-kind">{r.kind === "user" ? t("你") : r.kind === "agent" ? (state.sessions[r.sessionId]?.info.model ? brandName(state.sessions[r.sessionId].info.model!) : t("Agent")) : t("工具")}</span>

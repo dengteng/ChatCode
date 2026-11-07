@@ -15,8 +15,8 @@ import { EXT_NOTE_ZH } from "../extNotesZh";
 import { openEditorWindow } from "../popout";
 import { MEMORY_ROOT_KEY, VAULT_MEMORY_DIR, getMemoryRoot, applyMemoryRoot, detectObsidianVaults } from "../memory";
 import { btnPress } from "../lib/utils";
-import { loadFavorites, removeFavorite } from "../lib/favorites";
-import { copyText } from "./Chat";
+import { loadFavorites, removeFavorite, favSessionId, favPreview, type Favorite } from "../lib/favorites";
+import { copyText, focusMessage } from "./Chat";
 import { modelLogo } from "./Avatar";
 // 「个人资料」页单独成文件:开源版与内部版这一页装的东西不同,差异全收在那里,本文件两版逐字相同
 import { ProfilePane } from "./ProfilePane";
@@ -65,7 +65,7 @@ export function Settings({ onClose, initialTab, theme, onPickTheme, customBg, cu
             {tab === "ssh" && <SshTab />}
             {tab === "extensions" && <ExtensionsTab />}
             {tab === "memory" && <MemorySettingsTab />}
-            {tab === "favorites" && <FavoritesTab />}
+            {tab === "favorites" && <FavoritesTab onClose={onClose} />}
             {tab === "notify" && <NotifyTab />}
             {tab === "about" && <AboutTab />}
           </div>
@@ -249,24 +249,42 @@ function NotifyTab() {
 }
 
 // 收藏夹:气泡下方星标收进来的消息,只存本机(lib/favorites.ts)。新收藏的排最前。
-function FavoritesTab() {
+// 一条一张横向卡片,只露两行摘要;点卡片关掉设置、跳回原消息。
+function FavoritesTab({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
+  const { state, dispatch } = useStore();
+  const { reopenSession, restoreSession } = useApi();
   const [list, setList] = useState(loadFavorites);
   const fmt = (ts: number) => new Date(ts).toLocaleString();
+  // 会话已打开 → 切过去;在列表里没打开 → reopen;已关闭(首页「最近历史」)→ 先恢复回列表再打开。
+  // 定位交给 focusMessage:会话换上来之后 Chat 自己按 msgTs 滚过去,历史不够会往前补。
+  const jump = (f: Favorite) => {
+    const id = favSessionId(f);
+    if (state.sessions[id]) dispatch({ type: "activate", id });
+    else if (state.index.some((e) => e.id === id)) reopenSession(id);
+    else if (state.closed.some((e) => e.id === id)) restoreSession(id);
+    else { toast(t("原会话已经删除，没法跳回原消息"), "error"); return; }
+    focusMessage(id, f.msgTs);
+    onClose();
+  };
   return (
     <section className="settings-section">
       <h4>{t("收藏夹")}</h4>
       {list.length === 0 && <p className="muted">{t("还没有收藏。在已完成的消息下方点星标即可收藏。")}</p>}
-      <div className="ssh-host-list">
+      <div className="fav-list">
         {list.map((f) => (
-          <div className="ssh-host-row fav-row" key={f.id}>
-            <div className="ssh-host-meta">
-              <b>{f.sender}</b> <span className="muted">· {f.session || t("未命名会话")}</span>
-              <div className="muted" title={f.cwd}>{f.cwd}</div>
-              <div className="muted">{t("消息时间 {{a}} · 收藏于 {{b}}", { a: fmt(f.msgTs), b: fmt(f.savedAt) })}</div>
-              <div className="fav-text md"><Markdown remarkPlugins={[remarkGfm]}>{f.text}</Markdown></div>
+          <div className="fav-card" key={f.id} role="button" tabIndex={0} title={t("跳回原消息")}
+            {...btnPress(() => jump(f))}>
+            <div className="fav-main">
+              <div className="fav-head">
+                <b>{f.sender}</b>
+                <span className="muted" title={f.cwd}>· {f.session || t("未命名会话")}</span>
+                <span className="fav-time muted" title={t("消息时间 {{a}} · 收藏于 {{b}}", { a: fmt(f.msgTs), b: fmt(f.savedAt) })}>{t("收藏于 {{b}}", { b: fmt(f.savedAt) })}</span>
+              </div>
+              <div className="fav-text">{favPreview(f.text)}</div>
             </div>
-            <div className="ssh-host-actions">
+            {/* 按钮自己吃掉按下事件,别冒泡成「跳回原消息」 */}
+            <div className="fav-actions" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
               <button className="ghost" title={t("复制内容")} {...btnPress(() => copyText(f.text).then((ok) => ok && toast(t("已复制"), "success")))}><Copy size={13} /></button>
               <button className="ghost danger" title={t("取消收藏")} {...btnPress(() => setList(removeFavorite(f.id)))}><Trash2 size={13} /></button>
             </div>

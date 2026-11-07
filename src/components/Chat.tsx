@@ -1,7 +1,7 @@
 import { createContext, Fragment, useContext, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, isValidElement, type ComponentProps, type ReactNode } from "react";
 import { GitFork, GitBranch, ChevronRight, ChevronDown, Folder, Server, Puzzle, Plug, ArrowDown, Wrench, Check, Copy, X, CircleHelp, Lock, Image as ImageIcon, MessageSquare, Ban, Pin, Pencil, TriangleAlert, Loader2, Brain, RotateCcw, CornerDownRight, Paperclip, MessageCircleQuestion, Reply, Star } from "lucide-react";
 import { splitQuote, stripQuote, type Quote } from "../lib/quote";
-import { addFavorite, type Favorite } from "../lib/favorites";
+import { addFavorite, removeFavorite, favId, useFavoriteIds, type Favorite } from "../lib/favorites";
 import { createPortal } from "react-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -384,8 +384,19 @@ function quoteToComposer(q: Quote) {
 }
 
 // 收藏:只挂在已完成的消息上(agent 那排按钮本来就只在回合跑完后才渲染),存本机,见 lib/favorites.ts
-function favorite(f: Omit<Favorite, "id" | "savedAt">, sessionId: string) {
-  toast(addFavorite(f, sessionId) ? i18n.t("已收藏到本机，请在设置页面查看收藏内容") : i18n.t("这条已经收藏过了"), "success");
+// 已收藏的再点一次 = 取消收藏
+function favorite(f: Omit<Favorite, "id" | "savedAt" | "sessionId">, sessionId: string, on: boolean) {
+  if (on) { removeFavorite(favId(sessionId, f.msgTs)); toast(i18n.t("已取消收藏"), "success"); return; }
+  addFavorite(f, sessionId);
+  toast(i18n.t("已收藏到本机，请在设置页面查看收藏内容"), "success");
+}
+
+// 跳到某会话的某条消息(搜索结果、收藏夹都走这里)。切会话后 Chat 要等下一次渲染才换上新 session.id,
+// 这时发的事件会被旧会话的监听器丢掉 —— 所以先记下来,Chat 换到那个会话时再取。
+let pendingFocus: { id: string; ts: number } | null = null;
+export function focusMessage(id: string, ts: number) {
+  pendingFocus = { id, ts };
+  window.dispatchEvent(new CustomEvent("cc-focus-msg", { detail: { id, ts } }));
 }
 
 // 气泡右上角的"贴到输入框":放在复制按钮左边,一键把整条内容变成输入框里的引用 chip
@@ -673,6 +684,7 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
   const { state, respondPermission, sshReconnect, sshClose, configureSsh, chooseResume, bindProjectDir, requestGitInfo, runTerminal, listSshHosts, sendMessage, enqueuePending, loadOlderHistory } = useStore();
   const bottomRef = useRef<HTMLDivElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
+  const favIds = useFavoriteIds();
   const stick = useRef(true); // 是否跟随底部:运行中往上翻历史时不该被新消息拽回去
   // 编程式滚动的时刻 + 上一次的 scrollTop。判"用户是不是在往上翻"要靠这两个:
   // 钉底、重绘补的那 1px、切会话恢复位置都会发 scroll 事件,拿它们当用户意图会把跟随状态搅乱。
@@ -756,7 +768,8 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
   // 工具调用这种没有独立行的条目,所以取"不晚于它的最后一行"——落到所在回合的卡片上。
   const [focusTs, setFocusTs] = useState<number | null>(null);
   useEffect(() => {
-    const on = (e: Event) => { const d = (e as CustomEvent).detail; if (d?.id === session.id && d.ts) setFocusTs(d.ts); };
+    const on = (e: Event) => { const d = (e as CustomEvent).detail; if (d?.id === session.id && d.ts) { pendingFocus = null; setFocusTs(d.ts); } };
+    if (pendingFocus?.id === session.id) { setFocusTs(pendingFocus.ts); pendingFocus = null; }
     window.addEventListener("cc-focus-msg", on);
     return () => window.removeEventListener("cc-focus-msg", on);
   }, [session.id]);
@@ -1217,7 +1230,7 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
                       {/* 有发送时的 composer 快照(本会话内发的)→ 图片+引用 chip 全还原;历史老消息只有 blocks → 图片可还原、引用退化为文本 */}
                       <button title={t("编辑:回填到输入框")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); const u = g.user as any; window.dispatchEvent(new CustomEvent("cc-fill-composer", { detail: u.composerHtml != null ? { html: u.composerHtml, imgs: u.composerImgs } : { blocks: u.blocks } })); } }}><Pencil size={13} /></button>
                       {uText && <button title={t("引用这条消息继续问")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); quoteToComposer({ from: t("我的消息 {{clock}}", { clock: fmtClock(g.user.ts) }), ts: g.user.ts, text: uText }); } }}><Reply size={13} /></button>}
-                      {uText && <button title={t("收藏")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); favorite({ msgTs: g.user.ts, session: session.title, cwd: session.cwd, sender: getUserName() || t("我"), text: uText }, session.id); } }}><Star size={13} /></button>}
+                      {uText && (() => { const on = favIds.has(favId(session.id, g.user.ts)); return <button className={on ? "fav-on" : undefined} title={t(on ? "取消收藏" : "收藏")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); favorite({ msgTs: g.user.ts, session: session.title, cwd: session.cwd, sender: getUserName() || t("我"), text: uText }, session.id, on); } }}><Star size={13} /></button>; })()}
                       <button title={t("复制内容")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); copyText(uText).then((ok) => ok && toast(t("已复制"), "success")); } }}><Copy size={13} /></button>
                     </div>
                   )}
@@ -1284,7 +1297,7 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
                           <button data-tip={t("顺便问问")} aria-label={t("顺便问问:整条回复带进 btw 输入框")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); stashBtwDraft(turnCopyText(g.agent)); } }}><MessageCircleQuestion size={13} /></button>
                           {/* 引用:ts 用这一行的 data-ts,引用卡片点回来时按它定位 */}
                           <button data-tip={t("引用")} aria-label={t("引用这条回复继续问")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); const ts = g.agent[0]?.ts ?? anchor; quoteToComposer({ from: t("{{name}} 的回复 {{clock}}", { name: nameOf(turnModel), clock: fmtClock(ts) }), ts, text: turnCopyText(g.agent) }); } }}><Reply size={13} /></button>
-                          <button data-tip={t("收藏")} aria-label={t("收藏这条回复")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); favorite({ msgTs: g.agent[0]?.ts ?? anchor, session: session.title, cwd: session.cwd, sender: nameOf(turnModel), text: turnCopyText(g.agent) }, session.id); } }}><Star size={13} /></button>
+                          {(() => { const ts = g.agent[0]?.ts ?? anchor; const on = favIds.has(favId(session.id, ts)); return <button className={on ? "fav-on" : undefined} data-tip={t(on ? "取消收藏" : "收藏")} aria-label={t(on ? "取消收藏" : "收藏这条回复")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); favorite({ msgTs: ts, session: session.title, cwd: session.cwd, sender: nameOf(turnModel), text: turnCopyText(g.agent) }, session.id, on); } }}><Star size={13} /></button>; })()}
                           <button data-tip={t("贴到输入框")} aria-label={t("贴到输入框:整条回复变成一个引用 chip")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); pasteToComposer(turnCopyText(g.agent)); } }}><Paperclip size={13} /></button>
                           {/* 富文本复制:HTML 取屏幕上那份渲染结果(表格粘到飞书/Word 还是表格),纯文本退回 Markdown 原文 */}
                           <button data-tip={t("复制整条回复")} aria-label={t("复制整条回复")} onMouseDown={(e) => { if (e.button === 0) { e.preventDefault();

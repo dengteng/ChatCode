@@ -1879,7 +1879,23 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 .ssh-test-result.fail { color: #d9534f; background: rgba(217,83,79,.08); border-radius: 6px; padding: 4px 8px; margin-left: -2px; }
 .ssh-host-actions { display: flex; gap: 4px; flex-shrink: 0; }
 .ssh-host-actions .danger:hover { color: #d9534f; }
-.fav-text { margin-top: 6px; font-size: 12px; line-height: 1.55; word-break: break-word; max-height: 180px; overflow-y: auto; user-select: text; }
+/* 收藏夹:一条一张横向卡片,两行摘要,点击跳回原消息 */
+.fav-list { display: flex; flex-direction: column; gap: 8px; }
+.fav-card { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; cursor: pointer; transition: border-color .12s ease, background .12s ease; }
+.fav-card:hover, .fav-card:focus-visible { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); background: color-mix(in srgb, var(--accent) 5%, transparent); outline: none; }
+.fav-main { flex: 1; min-width: 0; }
+.fav-head { display: flex; align-items: baseline; gap: 6px; font-size: 12px; white-space: nowrap; }
+.fav-head b { font-size: 13px; }
+.fav-head .muted { overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
+.fav-time { margin-left: auto; flex-shrink: 0; }
+.fav-text { margin-top: 4px; font-size: 12px; line-height: 1.55; color: var(--text); opacity: .85; word-break: break-word;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.fav-actions { display: flex; gap: 4px; flex-shrink: 0; opacity: .55; transition: opacity .12s ease; }
+.fav-card:hover .fav-actions { opacity: 1; }
+.fav-actions .danger:hover { color: #d9534f; }
+/* 气泡下方已收藏的星标:实心 + 强调色 */
+.msg-redo-row button.fav-on { color: #f5a623; opacity: 1; }
+.msg-redo-row button.fav-on svg { fill: currentColor; }
 .ssh-host-form { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; padding: 12px; border: 1px dashed var(--border); border-radius: 10px; }
 .ssh-host-form label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
 .ssh-host-form input { width: 100%; }
