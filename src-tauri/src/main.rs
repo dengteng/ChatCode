@@ -372,7 +372,7 @@ fn find_file_down(root: &std::path::Path, target: &str) -> Option<String> {
 }
 
 /// 前端要的同一套解析(内置编辑器打开文件时用),别在 TS 里再实现一遍。
-#[tauri::command]
+#[tauri::command(async)]
 fn resolve_path_cmd(path: String, cwd: Option<String>) -> String {
     resolve_path(&path, cwd.as_deref())
 }
@@ -476,7 +476,7 @@ async fn kill_port(port: String) -> Result<(), String> {
 /// `sh -lc` 只读 /etc/profile + ~/.profile,拿到的是 path_helper 那份(/etc/paths.d 里登记过的能拿到);
 /// nvm / mise / volta 这类写在 .zshrc 的一律拿不到 —— 用它们装的 node 就会「终端里跑得通、这儿起不来」。
 /// 所以把登录 shell 那份 PATH 直接喂进去(和 run_claude 同一套)。
-#[tauri::command]
+#[tauri::command(async)]
 fn spawn_proc(cmd: String, cwd: String) -> Result<(), String> {
     let mut c = Command::new("sh");
     c.arg("-lc").arg(&cmd).current_dir(&cwd);
@@ -490,7 +490,7 @@ fn spawn_proc(cmd: String, cwd: String) -> Result<(), String> {
 /// 跑 `claude plugin ...` 之类的 CLI 命令,捕获退出码 + stdout/stderr 回前端。
 /// GUI 进程 PATH 不全,得先拿登录 shell 的 PATH 再找 claude 绝对路径。
 /// cwd:`claude mcp -s local|project` 认"当前目录属于哪个项目",跨项目操作必须切过去。
-#[tauri::command]
+#[tauri::command(async)]
 fn run_claude(args: Vec<String>, cwd: Option<String>) -> Result<(i32, String, String), String> {
     let path = login_path();
     let bin = find_claude(path.as_deref()).ok_or("找不到 claude 可执行文件")?;
@@ -522,7 +522,7 @@ fn set_app_theme(app: tauri::AppHandle, theme: String) {
 }
 
 /// 列目录:返回 (名称, 是否目录)，目录在前、按名称排序。仅一层，前端按需展开。
-#[tauri::command]
+#[tauri::command(async)]
 fn list_dir(path: String) -> Result<Vec<(String, bool)>, String> {
     let mut v: Vec<(String, bool)> = fs::read_dir(&path)
         .map_err(|e| e.to_string())?
@@ -539,7 +539,7 @@ fn list_dir(path: String) -> Result<Vec<(String, bool)>, String> {
 /// 输入框 @ 提及用:一次性递归列出项目里的相对路径(文件 + 目录),前端自己做过滤。
 /// 每敲一个字符都回 Rust 走一遍磁盘太浪费,索性走一次全量、前端缓存着过滤。
 /// 跳过 .git / node_modules / target 这类噪音目录和隐藏目录,并设总量与深度上限,防止在巨型目录里卡死。
-#[tauri::command]
+#[tauri::command(async)]
 fn walk_project(root: String) -> Result<Vec<(String, bool)>, String> {
     const SKIP: [&str; 12] = ["node_modules", "target", "dist", "build", "out", "coverage", "__pycache__", "venv", ".venv", "vendor", "Pods", ".next"];
     const MAX: usize = 20000;
@@ -564,14 +564,14 @@ fn walk_project(root: String) -> Result<Vec<(String, bool)>, String> {
 }
 
 /// 读文本文件内容(app 内编辑用)。
-#[tauri::command]
+#[tauri::command(async)]
 fn read_file(path: String) -> Result<String, String> {
     fs::read_to_string(&path).map_err(|e| e.to_string())
 }
 
 /// 读二进制文件转 base64。html 预览把 <img src="相对路径"> 内联成 data: URL 用 ——
 /// iframe 是 srcDoc,没有真实 URL 基准,图片只能连内容一起塞进文档。
-#[tauri::command]
+#[tauri::command(async)]
 fn read_file_b64(path: String) -> Result<String, String> {
     use base64::Engine;
     fs::read(&path)
@@ -580,7 +580,7 @@ fn read_file_b64(path: String) -> Result<String, String> {
 }
 
 /// 写文本文件内容(app 内保存用)。
-#[tauri::command]
+#[tauri::command(async)]
 fn write_file(path: String, content: String) -> Result<(), String> {
     if let Some(parent) = std::path::Path::new(&path).parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?; // 目录不存在(如同步落地记忆)先建
@@ -590,7 +590,7 @@ fn write_file(path: String, content: String) -> Result<(), String> {
 
 /// 列目录并带元信息:[(名字, 是否目录, 最后修改 ms)]。记忆中心用它显示"最后更新"。
 /// 目录不存在返回空表(记忆目录可能还没建),不当错误。
-#[tauri::command]
+#[tauri::command(async)]
 fn read_dir_meta(path: String) -> Result<Vec<(String, bool, u64)>, String> {
     use std::time::UNIX_EPOCH;
     let Ok(entries) = fs::read_dir(&path) else { return Ok(vec![]) };
@@ -608,7 +608,7 @@ fn read_dir_meta(path: String) -> Result<Vec<(String, bool, u64)>, String> {
 
 /// 反查一批端口谁在监听:给定端口号,返回 [(端口, 持有进程 PID, 进程名)] —— 只回当前处于 LISTEN 的。
 /// 用于把"脱离工作目录"的进程(如 ssh -L 隧道)按端口找回来:它不在项目目录树里,cwd 过滤抓不到,只能按端口反查。
-#[tauri::command]
+#[tauri::command(async)]
 fn probe_ports(ports: Vec<u16>) -> Vec<(u16, String, String)> {
     use std::collections::HashSet;
     if ports.is_empty() { return vec![]; }
@@ -635,7 +635,7 @@ fn probe_ports(ports: Vec<u16>) -> Vec<(u16, String, String)> {
 
 /// 启动前依赖检测。sidecar 靠 node 起、SDK 靠 claude 二进制干活,缺任一 app 全瘫。
 /// 返回 [(依赖名, 是否找到, 找到的绝对路径或"")],前端据此门控引导安装。
-#[tauri::command]
+#[tauri::command(async)]
 fn check_deps(app: tauri::AppHandle) -> Vec<(String, bool, String)> {
     let path = login_path();
     let p = path.as_deref();
@@ -652,7 +652,7 @@ fn check_deps(app: tauri::AppHandle) -> Vec<(String, bool, String)> {
 /// 首次启动时 claude 还没装,setup 里那次 spawn_sidecar 是直接失败的(错误只写进 sidecar.log);
 /// 而 DepGate 一旦检测通过就渲染主界面 —— 少了这一步,用户装完点「重新检测」进去的是个没有后台的
 /// 空壳(界面在,发消息没反应),得自己想到去重启 app。
-#[tauri::command]
+#[tauri::command(async)]
 fn start_sidecar(app: tauri::AppHandle) -> Result<(), String> {
     // 开发时 `npm run dev` 起的那个才是正主,别插一脚
     if cfg!(debug_assertions) {
@@ -681,7 +681,7 @@ const NPM_MIRROR: &str = "https://registry.npmmirror.com";
 /// 选默认 registry:官方源连得上就用官方,连不上(国内常态)就用 npmmirror。
 /// 直接拿 curl 探,不引 HTTP 依赖 —— macOS 自带,3 秒超时,失败即判定走镜像。
 /// ponytail: 只测"通不通"不测快慢。官方源在国内时常是"能连但极慢",那种情况用户在引导页手动切。
-#[tauri::command]
+#[tauri::command(async)]
 fn probe_registry() -> String {
     let ok = Command::new("curl")
         .args(["-sfI", "--max-time", "3", "-o", "/dev/null", NPM_OFFICIAL])
@@ -812,7 +812,7 @@ fn guard_claude(path: &str) -> Result<(), String> {
 }
 
 /// 删文件或整个目录(卸载 skill 用)。
-#[tauri::command]
+#[tauri::command(async)]
 fn remove_path(path: String) -> Result<(), String> {
     guard_claude(&path)?;
     let p = PathBuf::from(&path);
@@ -820,7 +820,7 @@ fn remove_path(path: String) -> Result<(), String> {
 }
 
 /// 改名(停用 skill = SKILL.md ↔ SKILL.md.off,claude 扫不到就不加载)。
-#[tauri::command]
+#[tauri::command(async)]
 fn rename_path(from: String, to: String) -> Result<(), String> {
     guard_claude(&from)?;
     guard_claude(&to)?;
@@ -831,7 +831,7 @@ fn rename_path(from: String, to: String) -> Result<(), String> {
 /// 只认 github 地址;clone 后扫 SKILL.md:根目录有 = 单个 skill(用仓库名);
 /// 否则找 skills/*/SKILL.md = 多个 skill。都没有则不是 skill,报错。
 /// 返回装好的 skill 名字列表。
-#[tauri::command]
+#[tauri::command(async)]
 fn install_skill_git(url: String) -> Result<Vec<String>, String> {
     let url = url.trim();
     // 归一化并校验必须是 github,取出 owner/repo
@@ -960,19 +960,15 @@ fn main() {
             if cfg!(debug_assertions) {
                 return Ok(());
             }
-            use tauri::Manager;
-            let script = app
-                .path()
-                .resolve("resources/sidecar.mjs", tauri::path::BaseDirectory::Resource)?;
-            match spawn_sidecar(&script) {
-                Ok(child) => {
-                    let state: tauri::State<Sidecar> = app.state();
-                    *state.0.lock().unwrap() = Some(child);
-                }
-                Err(e) => {
+            // 放到后台线程起:setup 跑在主线程,而 spawn_sidecar 要先跑一遍 `zsh -lic` 取 PATH(实测 1~2 秒),
+            // 这期间窗口已经显示、却收不到任何点击 —— 「刚启动输入框点不动几秒」就是它。
+            // 走 start_sidecar:它在锁里查槽位,和 DepGate 那次 start_sidecar 撞上也只会起一个。
+            let h = app.handle().clone();
+            std::thread::spawn(move || {
+                if let Err(e) = start_sidecar(h) {
                     let _ = fs::write(log_path(), format!("[ChatCode] {e}\n"));
                 }
-            }
+            });
             Ok(())
         })
         .build(tauri::generate_context!())
