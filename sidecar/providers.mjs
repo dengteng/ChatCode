@@ -196,9 +196,12 @@ export const PROVIDERS = {
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", // Gemini 的 OpenAI 兼容端点
     smallFast: "gemini-3.8-flash",
     models: [
-      // Gemini 4 Argon(2026-10-13 发布),Gemini 4 代旗舰。未写 price:同家现有条目都没写价,
-      // 官方价格页没查到就不写(见顶部 price 说明)。vision 也不写:openai 传输由代理转图,见顶部注释。
-      { value: "gemini/gemini-4-argon", model: "gemini-4-argon", displayName: "Gemini 4 Argon", description: "gemini-4-argon · 最强", provider: "gemini", contextWindow: 1_048_576 },
+      // Gemini 4 Carbon(2026-11-10 发布),Gemini 4 代新旗舰,benchmark 全面超过 Argon。未写 price:同家
+      // 现有条目都没写价(见顶部 price 说明)。vision 也不写:openai 传输由代理转图,见顶部注释。
+      { value: "gemini/gemini-4-carbon", model: "gemini-4-carbon", displayName: "Gemini 4 Carbon", description: "gemini-4-carbon · 最强", provider: "gemini", contextWindow: 1_048_576 },
+      // Gemini 4 Argon(2026-10-13 发布)。最强位置被 Carbon 取代,但 Google 仍推荐日常软件工程用它,保留为通用档。
+      // 未写 price:同家现有条目都没写价,官方价格页没查到就不写(见顶部 price 说明)。vision 也不写:openai 传输由代理转图,见顶部注释。
+      { value: "gemini/gemini-4-argon", model: "gemini-4-argon", displayName: "Gemini 4 Argon", description: "gemini-4-argon · 通用", provider: "gemini", contextWindow: 1_048_576 },
       // Gemini 3.8 Flash(2026-09-02 发布)。新一代 flash 档,取代 2.5-flash。
       { value: "gemini/gemini-3.8-flash", model: "gemini-3.8-flash", displayName: "Gemini 3.8 Flash", description: "gemini-3.8-flash · 快", provider: "gemini", contextWindow: 1_048_576 },
       // 2026-10-14 下架:被 Gemini 4 Argon 取代(新一代旗舰)。加 hidden,老会话仍可用。
