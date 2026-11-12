@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { LoaderCircle, CircleCheck, CircleAlert, Circle, Plus, Search, Settings as SettingsIcon, Blocks, X, GripVertical, FolderPlus, ChevronRight, ChevronDown, Trash2, Clock } from "lucide-react";
-import { useStore } from "../store";
+import { useStore, blockingBg } from "../store";
 import { useEnsureMemory } from "../memory";
 import { clockOf } from "./Composer";
 import type { VersionCheck } from "../version";
@@ -272,7 +272,7 @@ export function Sidebar({ onSearch, onOpenSettings, update, onShowUpdate }:
         )}
         {/* 用 bgTasks 而不是 bgWait:bgWait 是闩锁,任务清空后还会多挂一会儿(等续跑的 result),
             拿它画图标会在活儿早干完之后还转圈;真卡住时(见 store 的 20 秒兜底)更是永远转下去。 */}
-        <StatusIcon status={live?.status} freshDone={live?.freshDone} bg={(live?.bgTasks?.length ?? 0) > 0} />
+        <StatusIcon status={live?.status} freshDone={live?.freshDone} bg={!!live && blockingBg(live).length > 0} />
         <div className="session-meta">
           <div className="session-title">
             {editId === e.id ? (

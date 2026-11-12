@@ -929,5 +929,10 @@
   "已取消收藏": "Removed from favorites",
   "收藏于 {{b}}": "Saved {{b}}",
   "跳回原消息": "Jump to the original message",
-  "原会话已经删除，没法跳回原消息": "The original session was deleted, so the message can't be opened"
+  "原会话已经删除，没法跳回原消息": "The original session was deleted, so the message can't be opened",
+  "常驻服务在后台运行,可以继续对话": "A long-running service is up in the background — you can keep chatting",
+  " · 另有 {{n}} 个常驻服务": " · plus {{n}} long-running service(s)",
+  "常驻服务运行中": "Long-running service up",
+  "，不影响继续对话": ", you can keep chatting",
+  "常驻服务": "Service"
 }

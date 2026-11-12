@@ -1468,6 +1468,10 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 .bg-wait-dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--accent); animation: bg-wait-pulse 1.6s ease-in-out infinite; }
 @keyframes bg-wait-pulse { 0%, 100% { opacity: .3; transform: scale(.8); } 50% { opacity: 1; transform: scale(1.15); } }
 /* 气泡本身也给个弱提示边,和 .running 同色系但更淡 —— 一眼能从消息流里认出"这条还没完" */
+/* 常驻服务:绿点、不跳动 —— 它是「在跑着、但不用等」,和要等的后台任务区分开 */
+.bg-wait-dot.svc { background: var(--green); animation: none; }
+.bgt-tab-dot.svc { background: var(--green); }
+.bgt-badge.svc { color: var(--green); border-color: color-mix(in srgb, var(--green) 35%, var(--border)); }
 .agent-turn-card.bg-wait { border-color: color-mix(in srgb, var(--accent) 28%, var(--border)); }
 @media (prefers-reduced-motion: reduce) { .bg-wait-dot { animation: none; opacity: .8; } }
 /* 后台任务弹窗:顶部 tab 切换各任务,详情区撑满剩余高度。宽度 1.4x、高度 1.5x(相对原 760px/紧凑高度) */

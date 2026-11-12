@@ -11,7 +11,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { openPath, openUrl, revealPath } from "../native";
 import type { ApiRetry, PermissionSuggestion, ResumeChoice, ResumePrompt, Session, TimelineItem } from "../types";
 import { modelDisplayName, shortModelName } from "../types";
-import { useStore, useApi, fetchBlob, sessionBusy, PENDING_MAX, type RememberChoice } from "../store";
+import { useStore, useApi, fetchBlob, sessionBusy, blockingBg, PENDING_MAX, type RememberChoice } from "../store";
 import { applyEdgeGlow } from "../lib/edgeGlow";
 import { pushCmd } from "../lib/gitcmd";
 import { btnPress } from "../lib/utils";
@@ -707,11 +707,15 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
   // 最后一张卡的"后台等待"态跟输入框打断按钮用同一个判据(Composer 的 busy = running || bgWait),
   // 两处各判各的就会出现输入框还在等、气泡却已是完成态。任务清单按 SDK 电平列,扫整条时间线补标题
   // (前几轮起的任务也算在等)。只在真在等时扫,平时不碰 timeline。
-  const waitingBg = session.status !== "running" && (!!session.bgWait || (session.bgTasks?.length ?? 0) > 0);
-  const liveTasks = useMemo(
-    () => (waitingBg ? liveBgTasks(session.timeline, session.bgTasks ?? [], t) : NO_BG),
-    [waitingBg, session.timeline, session.bgTasks, t],
-  );
+  // 常驻服务(见 store 的 blockingBg)照样列在 bar 上,但不算「在等」:卡片不进等待态,文案也换成「不影响继续对话」。
+  const idleNow = session.status !== "running";
+  const waitingBg = idleNow && (!!session.bgWait || blockingBg(session).length > 0);
+  const showBg = idleNow && (!!session.bgWait || (session.bgTasks?.length ?? 0) > 0);
+  const liveTasks = useMemo(() => {
+    if (!showBg) return NO_BG;
+    const svc = new Set(session.bgServices ?? []);
+    return liveBgTasks(session.timeline, session.bgTasks ?? [], t).map((k) => (svc.has(k.id) ? { ...k, service: true } : k));
+  }, [showBg, session.timeline, session.bgTasks, session.bgServices, t]);
   // 登录失效条的「重发」:只挂在最后一轮。走 ref 转一手,传给 memo 卡片的是永远不变的同一个函数 ——
   // 直接传现造的箭头函数,最后那张卡每次渲染都会被顶掉重渲。
   const claudeCredAt = state.auth?.claude?.credAt ?? 0;
@@ -1581,7 +1585,7 @@ const AgentTurnCard = memo(function AgentTurnCard({ items, running, showFull, si
   // waiting:任务清单已空、正等续跑那一小会儿(bgWait 闩锁还没清)也保持等待态,
   // 否则会闪一下完成态再跳回运行中。
   return (
-    <div className={`agent-turn-card bubble ${running ? "running" : ""} ${bgWait?.length || waiting ? "bg-wait" : ""}`}>
+    <div className={`agent-turn-card bubble ${running ? "running" : ""} ${bgWait?.some((k) => !k.service) || waiting ? "bg-wait" : ""}`}>
       <div className="agent-turn-body">
         {running
           ? <WorkBody items={items} elapsed={elapsed} liveInput={liveInput} />
@@ -1708,7 +1712,7 @@ function BgTaskItem({ task }: { task: BgTask }) {
   const lines = out ? out.replace(/\s+$/, "").split("\n") : [];
   return <div className="bgt-item">
     <div className="bgt-item-head">
-      <span className={`bgt-badge ${task.kind}`}>{task.kind === "shell" ? t("命令") : task.kind === "workflow" ? t("工作流") : t("子 agent")}</span>
+      <span className={`bgt-badge ${task.service ? "svc" : task.kind}`}>{task.service ? t("常驻服务") : task.kind === "shell" ? t("命令") : task.kind === "workflow" ? t("工作流") : t("子 agent")}</span>
       <b title={task.title}>{task.title}</b>
       {task.out && <span className="muted">{t("{{n}} 行输出", { n: lines.length })}</span>}
     </div>
@@ -1727,7 +1731,10 @@ function BgTasksBar({ tasks }: { tasks: BgTask[] }) {
   // 一个几分钟的构建看着就像卡死了 —— 其实电平一清(SDK 的 background_tasks_changed)0.2s 内就续跑。
   const now = useNow(true);
   const born = useRef(Date.now()); // 找不到启动记录的任务没有 ts:退回「这条 bar 出现的时刻」,别拿 now 当起点(那样永远显示已跑 0s)
-  const since = Math.min(...tasks.map((t) => t.ts ?? born.current));
+  // 常驻服务不会自己结束,「完成后会自动继续」对它是假话:只剩服务时换一套文案;混着普通任务时计时只算要等的那些
+  const waits = tasks.filter((k) => !k.service);
+  const svcN = tasks.length - waits.length;
+  const since = Math.min(...(waits.length ? waits : tasks).map((t) => t.ts ?? born.current));
   // 折叠着也读输出,把进度顶到 bar 上 —— 拉几个 G 的镜像时,只有一个"已跑 3min"跟卡死没区别。
   // ponytail: 只跟第一个有输出文件的 shell 任务。同时跑两条命令时另一条的进度得点开看,
   //           合并多路进度要嘛串味要嘛占两行,不值当。
@@ -1759,7 +1766,9 @@ function BgTasksBar({ tasks }: { tasks: BgTask[] }) {
   return <>
     <button className="bubble-bg-wait" {...btnPress(() => { setOpen(true); setActive(0); })} title={t("查看后台任务内容与实时输出")}>
       <span className="bg-wait-l1">
-        <i className="bg-wait-dot" />{t("后台任务运行中")}{tasks.length > 1 ? t(" · {{n}} 个", { n: tasks.length }) : ""}{t(" · 已跑 ")}<span className="bgt-dur">{fmtDurationSec(now - since)}</span>{t("，完成后会自动继续")}
+        {waits.length
+          ? <><i className="bg-wait-dot" />{t("后台任务运行中")}{waits.length > 1 ? t(" · {{n}} 个", { n: waits.length }) : ""}{t(" · 已跑 ")}<span className="bgt-dur">{fmtDurationSec(now - since)}</span>{t("，完成后会自动继续")}{svcN ? t(" · 另有 {{n}} 个常驻服务", { n: svcN }) : ""}</>
+          : <><i className="bg-wait-dot svc" />{t("常驻服务运行中")}{svcN > 1 ? t(" · {{n}} 个", { n: svcN }) : ""}{t(" · 已跑 ")}<span className="bgt-dur">{fmtDurationSec(now - since)}</span>{t("，不影响继续对话")}</>}
         <ChevronRight size={13} className="bgt-chevron" />
       </span>
       {summary && <span className="bg-wait-l2" title={summary}>{summary}</span>}
@@ -1771,7 +1780,7 @@ function BgTasksBar({ tasks }: { tasks: BgTask[] }) {
           <div className="bgt-tabs">
             {tasks.map((t, i) => (
               <button key={t.id} className={`bgt-tab ${i === active ? "cur" : ""}`} title={t.title} {...btnPress(() => setActive(i))}>
-                <span className={`bgt-tab-dot ${t.kind}`} />
+                <span className={`bgt-tab-dot ${t.service ? "svc" : t.kind}`} />
                 <span className="bgt-tab-title">{t.title}</span>
               </button>
             ))}

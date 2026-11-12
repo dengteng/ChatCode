@@ -9,6 +9,37 @@
 // 「哪些任务还在跑」仍以 SDK 的 background_tasks_changed 为准(sess.bgTasks),
 // 这里只负责补详情;电平里有、详情里没有的也照列一条占位,宁可朴素不能漏。
 import { openSync, readSync, fstatSync, closeSync } from "fs";
+import { execFile } from "child_process";
+
+// lsof 找不到某个文件时退出码是 1,但 stdout 里其余文件的结果照样有效 —— 只认 stdout,不认退出码
+const lsof = (args) => new Promise((ok) => execFile("lsof", args, { timeout: 5000, maxBuffer: 4 << 20 }, (_e, out) => ok(String(out ?? ""))));
+
+/** 常驻服务探测:哪些后台 shell 任务的进程在监听 TCP 端口(dev server、webui 之类,不会自己结束)。
+ *  归属靠输出文件:CLI 把任务的 stdout 重定向到 tasks/<id>.output,服务进程继承了这个 fd,
+ *  所以「开着这个文件的进程」就是这个任务的进程树。tasks = [{ id, out }],返回是服务的 id 集。
+ *  ponytail: 只认 TCP LISTEN。只走 UDP 或 unix socket 的常驻进程认不出来,照旧当普通后台任务等。 */
+export async function serviceTaskIds(tasks) {
+  const withOut = tasks.filter((t) => t.out);
+  if (!withOut.length) return new Set();
+  const holders = new Map(); // 输出路径(lsof 回报的真实路径)-> 开着它的 pid 集
+  let pid = "";
+  for (const ln of (await lsof(["-nP", "-Fpn", "--", ...withOut.map((t) => t.out)])).split("\n")) {
+    if (ln[0] === "p") pid = ln.slice(1);
+    else if (ln[0] === "n" && pid) (holders.get(ln.slice(1)) ?? holders.set(ln.slice(1), new Set()).get(ln.slice(1))).add(pid);
+  }
+  const pids = [...new Set([...holders.values()].flatMap((s) => [...s]))];
+  if (!pids.length) return new Set();
+  const listening = new Set((await lsof(["-a", "-nP", "-iTCP", "-sTCP:LISTEN", "-Fp", "-p", pids.join(",")]))
+    .split("\n").filter((l) => l[0] === "p").map((l) => l.slice(1)));
+  const ids = new Set();
+  // /tmp 是 /private/tmp 的软链,lsof 回报的是真实路径:按 tasks/<id>.output 结尾对,不按全路径对
+  for (const [path, set] of holders) {
+    if (![...set].some((p) => listening.has(p))) continue;
+    const t = withOut.find((x) => path.endsWith(`/${x.out.split("/").pop()}`));
+    if (t) ids.add(t.id);
+  }
+  return ids;
+}
 
 // 与 src/lib/timeline.ts 的 BG_START 保持一致(那边的注释解释了三种启动写法)
 const BG_START = /(?:running in background with ID:\s*|moved to the background \(ID:\s*)([\w-]+)\)?\.\s*Output is being written to:\s*(\S+?)\.?(?=\s|$)|Async agent launched[\s\S]*?agentId:\s*([\w-]+)|Workflow launched in background\. Task ID:\s*([\w-]+)(?:\s*\nSummary:\s*([^\n]+))?|Monitor started \(task\s+([\w-]+)/g;

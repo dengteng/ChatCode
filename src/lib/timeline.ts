@@ -50,7 +50,7 @@ export function failedEdits(items: TimelineItem[]) {
 // 前台命令跑超时被 SDK 挪去后台回 "moved to the background (ID: x). Output …"。
 // 后者只认前一种的话,长命令超时转后台那轮会被当成已结束 —— 输入框还在等、气泡却是完成态。
 const BG_START = /(?:running in background with ID:\s*|moved to the background \(ID:\s*)([\w-]+)\)?\.\s*Output is being written to:\s*(\S+?)\.?(?=\s|$)|Async agent launched[\s\S]*?agentId:\s*([\w-]+)|Workflow launched in background\. Task ID:\s*([\w-]+)(?:\s*\nSummary:\s*([^\n]+))?|Monitor started \(task\s+([\w-]+)/g;
-export type BgTask = { id: string; kind: "shell" | "agent" | "workflow";title: string; body: string; out?: string; ts?: number };
+export type BgTask = { id: string; kind: "shell" | "agent" | "workflow";title: string; body: string; out?: string; ts?: number; service?: boolean /* 常驻服务(监听端口),不会自己结束 */ };
 // 按顺序列出这些条目里启动过的后台任务(不判是否已了结)。
 type ToolItem = Extract<TimelineItem, { kind: "tool" }>;
 function bgStarts(items: TimelineItem[], t: T, onTool?: (it: ToolItem, found: BgTask[]) => void): BgTask[] {

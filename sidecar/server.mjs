@@ -7,7 +7,7 @@ import { accumulate, emptySpend, priceTable, ledgerAdd, ledgerStats } from "./sp
 import { startProxy } from "./openai-proxy.mjs";
 import { capToolResults } from "./logcap.mjs";
 import { blobGet, isBlobRef, isInlineImg, externalizeImages, inlineImages } from "./blobs.mjs";
-import { createBgTracker } from "./bgtasks.mjs";
+import { createBgTracker, serviceTaskIds } from "./bgtasks.mjs";
 import { snapTree as snapTreeWith, turnChanges as turnChangesWith } from "./turnsnap.mjs";
 import { HIST_ROUNDS, historyChunk, mobileBubbles, usageBase } from "./histpage.mjs";
 import fs from "node:fs";
@@ -2182,6 +2182,7 @@ function spawnAgent(ws, sess, { id, resume }) {
   sess.q = q;
   sess.binReal = claudeBinReal(); // 见 deliverUserMessage:CLI 自更新后据此换进程
   sess.bgTasks = []; // 后台任务清单是 CLI 进程级的:换了进程就清零,等新进程自己再报
+  sess.bgServices = []; sess.bgServicesSig = "";
   sess.bgTrack?.clear();
   broadcast({ type: "bg_tasks", sessionId: id, tasks: [] });
 
@@ -2378,6 +2379,27 @@ setInterval(() => {
     deliverUserMessage(null, next.m);
   }
 }, 15_000);
+
+// 常驻服务探测:后台任务里的 dev server / webui 永远不会自己结束,前端却把「还有后台任务」当成这一轮没了结,
+// 待发队列一直不出队(要等到 2 小时超时被杀)。每 4s 用 lsof 看一遍哪些任务在监听端口,变了就广播 bg_services,
+// 前端把这些任务从「忙」的判据里剔掉(store 的 blockingBg)。没有后台任务的会话不探,平时零开销。
+let svcProbing = false;
+setInterval(async () => {
+  if (svcProbing) return;
+  const live = [...sessions].filter(([, s]) => s.bgTasks?.length);
+  if (!live.length) return;
+  svcProbing = true;
+  try {
+    for (const [id, sess] of live) {
+      const ids = [...await serviceTaskIds(sess.bgTrack.list(sess.bgTasks).filter((t) => t.kind === "shell"))];
+      const sig = ids.sort().join(",");
+      if (sig === (sess.bgServicesSig ?? "")) continue;
+      sess.bgServicesSig = sig;
+      sess.bgServices = ids;
+      broadcast({ type: "bg_services", sessionId: id, ids });
+    }
+  } finally { svcProbing = false; }
+}, 4000).unref();
 
 // 把一条用户消息真正送进 agent(落盘 + 回显 + 注入动态上下文 + pushTurn)。
 // 单独抽出来是因为 agent 忙的时候这条消息要先躺进 sess.msgQueue,等本轮跑完再原样走一遍这里。
@@ -3043,6 +3065,7 @@ wss.on("connection", (ws) => {
         send(ws, { type: "perm_mode", sessionId: entry.id, mode: s?.permMode || entry.permMode || "default" });
         // 后台任务电平只在变化时才发:任务起了之后才打开会话(或手机断线重连)的端,不补就一直不知道有任务在跑
         send(ws, { type: "bg_tasks", sessionId: entry.id, tasks: s ? s.bgTrack.list(s.bgTasks) : [] });
+        send(ws, { type: "bg_services", sessionId: entry.id, ids: s?.bgServices ?? [] }); // 同上:探测只在变化时广播
         if (entry.spend) send(ws, { type: "spend", sessionId: entry.id, spend: entry.spend }); // 花费是落盘累计,重开要接上
         if (s?.ssh) send(ws, { type: "ssh_status", sessionId: entry.id, ssh: pubSsh(s.ssh) }); // 恢复 SSH 显示
         // 模型列表只在 spawnAgent 时推过一次;重开(尤其是换个客户端连上来)要补一份,

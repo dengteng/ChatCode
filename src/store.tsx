@@ -476,6 +476,11 @@ function runningCompactAt(tl: TimelineItem[]) {
 export const sessionBusy = (s: Session) =>
   s.status === "running" || !!s.bgWait || runningCompactAt(s.timeline) >= 0;
 
+/** 真正要等的后台任务:剔掉常驻服务(dev server 之类监听端口的,永远不会自己结束,等它就是等到超时被杀)。
+ *  所有「还有后台任务吗」的判据都走这里,别直接数 bgTasks。 */
+export const blockingBg = (s: Session) =>
+  s.bgServices?.length ? (s.bgTasks ?? []).filter((id) => !s.bgServices!.includes(id)) : (s.bgTasks ?? []);
+
 // 更新时间线里最后一个 streaming 的 agent_text
 function mapLastStreaming(tl: TimelineItem[], f: (t: any) => any): TimelineItem[] {
   for (let i = tl.length - 1; i >= 0; i--) {
@@ -552,7 +557,9 @@ function handleSdkMessage(dispatch: (a: Action) => void, id: string, msg: any, l
     // (SDK 的 resume 是懒的:起进程 + 跑 SessionStart hook,能重置的新 init 要等第一条 prompt 才来。)
     if (!live) return;
     const tasks = Array.isArray(msg.tasks) ? msg.tasks.map((t: any) => String(t.task_id)) : [];
-    dispatch({ type: "patch", id, patch: { bgTasks: tasks, ...(tasks.length ? { bgWait: true } : {}) } });
+    // 已认出是常驻服务的不挂闩锁:否则电平一变(比如另起了个服务),空闲会话又被锁 20 秒
+    const svc = stateRef?.current.sessions[id]?.bgServices ?? [];
+    dispatch({ type: "patch", id, patch: { bgTasks: tasks, ...(tasks.some((x: string) => !svc.includes(x)) ? { bgWait: true } : {}) } });
     return;
   }
   // API 退避重发:SDK 每次撞上可重试错误(529 过载、超时…)都会先发这条,再等 retry_delay_ms 重发。
@@ -678,7 +685,8 @@ function handleSdkMessage(dispatch: (a: Action) => void, id: string, msg: any, l
       // 用户中断(aborted)时必清闩锁:SDK 可能先回 result 再发后台任务清空信号,不清的话闩锁会卡死队列。
       // 还挂着后台任务 = 这一轮压根没完:绿✅ 和"任务完成"提醒都得压住,等后台任务清空后的续跑 result 再放。
       // (不压的话:列表里画着 ✅、dock 跳一下、"叮"一声,可用户点进去看到的是"后台任务运行中·已跑 3min")
-      const hasBg = (stateRef?.current.sessions[id]?.bgTasks?.length ?? 0) > 0;
+      const cur = stateRef?.current.sessions[id];
+      const hasBg = !!cur && blockingBg(cur).length > 0;
       const done = !msg.aborted && !hasBg;
       dispatch({ type: "patch", id, patch: { status: "idle", freshDone: done, apiRetry: null, ...(msg.aborted || !hasBg ? { bgWait: false } : {}) } });
       if (done) { notify(i18n.t("任务完成"), i18n.t("花费 ${{cost}}", { cost: (msg.total_cost_usd ?? 0).toFixed(4) })); alertUser(); } // d: 完成提醒 + dock 跳动(不在前台时才跳) + 提示音
@@ -1142,6 +1150,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           case "auto_approve": // sidecar 广播的开关状态(任一端切换都同步过来)
             dispatch({ type: "set_auto_allow", id: m.sessionId, on: !!m.on });
             break;
+          case "bg_services": { // 常驻服务清单(sidecar lsof 探测,变了才发),见 blockingBg
+            const ids: string[] = m.ids ?? [];
+            dispatch({ type: "patch", id: m.sessionId, patch: { bgServices: ids } });
+            // 本轮已说完、只剩常驻服务挂着:续跑不会来了,当场放闸,不等 20 秒兜底。
+            // 上面 result 那次被「还有后台任务」压住的完成提醒,在这里补(同兜底那条)。
+            const s = stateRef.current.sessions[m.sessionId];
+            if (s?.bgWait && s.status === "idle" && blockingBg({ ...s, bgServices: ids }).length === 0) {
+              dispatch({ type: "patch", id: m.sessionId, patch: { bgWait: false, freshDone: true } });
+              notify(i18n.t("任务完成"), i18n.t("常驻服务在后台运行,可以继续对话"));
+              alertUser();
+            }
+            break;
+          }
           case "perm_mode": // 权限模式:自己切的、CLI 启动时报的、另一端切的,都从这里回来
             dispatch({ type: "set_perm_mode", id: m.sessionId, mode: m.mode });
             break;
@@ -1502,7 +1523,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     for (const s of Object.values(state.sessions)) {
       const compacting = s.timeline.some((t) => t.kind === "compact" && t.running);
       // 断连时不出队:sendMessage 会失败,而这条已经从队列里摘掉了 —— 用户排的消息就凭空没了。
-      if (state.connected && s.status === "idle" && !s.bgWait && !compacting && (s.bgTasks?.length ?? 0) === 0 && s.pending && s.pending.length > 0) {
+      if (state.connected && s.status === "idle" && !s.bgWait && !compacting && blockingBg(s).length === 0 && s.pending && s.pending.length > 0) {
         // 定时消息没到点就跳过它,取后面第一条到点的 —— 否则一条约在凌晨的消息会把整条队列堵到凌晨
         const next = s.pending.find((p) => !p.at || p.at <= Date.now());
         if (!next) continue;
@@ -1603,12 +1624,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const timers = bgWaitTimers.current;
     for (const s of Object.values(state.sessions)) {
-      const stuck = !!s.bgWait && s.status === "idle" && (s.bgTasks?.length ?? 0) === 0;
+      const stuck = !!s.bgWait && s.status === "idle" && blockingBg(s).length === 0;
       if (stuck && !timers.has(s.id)) {
         timers.set(s.id, window.setTimeout(() => {
           timers.delete(s.id);
           const cur = stateRef.current.sessions[s.id];
-          if (cur?.bgWait && cur.status === "idle" && (cur.bgTasks?.length ?? 0) === 0) {
+          if (cur?.bgWait && cur.status === "idle" && blockingBg(cur).length === 0) {
             // 走到这儿说明续跑轮确实不会来了 —— 那"轮次完成"就是此刻。
             // 上面 result 那次因为挂着后台任务把 ✅ 和提醒压住了(见 hasBg),欠的这一次在这里补,
             // 否则这种会话永远不点亮、也永远不响,用户以为还在跑。
