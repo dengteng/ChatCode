@@ -313,9 +313,15 @@
     ],
     "gemini": [
       {
+        "model": "gemini-4-carbon",
+        "displayName": "Gemini 4 Carbon",
+        "description": "gemini-4-carbon · 最强",
+        "contextWindow": 1048576
+      },
+      {
         "model": "gemini-4-argon",
         "displayName": "Gemini 4 Argon",
-        "description": "gemini-4-argon · 最强",
+        "description": "gemini-4-argon · 通用",
         "contextWindow": 1048576
       },
       {
