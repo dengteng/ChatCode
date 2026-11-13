@@ -695,6 +695,10 @@ function handleSdkMessage(dispatch: (a: Action) => void, id: string, msg: any, l
 }
 
 const rechecked = new Set<string>(); // 定时回查已处理过的轮次,见 StoreProvider 里那个 effect
+// 已发出打断、还没等到 sidecar 回执(turn_ended / result)的会话。回执到之前不出队:
+// 本地放闸后队列会立刻发下一条,而回执晚到一步,会把刚起的新一轮 status 打回 idle ——
+// 消息其实在跑,界面却不转圈、没有打断按钮,看着像没执行。
+const interruptAcks = new Set<string>();
 // dock 跳动提醒(窗口在前台时系统本来就不跳)。用户可在设置里关掉,默认开 ——
 // 只有显式存过 "0" 才算关,不然第一次启动读到 null 就成了默认关。
 // 所有跳动都必须走 bounceDock:直接 invoke 会绕开这个开关,新增提醒点时最容易漏(自检盯着这条)。
@@ -903,6 +907,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       ws.onclose = (ev) => {
         console.warn(`[ws] 断开 code=${ev.code} reason=${ev.reason || "(空)"} wasClean=${ev.wasClean}`);
         dispatch({ type: "connected", v: false });
+        interruptAcks.clear(); // 回执随连接一起丢了,别把队列永远按住
         prefetched.current = false;
         olderInflight.clear(); // 要更早历史的请求跟着断线丢了,不清的话往上翻永远停在"加载中"
         // 断连当下就把转圈停掉:那轮的 turn_ended 会丢在断线里,不停就一直转到天荒地老,
@@ -1129,6 +1134,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             dispatch({ type: "set_context", id: m.sessionId, contextTokens: m.tokens, allowShrink: !!m.reset });
             break;
           case "sdk":
+            if (m.message?.type === "result") interruptAcks.delete(m.sessionId);
             handleSdkMessage(dispatch, m.sessionId, m.message, true, stateRef);
             break;
           case "permission_request": {
@@ -1183,6 +1189,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           // sidecar 那轮已经没了(重建 query / 打断兜底),但不会再有 result 来解锁 —— 手动放闸,
           // 否则 status 永远卡在运行中:打断点了没反应、待发队列也永远发不出去
           case "turn_ended":
+            interruptAcks.delete(m.sessionId);
             dispatch({ type: "patch", id: m.sessionId, patch: { status: "idle", bgWait: false, bgTasks: [] } });
             break;
           case "session_converted":
@@ -1363,6 +1370,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // "打断"在这个态下的语义就是"不等这些后台任务了"。SDK 之后真报了新任务,电平会自己填回来。
     interrupt(id) {
       const sent = send({ type: "interrupt", sessionId: id });
+      if (sent) interruptAcks.add(id); // 等 sidecar 回执再出队,见 interruptAcks
       dispatch({ type: "patch", id, patch: { bgWait: false, bgTasks: [] } });
       // 断连时 sidecar 收不到,那"打断"就必须在本地兑现:否则按钮点下去毫无反应,
       // 而这个态恰恰是最容易点它的时候(界面转圈不动就是因为断了)。
@@ -1523,7 +1531,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     for (const s of Object.values(state.sessions)) {
       const compacting = s.timeline.some((t) => t.kind === "compact" && t.running);
       // 断连时不出队:sendMessage 会失败,而这条已经从队列里摘掉了 —— 用户排的消息就凭空没了。
-      if (state.connected && s.status === "idle" && !s.bgWait && !compacting && blockingBg(s).length === 0 && s.pending && s.pending.length > 0) {
+      if (state.connected && s.status === "idle" && !s.bgWait && !compacting && !interruptAcks.has(s.id) && blockingBg(s).length === 0 && s.pending && s.pending.length > 0) {
         // 定时消息没到点就跳过它,取后面第一条到点的 —— 否则一条约在凌晨的消息会把整条队列堵到凌晨
         const next = s.pending.find((p) => !p.at || p.at <= Date.now());
         if (!next) continue;
