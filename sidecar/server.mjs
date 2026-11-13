@@ -2030,8 +2030,11 @@ async function compactBacklog() {
     const sess = sessions.get(id);
     if (!sess) continue;
     sess.bgCompact = true;
+    // /compact 先回一条空 result(running 随之归 false),压缩随后才真开始 —— 只看 running 会在压到一半时
+    // queue.end,进程压完就退,用户此时点开的会话变成「已断开」。compacting 由 status 消息维护,先置上盖住这段空档。
+    sess.compacting = true;
     const t0 = Date.now();
-    while (sessions.get(id) === sess && sess.running && Date.now() - t0 < 15 * 60_000) await sleep(2000);
+    while (sessions.get(id) === sess && (sess.running || sess.compacting) && Date.now() - t0 < 15 * 60_000) await sleep(2000);
     if (sessions.get(id) === sess && sess.bgCompact && !sess.running) sess.queue.end();
     await sleep(500);
   }
@@ -2222,6 +2225,8 @@ function spawnAgent(ws, sess, { id, resume }) {
         // agent 起的后台活(bash &、subagent…)由 SDK 报,整份替换(level 语义,不是增量事件)。
         // 这是「本会话跑起来的进程」的**权威**来源:它们正是本 sidecar 的子孙,
         // 按进程树剔自己人时会被一起剔光 —— 光靠 cwd/进程树只能猜,猜不出归属。
+        if (msg.type === "system" && (msg.subtype === "status" || msg.subtype === "compact_boundary"))
+          sess.compacting = msg.subtype === "status" && msg.status === "compacting"; // 给 compactBacklog 判断压完没有
         const levelChanged = msg.type === "system" && msg.subtype === "background_tasks_changed";
         if (levelChanged) sess.bgTasks = msg.tasks ?? [];
         // 手机的「后台任务」入口:电平变了、或还在跑的任务补到了详情(命令/输出路径/进度),整份重发。

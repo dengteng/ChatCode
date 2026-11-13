@@ -1274,7 +1274,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       } else {
         dispatch({ type: "activate", id });
       }
-      send({ type: "reopen_session", sessionId: id, haveHistory, paged: true }); // paged:只要最近几十轮,更早的 loadOlderHistory 按需要
+      // 送达即解除断开态:sidecar 会当场起进程,出错会回 session_error/closed 再关上。
+      // 不能等 init —— SDK resume 是懒的,init 要等第一条消息才来,而断开态下输入框不渲染,发不出消息。
+      if (send({ type: "reopen_session", sessionId: id, haveHistory, paged: true })) dispatch({ type: "revive", id }); // paged:只要最近几十轮,更早的 loadOlderHistory 按需要
       // 模型列表平时由 CLI 起来后上报。老会话要先选恢复方式(resume_prompt)才起 CLI,这期间列表是空的,
       // 底部模型名只能显示存着的原始值(opus[1m]),档位也出不来。先要一份缓存列表,不用等 CLI。
       if (!haveHistory) send({ type: "get_models", sessionId: id });
