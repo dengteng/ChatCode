@@ -2853,6 +2853,18 @@ wss.on("connection", (ws) => {
         send(ws, { type: "search_results", results: findMessages(m.query, m.sessionId, m.kind) });
         break;
       }
+      case "fav_exists": {
+        // 收藏夹「跳回原消息」前先问:/clear 会清空会话日志,原消息就不在了,跳过去只会落到别处。
+        // ponytail: 按正文首行(≤80 字)在日志里找,不比时间戳 —— 老日志的 user 消息没 timestamp。
+        // 只取首行:收藏的回复是整轮拼起来的,跨了多个 text 块,整段去比一个块都对不上。
+        // 天花板:/clear 后又说过同一句话会判成"还在",跳过去落到最近一条。
+        const norm = (s) => String(s).replace(/\s+/g, " ").trim();
+        const probe = norm(String(m.text || "").split("\n").find((l) => l.trim()) || "").slice(0, 80);
+        const texts = (msg) => { const c = msg?.message?.content; return typeof c === "string" ? [c] : searchText(msg).map((p) => p.text); };
+        const exists = !probe || readLog(m.sessionId).some((msg) => texts(msg).some((t) => norm(t).includes(probe)));
+        send(ws, { type: "fav_exists", rid: m.rid, exists });
+        break;
+      }
       case "context_usage": { // 底栏「上下文」点开的构成面板。summary 档按上一轮 usage + 本地估算出数,不调模型、不花钱
         const s = sessions.get(m.sessionId);
         const reply = (x) => send(ws, { type: "context_usage", sessionId: m.sessionId, ...x });

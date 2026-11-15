@@ -1897,6 +1897,9 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
 .fav-actions { display: flex; gap: 4px; flex-shrink: 0; opacity: .55; transition: opacity .12s ease; }
 .fav-card:hover .fav-actions { opacity: 1; }
 .fav-actions .danger:hover { color: #d9534f; }
+/* 收藏全文弹窗:比通用弹窗宽,正文超高自己滚 */
+.fav-view { width: min(720px, 90vw); }
+.fav-view-body { max-height: 60vh; overflow: auto; font-size: 13px; line-height: 1.6; word-break: break-word; }
 /* 气泡下方已收藏的星标:实心 + 强调色 */
 .msg-redo-row button.fav-on { color: #f5a623; opacity: 1; }
 .msg-redo-row button.fav-on svg { fill: currentColor; }

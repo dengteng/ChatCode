@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "../native";
 import { setLang, resetLang, selectedLang, getLang } from "../i18n";
-import { X, RotateCw, Plus, Check, GitBranch, Pencil, Copy, Search, Trash2, Download, Loader2, Power, PowerOff, ExternalLink, ChevronLeft } from "lucide-react";
+import { X, RotateCw, Plus, Check, GitBranch, Pencil, Copy, Search, Trash2, Download, Loader2, Power, PowerOff, ExternalLink, ChevronLeft, LocateFixed } from "lucide-react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { rawHtml, useMdImages } from "../lib/mdhtml";
@@ -16,6 +16,7 @@ import { openEditorWindow } from "../popout";
 import { MEMORY_ROOT_KEY, VAULT_MEMORY_DIR, getMemoryRoot, applyMemoryRoot, detectObsidianVaults } from "../memory";
 import { btnPress } from "../lib/utils";
 import { loadFavorites, removeFavorite, favSessionId, favPreview, type Favorite } from "../lib/favorites";
+import { createPortal } from "react-dom";
 import { copyText, focusMessage } from "./Chat";
 import { modelLogo } from "./Avatar";
 // 「个人资料」页单独成文件:开源版与内部版这一页装的东西不同,差异全收在那里,本文件两版逐字相同
@@ -249,17 +250,21 @@ function NotifyTab() {
 }
 
 // 收藏夹:气泡下方星标收进来的消息,只存本机(lib/favorites.ts)。新收藏的排最前。
-// 一条一张横向卡片,只露两行摘要;点卡片关掉设置、跳回原消息。
+// 一条一张横向卡片,只露两行摘要;点卡片弹窗看全文,点定位图标关掉设置、跳回原消息。
+// 看全文不依赖原会话:/clear 之后原消息没了,收藏里存的这份照样能看。
 function FavoritesTab({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
   const { state, dispatch } = useStore();
-  const { reopenSession, restoreSession } = useApi();
+  const { reopenSession, restoreSession, favExists } = useApi();
   const [list, setList] = useState(loadFavorites);
+  const [viewing, setViewing] = useState<Favorite | null>(null);
   const fmt = (ts: number) => new Date(ts).toLocaleString();
   // 会话已打开 → 切过去;在列表里没打开 → reopen;已关闭(首页「最近历史」)→ 先恢复回列表再打开。
   // 定位交给 focusMessage:会话换上来之后 Chat 自己按 msgTs 滚过去,历史不够会往前补。
-  const jump = (f: Favorite) => {
+  const jump = async (f: Favorite) => {
     const id = favSessionId(f);
+    const known = state.sessions[id] || state.index.some((e) => e.id === id) || state.closed.some((e) => e.id === id);
+    if (known && !(await favExists(id, f.text))) { toast(t("原消息已被删除"), "error"); return; }
     if (state.sessions[id]) dispatch({ type: "activate", id });
     else if (state.index.some((e) => e.id === id)) reopenSession(id);
     else if (state.closed.some((e) => e.id === id)) restoreSession(id);
@@ -273,8 +278,7 @@ function FavoritesTab({ onClose }: { onClose: () => void }) {
       {list.length === 0 && <p className="muted">{t("还没有收藏。在已完成的消息下方点星标即可收藏。")}</p>}
       <div className="fav-list">
         {list.map((f) => (
-          <div className="fav-card" key={f.id} role="button" tabIndex={0} title={t("跳回原消息")}
-            {...btnPress(() => jump(f))}>
+          <div className="fav-card" key={f.id} role="button" tabIndex={0} {...btnPress(() => setViewing(f))}>
             <div className="fav-main">
               <div className="fav-head">
                 <b>{f.sender}</b>
@@ -283,8 +287,9 @@ function FavoritesTab({ onClose }: { onClose: () => void }) {
               </div>
               <div className="fav-text">{favPreview(f.text)}</div>
             </div>
-            {/* 按钮自己吃掉按下事件,别冒泡成「跳回原消息」 */}
+            {/* 按钮自己吃掉按下事件,别冒泡成「看全文」 */}
             <div className="fav-actions" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
+              <button className="ghost" title={t("跳回原消息")} {...btnPress(() => jump(f))}><LocateFixed size={13} /></button>
               <button className="ghost" title={t("复制内容")} {...btnPress(() => copyText(f.text).then((ok) => ok && toast(t("已复制"), "success")))}><Copy size={13} /></button>
               <button className="ghost danger" title={t("取消收藏")} {...btnPress(() => setList(removeFavorite(f.id)))}><Trash2 size={13} /></button>
             </div>
@@ -292,6 +297,21 @@ function FavoritesTab({ onClose }: { onClose: () => void }) {
         ))}
       </div>
       <p className="settings-note">{t("收藏只存在本机,暂不跨电脑同步。")}</p>
+      {viewing && createPortal(
+        <div className="commit-modal-overlay" onMouseDown={() => setViewing(null)}>
+          <div className="commit-modal fav-view" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="fav-head">
+              <b>{viewing.sender}</b>
+              <span className="muted" title={viewing.cwd}>· {viewing.session || t("未命名会话")}</span>
+              <span className="fav-time muted">{fmt(viewing.msgTs)}</span>
+            </div>
+            <div className="md fav-view-body"><Markdown remarkPlugins={[remarkGfm]}>{viewing.text}</Markdown></div>
+            <div className="commit-modal-actions">
+              <button type="button" {...btnPress(() => copyText(viewing.text).then((ok) => ok && toast(t("已复制"), "success")))}>{t("复制内容")}</button>
+              <button type="button" className="hi" {...btnPress(() => setViewing(null))}>{t("关闭")}</button>
+            </div>
+          </div>
+        </div>, document.body)}
     </section>
   );
 }

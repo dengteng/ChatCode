@@ -804,6 +804,7 @@ interface Api {
   contextUsage: (id: string) => Promise<ContextUsage>; // 底栏「上下文」构成面板
   compareBranches: (id: string, base: string, head: string) => void;
   suggestCommit: (id: string, force?: boolean, ai?: boolean) => Promise<string>; // commit 弹窗:总结待提交改动;无新对话复用缓存,force 强制重跑;ai = 让模型读 diff 重写
+  favExists: (id: string, text: string) => Promise<boolean>; // 收藏的原消息是否还在会话日志里(/clear 会清掉)
   askBtw: (id: string, text: string) => Promise<string>; // 抽屉侧问:走 CLI 的 side_question,任务跑着也能问,不排队、不进主线上下文
   deleteSession: (id: string) => void;
   renameSession: (id: string, title: string) => void;
@@ -872,6 +873,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // 侧问的待响应 promise。按 rid 存而不是按 sessionId:侧问不占主线,同一会话可以连着问好几条,
   // 后一条不该把前一条的回答顶掉(commit 总结那种"一个弹窗一条"的按会话存法在这里不成立)。
   const btwWaiters = useRef(new Map<string, { resolve: (s: string) => void; reject: (e: Error) => void }>());
+  const favWaiters = useRef(new Map<string, (ok: boolean) => void>());
   const ctxWaiters = useRef(new Map<string, { resolve: (d: ContextUsage) => void; reject: (e: Error) => void }>()); // 上下文构成面板,按会话存
   // 启动预取只做一次:连上后首个 index 到达时,异步暖各会话 git 分支状态 + 5h/周用量。断线重连会重置。
   const prefetched = useRef(false);
@@ -1006,6 +1008,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             if (w) { ctxWaiters.current.delete(m.sessionId); m.error ? w.reject(new Error(m.error)) : w.resolve(m.data); }
             break;
           }
+          case "fav_exists": favWaiters.current.get(m.rid)?.(m.exists); favWaiters.current.delete(m.rid); break;
           case "btw_reply": {
             const w = btwWaiters.current.get(m.rid);
             if (w) { btwWaiters.current.delete(m.rid); m.error ? w.reject(new Error(m.error)) : w.resolve(m.text || ""); }
@@ -1461,6 +1464,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         commitWaiters.current.get(id)?.reject(new Error(i18n.t("已被新的请求取代"))); // 旧的未决请求作废
         commitWaiters.current.set(id, { resolve, reject });
         send({ type: "commit_suggest", sessionId: id, force: !!force, ai: !!ai });
+      });
+    },
+    favExists(id, text) {
+      return new Promise<boolean>((resolve) => {
+        const rid = crypto.randomUUID();
+        favWaiters.current.set(rid, resolve);
+        // 没连上 / 等不到回包:当作还在,照常跳(最坏落到最近一条),别把人卡在设置页
+        if (!send({ type: "fav_exists", sessionId: id, rid, text })) { favWaiters.current.delete(rid); resolve(true); return; }
+        setTimeout(() => { if (favWaiters.current.delete(rid)) resolve(true); }, 8000);
       });
     },
     askBtw(id, text) {
