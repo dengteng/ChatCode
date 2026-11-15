@@ -13,6 +13,71 @@ const SIDECAR_PORT: &str = "8976"; // 与开发用的 8975 错开,两者可并�
 
 struct Sidecar(Mutex<Option<Child>>);
 
+/// 退出前二次确认。前端有会话在跑时推来 [提示, 退出, 取消],空闲时推 None(store.tsx 的 busyCount)。
+/// 放 Rust 弹原生框,不在页面里弹:webview 卡死时页面弹窗也没了,App 就再也退不掉。
+struct QuitGuard(Mutex<Option<Vec<String>>>);
+static QUIT_CONFIRMED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static QUIT_ASKING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static APP_HANDLE: OnceLock<tauri::AppHandle> = OnceLock::new();
+
+#[tauri::command]
+fn set_quit_guard(state: tauri::State<QuitGuard>, guard: Option<Vec<String>>) {
+    *state.0.lock().unwrap() = guard;
+}
+
+/// 该拦就弹确认框并返回 true,调用方取消这次退出;用户点「退出」后 app.exit(0),再进来时直接放行。
+fn hold_quit(app: &tauri::AppHandle) -> bool {
+    use std::sync::atomic::Ordering::SeqCst;
+    use tauri::Manager;
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    if QUIT_CONFIRMED.load(SeqCst) {
+        return false;
+    }
+    let guard = app.state::<QuitGuard>().0.lock().unwrap().clone();
+    let Some([msg, ok, cancel]) = guard.as_deref() else { return false };
+    if QUIT_ASKING.swap(true, SeqCst) {
+        return true; // 框已经开着,连按 ⌘Q 别叠第二个
+    }
+    let h = app.clone();
+    app.dialog()
+        .message(msg.clone())
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCancelCustom(ok.clone(), cancel.clone()))
+        .show(move |yes| {
+            QUIT_ASKING.store(false, SeqCst);
+            if yes {
+                QUIT_CONFIRMED.store(true, SeqCst);
+                h.exit(0);
+            }
+        });
+    true
+}
+
+/// ⌘Q、Dock 右键「退出」走的是 NSApp terminate:,tao 的 app delegate 没实现 applicationShouldTerminate:,
+/// 系统直接收进程,RunEvent::ExitRequested 根本不来。这里给 delegate 的类补上这个方法,在那一步拦。
+#[cfg(target_os = "macos")]
+fn hook_should_terminate() {
+    use objc2::runtime::{AnyClass, AnyObject, Imp, Sel};
+    use objc2::{class, msg_send, sel};
+    extern "C-unwind" fn should_terminate(_: &AnyObject, _: Sel, _: *mut AnyObject) -> usize {
+        // NSTerminateCancel = 0, NSTerminateNow = 1
+        match APP_HANDLE.get() {
+            Some(app) if hold_quit(app) => 0,
+            _ => 1,
+        }
+    }
+    unsafe {
+        let ns_app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
+        let delegate: *mut AnyObject = msg_send![ns_app, delegate];
+        if delegate.is_null() {
+            return;
+        }
+        let cls = objc2::ffi::object_getClass(delegate) as *mut AnyClass;
+        let imp: Imp = std::mem::transmute(should_terminate as extern "C-unwind" fn(_, _, _) -> _);
+        objc2::ffi::class_addMethod(cls, sel!(applicationShouldTerminate:), imp, c"Q@:@".as_ptr());
+    }
+}
+
 /// sidecar 的 ws 握手令牌。
 ///
 /// 为什么需要:sidecar 监听的是固定的 loopback 端口,而 WebSocket **不受同源策略约束** ——
@@ -917,8 +982,9 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_http::init())
-        .invoke_handler(tauri::generate_handler![open_url, open_path, reveal_path, resolve_path_cmd, kill_pid, kill_port, spawn_proc, run_claude, choose_directory, set_app_theme, list_dir, walk_project, read_file, read_file_b64, write_file, read_dir_meta, probe_ports, bounce_dock, check_deps, start_sidecar, probe_registry, install_claude, install_skill_git, remove_path, rename_path, sidecar_token])
+        .invoke_handler(tauri::generate_handler![open_url, open_path, reveal_path, resolve_path_cmd, kill_pid, kill_port, spawn_proc, run_claude, choose_directory, set_app_theme, list_dir, walk_project, read_file, read_file_b64, write_file, read_dir_meta, probe_ports, bounce_dock, check_deps, start_sidecar, probe_registry, install_claude, install_skill_git, remove_path, rename_path, sidecar_token, set_quit_guard])
         .manage(Sidecar(Mutex::new(None)))
+        .manage(QuitGuard(Mutex::new(None)))
         // 浮窗(大图 / 代码编辑器)关闭:先 hide,隔一小会儿再销毁。
         // 起因是一次 SIGSEGV:关掉图片浮窗后几秒,主进程崩在 WebKit::DisplayLink::notifyObserversDisplayDidRefresh()。
         // 那个刷新观察者挂在页面上,窗口一销毁页面就没了,而 CVDisplayLink 线程还在遍历观察者链表 ——
@@ -932,7 +998,11 @@ fn main() {
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" {
-                    return; // 主窗关闭 = 退出 App,照常走
+                    // 主窗关闭 = 退出 App;有会话在跑先确认
+                    if hold_quit(tauri::Manager::app_handle(window)) {
+                        api.prevent_close();
+                    }
+                    return;
                 }
                 api.prevent_close();
                 let w = window.clone();
@@ -956,6 +1026,9 @@ fn main() {
             }
         })
         .setup(|app| {
+            let _ = APP_HANDLE.set(app.handle().clone());
+            #[cfg(target_os = "macos")]
+            hook_should_terminate();
             // 开发时 npm run dev 已经起了一个 sidecar,别再起第二个
             if cfg!(debug_assertions) {
                 return Ok(());

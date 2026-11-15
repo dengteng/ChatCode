@@ -930,6 +930,8 @@
   "收藏于 {{b}}": "Saved {{b}}",
   "跳回原消息": "Jump to the original message",
   "原消息已被删除": "The original message has been deleted",
+  "有 {{n}} 个会话还在运行，退出会中断它们。确定退出吗？": "{{n}} session(s) still running. Quitting will interrupt them. Quit anyway?",
+  "退出": "Quit",
   "原会话已经删除，没法跳回原消息": "The original session was deleted, so the message can't be opened",
   "常驻服务在后台运行,可以继续对话": "A long-running service is up in the background — you can keep chatting",
   " · 另有 {{n}} 个常驻服务": " · plus {{n}} long-running service(s)",

@@ -1537,6 +1537,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return () => { clearInterval(iv); clearTimeout(done); };
   }, [state.activeId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 退出前二次确认:有会话在跑(含后台任务、压缩)就把提示推给 Rust,关窗 / ⌘Q 时它弹原生确认框。
+  // 常驻服务不算:dev server 一挂一整天,算上就每次退出都要点一下。
+  const busyCount = Object.values(state.sessions).filter((s) => sessionBusy(s) || blockingBg(s).length > 0).length;
+  useEffect(() => {
+    const guard = busyCount ? [i18n.t("有 {{n}} 个会话还在运行，退出会中断它们。确定退出吗？", { n: busyCount }), i18n.t("退出"), i18n.t("取消")] : null;
+    invoke("set_quit_guard", { guard }).catch(() => {});
+  }, [busyCount]);
+
   // 待发队列自动出队:某会话变空闲(agent 完成上一轮)、没有后台任务、且上一轮已彻底了结(含后台续跑)时,发出队首。
   // bgWait = 上一轮还挂着后台任务,轮次未完全了结 —— 不能放队列出去,否则会在后台任务续跑前把下一条消息切进来。
   // 压缩上下文期间 status 也是 idle,同样要按住:压到一半插进新一轮,压缩就白做了。
