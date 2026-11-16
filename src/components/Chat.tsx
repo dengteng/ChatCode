@@ -782,15 +782,23 @@ export function Chat({ session, onToggleInfo, onShowTurn, onOpenSettings }: { se
     const el = timelineRef.current; if (!el) return;
     const rows = [...el.querySelectorAll<HTMLElement>("[data-ts]")];
     if (!rows.length) return;                                   // 历史还在回放,等下次渲染
+    const firstTs = (g: Turn) => ("user" in g ? g.user : "solo" in g ? g.solo : g.agent[0])?.ts ?? 0;
+    let gi = -1;
+    for (let i = 0; i < turns.length; i++) { if (firstTs(turns[i]) <= focusTs) gi = i; else break; }
+    // 窗口停在中间(上次跳转留下的)、目标却在窗口之后:只看已渲染行会落到窗口最后一行。先把窗口挪过去
+    if (viewEnd != null && gi >= Math.min(viewEnd, turns.length)) {
+      histRestore.current = null; stick.current = false;
+      const need = turns.length - gi + 2;
+      if (need > HIST_STEP * 2) { setViewEnd(gi + HIST_STEP); setHistCap(HIST_STEP + 2); }
+      else { setViewEnd(null); setHistCap(Math.max(HIST_STEP, need)); }
+      return;
+    }
     let hit: HTMLElement | null = null;
     for (const r of rows) { if (+(r.dataset.ts ?? 0) <= focusTs) hit = r; else break; }
     if (!hit) {                                                 // 目标比渲染窗口最早那行还早:往前多翻一页再试
       // 上界用 timeline 长度(回合数一定不超过它),翻到头还没找到就停在第一行,不空转
       // 目标已在本地 timeline 里:直接算出它在第几组,窗口一步撑到那儿(多留 2 组上文)。
       // 一页页 +30 地撑,每撑一次整页重渲染一遍,跳到几百轮前要十几秒
-      const firstTs = (g: Turn) => ("user" in g ? g.user : "solo" in g ? g.solo : g.agent[0])?.ts ?? 0;
-      let gi = -1;
-      for (let i = 0; i < turns.length; i++) { if (firstTs(turns[i]) <= focusTs) gi = i; else break; }
       // 比本地最早一组还早:先让 sidecar 一次送到那一刻为止(untilTs),别先把本地几百组全渲染一遍。
       // 到货后 timeline 变长,这个 effect 会再跑
       if (gi < 0 && session.histMore) { loadOlderHistory(session.id, focusTs); return; }
