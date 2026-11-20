@@ -689,7 +689,8 @@ function handleSdkMessage(dispatch: (a: Action) => void, id: string, msg: any, l
       const hasBg = !!cur && blockingBg(cur).length > 0;
       const done = !msg.aborted && !hasBg;
       dispatch({ type: "patch", id, patch: { status: "idle", freshDone: done, apiRetry: null, ...(msg.aborted || !hasBg ? { bgWait: false } : {}) } });
-      if (done) { notify(i18n.t("任务完成"), i18n.t("花费 ${{cost}}", { cost: (msg.total_cost_usd ?? 0).toFixed(4) })); alertUser(); } // d: 完成提醒 + dock 跳动(不在前台时才跳) + 提示音
+      // quiet:启动后自动压缩那一轮(sidecar 标的),不是用户交办的活,压完不响不跳
+      if (done && !msg.quiet) { notify(i18n.t("任务完成"), i18n.t("花费 ${{cost}}", { cost: (msg.total_cost_usd ?? 0).toFixed(4) })); alertUser(); } // d: 完成提醒 + dock 跳动(不在前台时才跳) + 提示音
     }
   }
 }

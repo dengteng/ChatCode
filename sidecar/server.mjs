@@ -2011,7 +2011,8 @@ function startSession(ws, { id, cwd, resume, compactFirst }) {
   spawnAgent(ws, sess, { id, resume });
   // "从摘要恢复":SDK 没有原生的 resume-from-summary,先 resume 全量上下文再立刻 /compact,
   // 让后续每轮只带摘要。代价是压缩这一次要读完整上下文。
-  if (compactFirst) pushTurn(sess, userMessage(sess, "/compact"));
+  // 这是自动压缩,不是用户交办的活:压完不提醒(声音/dock/手机推送),用户下一次发消息时 pushTurn 清掉
+  if (compactFirst) { pushTurn(sess, userMessage(sess, "/compact")); sess.quietTurn = true; }
 }
 
 // 设置「重开会话压缩方式」= 从摘要恢复时,每次启动后把没人动的大会话也在后台逐个压掉。
@@ -2053,6 +2054,7 @@ function pushTurn(sess, msg) {
   sess.running = true;
   sess.freshDone = false; // 新一轮开始,清掉上一轮的完成态
   sess.userInterrupted = false; // 新一轮开始,清掉上一轮的打断标记
+  sess.quietTurn = false;       // 见 startSession 的 compactFirst
   sess.queue.push(msg);
   broadcastIndex(); // 列表图标转「运行中」
 }
@@ -2244,6 +2246,7 @@ function spawnAgent(ws, sess, { id, resume }) {
           sess.quotaBlockedAt = msg.rate_limit_info.resetsAt ?? msg.rate_limit_info.overageResetsAt ?? null;
         if (msg.type === "result") {
           if (sess.userInterrupted) msg = { ...msg, aborted: true };
+          else if (sess.quietTurn) msg = { ...msg, quiet: true }; // 自动压缩收尾:不推,前端也认这个标记不响
           else { const title = loadIndex().find((e) => e.id === id)?.title || tr("会话"); pushOverlay(tr("任务完成"), tr("{{title}} 已完成", { title })); } // 用户主动中断不推
           clearTimeout(sess.interruptWatch); // interrupt() 已经把 result 逼出来了,不用再走强制重启看门狗
           // 每轮改动卡片:挂在 result 上一起落盘、一起广播。必须在 drainMsgQueue 之前算完:
