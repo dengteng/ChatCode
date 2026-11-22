@@ -923,7 +923,7 @@ function underRoot(file, cwd, root) {
 }
 // commit 信息 = 汇总各轮 AI 已写好的「本轮小结」(距上次提交的部分)。纯文本处理,不再跑一次 LLM。
 // 只收改动还在待提交文件里的轮次:启动服务、查数据、改仓库外文件的小结都不该进 commit。
-// force=true 时忽略水位,汇总本会话全部小结。都对不上时退到文件清单。
+// force=true 时忽略水位,汇总本会话全部小结。都对不上时让 AI 读 diff 写,再不行退到文件清单。
 // 提交是否落在 root 这个仓库里(null = 会话目录,当作本仓库)
 const ownCommitIn = (cwd, root) => (d) => !d || underRoot(d, cwd, root);
 async function buildCommitMessage(cwd, id, force) {
@@ -956,7 +956,9 @@ async function buildCommitMessage(cwd, id, force) {
     }
     if (others.length) return join(others);
   }
-  // 没有对得上的小结:只报文件清单,想要更好的说明点弹窗里的「重新AI生成」
+  // 没有对得上的小结(改动来自别的会话还没跑完的一轮 / 手动改的):直接让 AI 读 diff 写,
+  // 文件清单只说「改了哪些文件」不说「改了什么」。AI 不可用时才退到文件清单。
+  if (dirty.length) { try { return await aiCommitMessage(cwd); } catch {} }
   const names = dirty.map((d) => path.basename(d.replace(/\/$/, "")));
   return names.length ? `修改 ${names.slice(0, 3).join("、")}${names.length > 3 ? ` 等 ${names.length} 个文件` : ""}` : "";
 }
