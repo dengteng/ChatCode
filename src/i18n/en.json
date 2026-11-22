@@ -345,7 +345,7 @@
   "市场": "Market",
   "已删除 {{name}}": "Deleted {{name}}",
   "claude.ai 远程连接器": "claude.ai remote connector",
-  "sidecar 未连接 — 请先 npm run sidecar": "sidecar not connected — run npm run sidecar first",
+  "正在连接 sidecar...": "Connecting to sidecar...",
   "提交改动": "Commit changes",
   "提交改动（{{count}} 处）": "Commit changes ({{count}})",
   "正在汇总各轮小结…": "Summarizing the turns…",

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
-import { TriangleAlert } from "lucide-react";
 import { useStore } from "./store";
 import { Sidebar } from "./components/Sidebar";
 import { Chat } from "./components/Chat";
@@ -253,7 +252,7 @@ export default function App() {
           <div className="empty-wrap">
             <div className="empty">
               <BrandIntro />
-              {!state.connected && <p className="warn"><TriangleAlert size={14} /> {t("sidecar 未连接 — 请先 npm run sidecar")}</p>}
+              {!state.connected && <p className="connecting">{t("正在连接 sidecar...")}</p>}
             </div>
             <EmptyComposer />
           </div>

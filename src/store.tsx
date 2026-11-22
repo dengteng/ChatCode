@@ -880,6 +880,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const prefetched = useRef(false);
   // 重连后待对表:下一份 index 用来把本地"运行中"和 sidecar 的真状态校齐(见 index 分支)。
   const resync = useRef(false);
+  const everConnected = useRef(false);
   // 空态输入框"发消息即建会话":会话 id 由 sidecar 生成、异步回来,先把首条消息暂存,等 session_created 到了再补发。
   const pendingFirst = useRef<any[] | null>(null);
   // 同目录重复建会话的拦截:标题只取目录 basename,同一目录建两次就是两条同名会话,
@@ -902,6 +903,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       wsRef.current = ws;
       ws.onopen = () => {
         dispatch({ type: "connected", v: true });
+        everConnected.current = true;
         resync.current = true; // 见下面 index 分支:重连后拿 sidecar 的真状态校一次
         dismissToast(WS_DOWN);
         send({ type: "set_lang", lang: getLang() }); // 让 sidecar 一上来就按当前语言出消息
@@ -918,7 +920,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // 那边会把「其实还在跑」的会话恢复回 running(见下面 resync 的两个方向)。
         for (const s of Object.values(stateRef.current.sessions))
           if (s.status === "running") dispatch({ type: "patch", id: s.id, patch: { status: "idle" } });
-        toast(i18n.t("与后端断开 —— 正在重连,这期间发不出消息"), "error", WS_DOWN); // 带 key = 常驻,重连时收掉
+        // 启动时 sidecar 还在起(Rust 后台线程拉起,要 1~2 秒),这时连不上是正常加载,不弹;连上过再断才弹
+        if (everConnected.current) toast(i18n.t("与后端断开 —— 正在重连,这期间发不出消息"), "error", WS_DOWN); // 带 key = 常驻,重连时收掉
         if (!stop) setTimeout(connect, 1500);
       };
       ws.onmessage = (ev) => {

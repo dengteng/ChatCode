@@ -327,6 +327,7 @@ kbd { font: 10px Menlo, monospace; color: var(--muted); }
   ::view-transition-old(root), ::view-transition-new(root) { animation-duration: 180ms; animation-timing-function: ease; }
 }
 .warn { color: var(--amber); margin-top: 10px; }
+.connecting { color: var(--muted); margin-top: 10px; }
 
 /* 渲染异常兜底页(ErrorBoundary):取代白屏 */
 .crash-screen { position: fixed; inset: 0; z-index: 9999; display: flex; flex-direction: column; gap: 12px; padding: 40px; background: var(--bg, #14161a); color: var(--text, #e6e8ec); overflow: auto; }
