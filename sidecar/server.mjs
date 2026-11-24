@@ -986,7 +986,7 @@ async function aiCommitMessage(cwd) {
     try { body += `\n+++ 新文件 ${f}\n${fs.readFileSync(path.join(root, f), "utf8").slice(0, 3000)}`; } catch {}
   }
   if (!stat.stdout.trim() && !newFiles.length) throw new Error(tr("没有待提交的改动"));
-  const prompt = "根据下面「上次提交至今」的全部代码改动,写一条 git commit 说明。只依据下面的 diff,diff 里没有的事一律不写。只输出说明本身,不要解释、不要代码块。\n"
+  const prompt = "根据下面「上次提交至今」的全部代码改动,写一条 git commit 说明。只依据下面的 diff,diff 里没有的事一律不写。只输出说明本身(纯文本),不要解释、不要代码块、不要任何标签或引用标记。\n"
     + `要求:${LANG === "en" ? "English" : "中文"};写用户能感知到的改了什么/修了什么,不写文件名和实现细节;`
     + "一件事就一行(≤60字);多件互不相关的事每件一行、以「- 」开头;不写测试、打包、格式化这类例行动作。\n\n"
     + `## 改动统计\n${stat.stdout}${newFiles.length ? `新文件:\n${newFiles.join("\n")}\n` : ""}\n## 改动内容\n${body.slice(0, BUDGET)}`;
@@ -995,7 +995,9 @@ async function aiCommitMessage(cwd) {
   const host = ensureUsageProbe()?.q;
   if (typeof host?.askSideQuestion !== "function") throw new Error(tr("没有可用的 agent 进程"));
   const r = await host.askSideQuestion(prompt);
-  const text = String(r?.response ?? "").trim().replace(/^```\w*\n?|\n?```$/g, "").trim();
+  // 第三方模型会夹带带命名空间的私有标记(如 grok 的 <grok:render type="render_inline_citation">…</grok:render>),整段剥掉
+  const text = String(r?.response ?? "").trim().replace(/^```\w*\n?|\n?```$/g, "")
+    .replace(/<([a-z]+:[\w-]+)\b[^>]*>[\s\S]*?<\/\1>/gi, "").replace(/<\/?[a-z]+:[\w-]+\b[^>]*\/?>/gi, "").trim();
   // 上游报错(CLI 版本太旧/额度用完)也是装在 response 里正常回来的,不拦就被当成提交说明填进框
   if (!text || r?.synthetic || /^API Error\b/.test(text)) throw new Error(text || tr("生成失败"));
   return text;
