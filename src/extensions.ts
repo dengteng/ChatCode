@@ -125,7 +125,8 @@ export async function loadExtensions(cwd: string | string[]): Promise<Exts> {
   // 磁盘扫描到的全部名字(不只带说明的),供设置页在无会话时也能列出 Skills / MCP
   const skillNames = [...new Set(skills.map((s) => s.name))];
   // 顺手刷新 # 菜单那份缓存:设置页装完新 skill 不用重启就有说明
-  for (const c of cwds) descCache.set(c, Promise.resolve(skillDescMap));
+  const onNames = skillNames.filter((n) => skillOnMap[n] !== false);
+  for (const c of cwds) descCache.set(c, Promise.resolve({ desc: skillDescMap, on: onNames }));
   return { plugins, skills: skillNames, mcp: Object.keys(mcpMeta), skillDesc: skillDescMap, skillPath: skillPathMap, skillOn: skillOnMap, skillProject, mcpDesc: mcpDescMap, mcpUrl: mcpUrlMap, mcpMeta };
 }
 
@@ -144,10 +145,12 @@ export const extNote = (name: string, desc = "") => loadExtNotes()[name] || EXT_
 // 输入框 # 菜单也要给每个 skill 配说明。整套扫描要读几十个文件,菜单每开一次扫一遍会卡,
 // 所以按 cwd 存一份缓存(项目级 skill 只在自己项目里扫得到,不能一份缓存走天下);
 // 设置页重扫时会顺带刷新它(见 loadExtensions 结尾)。
-export const descCache = new Map<string, Promise<Record<string, string>>>();
-export function skillDescs(cwd: string): Promise<Record<string, string>> {
+// desc:每个 skill 的说明;on:磁盘上已启用的 skill 名
+export type DiskSkills = { desc: Record<string, string>; on: string[] };
+export const descCache = new Map<string, Promise<DiskSkills>>();
+export function skillDescs(cwd: string): Promise<DiskSkills> {
   let p = descCache.get(cwd);
-  if (!p) descCache.set(cwd, (p = loadExtensions(cwd).then((e) => e.skillDesc).catch(() => ({}))));
+  if (!p) descCache.set(cwd, (p = loadExtensions(cwd).then((e) => ({ desc: e.skillDesc, on: e.skills.filter((n) => e.skillOn[n] !== false) })).catch(() => ({ desc: {}, on: [] }))));
   return p;
 }
 

@@ -342,15 +342,19 @@ export function Composer({ session }: { session: Session }) {
   // 说明:光有名字分不清 design / design-system / taste-skill 这类,菜单里每行跟一句备注。
   // 和设置页同一份来源(自己写的备注 > 内置中文表 > SKILL.md 的 description),开菜单时才去读盘。
   const [sDesc, setSDesc] = useState<Record<string, string>>({});
-  useEffect(() => { if (skillTok) skillDescs(session.cwd).then(setSDesc); }, [!!skillTok, session.cwd]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [sDisk, setSDisk] = useState<string[]>([]);
+  useEffect(() => { skillDescs(session.cwd).then((d) => { setSDesc(d.desc); setSDisk(d.on); }); }, [!!skillTok, session.cwd]); // eslint-disable-line react-hooks/exhaustive-deps
+  // init 清单是会话 CLI 启动那刻的快照:重启 app 后会话没发过消息,看到的是历史里那份旧的,
+  // 之后新装的 skill 不在里面。并上磁盘上已启用的,下次发消息 CLI 新起时自会加载。
+  const allSkills = useMemo(() => [...new Set([...(session.info.skills ?? []), ...sDisk])], [session.info.skills, sDisk]);
   const sItems = useMemo(() => {
-    const all = session.info.skills ?? [];
+    const all = allSkills;
     if (!sQuery) return all;
     const q = sQuery.toLowerCase();
     // 前缀命中的排前面,其次是名字里任意位置命中的
     return all.filter((n) => n.toLowerCase().includes(q))
       .sort((a, b) => (+!a.toLowerCase().startsWith(q)) - (+!b.toLowerCase().startsWith(q)) || a.localeCompare(b));
-  }, [session.info.skills, sQuery]);
+  }, [allSkills, sQuery]);
   useEffect(() => { setSIdx(0); }, [sQuery]);
   function pickSkill(name: string) {
     edRef.current?.focus();
@@ -925,7 +929,7 @@ export function Composer({ session }: { session: Session }) {
     if (blocks.length === 0) return;
     // 引用单独占第一个 text block,打头发出(格式见 lib/quote.ts);发出或排上队后才清掉引用条
     if (quote) blocks.unshift({ type: "text", text: quoteBlock(quote) });
-    const outBlocks = expandSkillTags(blocks, session.info.skills ?? []);
+    const outBlocks = expandSkillTags(blocks, allSkills);
     const snap = snapshot(); // 快照编辑器(含图片/引用 chip 的 html),给"编辑"按钮完整还原
     // agent 正在工作、上一轮还挂着后台任务在续跑(轮次未彻底了结)、或正在压缩上下文:
     // 都不打断,消息进待发区排队(最多 3),彻底完成后自动依次发出(闸见 sessionBusy)
@@ -1466,7 +1470,7 @@ export function Composer({ session }: { session: Session }) {
                 {extNote(n, sDesc[n]) && <span className="muted skill-desc" title={extNote(n, sDesc[n])}>{extNote(n, sDesc[n])}</span>}
               </div>
             ))}
-            {!sItems.length && <div className="palette-item muted">{(session.info.skills ?? []).length ? t("没有匹配的 skill") : t("会话还没上报 skill 列表")}</div>}
+            {!sItems.length && <div className="palette-item muted">{allSkills.length ? t("没有匹配的 skill") : t("会话还没上报 skill 列表")}</div>}
           </div>
           <div className="palette-hint">{t("↑↓ 选择 · ⏎/Tab 插入 · esc 关闭 · 发送时自动转成显式调用")}</div>
         </div>
