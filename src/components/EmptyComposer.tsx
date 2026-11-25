@@ -10,6 +10,8 @@ import { unwrapSoftBreaks, htmlHasBlocks } from "../lib/unwrap";
 import { HomeInfoPanel } from "./InfoPanel";
 import { useTranslation } from "react-i18next";
 import { btnPress } from "../lib/utils";
+import { extNote, skillDescs } from "../extensions";
+import { expandSkillTags } from "./Composer";
 
 interface Img { media_type: string; data: string }
 const ZWSP = "​";
@@ -47,7 +49,7 @@ const draft: { cwd: string; html: string; imgs: Map<string, Img>; idc: number } 
 
 // 空态(未打开任何会话)时,主区底部的快捷输入框:发消息即建会话。
 // 输入区是 contentEditable —— 粘贴的图片以内联 chip 插在光标处、和文本混排,发送时拆成 image/text 块(与会话输入框一致)。
-// 也支持 /(内置命令补全)、@(选项目文件)、#(skill —— 首页无会话拿不到列表,只提示建会话后可用)。
+// 也支持 /(内置命令补全)、@(选项目文件)、#(skill:没有会话上报,直接读磁盘上已启用的)。
 export function EmptyComposer() {
   const { t } = useTranslation();
   const { state, startSessionWithMessage, requestHomeModels, setHomeModel, restoreSession } = useStore();
@@ -68,6 +70,9 @@ export function EmptyComposer() {
   const [mIdx, setMIdx] = useState(0);
   const mDismiss = useRef(false);
   const [skillTok, setSkillTok] = useState<{ query: string } | null>(null);
+  const [sIdx, setSIdx] = useState(0);
+  const [sDesc, setSDesc] = useState<Record<string, string>>({});
+  const [sDisk, setSDisk] = useState<string[]>([]);
   const modelMenuRef = useRef<HTMLDivElement>(null);
   const histRef = useRef<HTMLSpanElement>(null);
   const edRef = useRef<HTMLDivElement>(null);
@@ -187,6 +192,20 @@ export function EmptyComposer() {
   }, [mention, mQuery, mDir, mEntries, mAll]);
   useEffect(() => { setMIdx(0); }, [mQuery, mDir]);
 
+  // # skill:首页没会话,init 清单拿不到;和会话输入框同一份磁盘来源(用户级 + 插件 + 所选项目)
+  const sQuery = skillTok?.query ?? "";
+  useEffect(() => { if (skillTok) skillDescs(cwd).then((d) => { setSDesc(d.desc); setSDisk(d.on); }); }, [!!skillTok, cwd]); // eslint-disable-line react-hooks/exhaustive-deps
+  const sItems = useMemo(() => {
+    if (!sQuery) return sDisk;
+    const q = sQuery.toLowerCase();
+    return sDisk.filter((n) => n.toLowerCase().includes(q))
+      .sort((a, b) => (+!a.toLowerCase().startsWith(q)) - (+!b.toLowerCase().startsWith(q)) || a.localeCompare(b));
+  }, [sDisk, sQuery]);
+  useEffect(() => { setSIdx(0); }, [sQuery]);
+  const selItemRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { selItemRef.current?.scrollIntoView({ block: "nearest" }); }, [sIdx]);
+  function pickSkill(name: string) { edRef.current?.focus(); replaceToken("#", `#${name} `); }
+
   const insertChip = (img: Img) => {
     const ed = edRef.current; if (!ed) return;
     const id = String(idc.current++);
@@ -275,7 +294,7 @@ export function EmptyComposer() {
     });
     walk(ed); flush();
     if (blocks.length === 0) return;
-    startSessionWithMessage(cwd, blocks); // cwd 为空 = 闲聊会话
+    startSessionWithMessage(cwd, expandSkillTags(blocks, sDisk)); // cwd 为空 = 闲聊会话
     // 发出去了才清草稿正文;目录这里不清 —— 下次挂载时那个目录已经有会话了,上面那条会把它摘掉
     ed.innerHTML = ""; imgData.current.clear(); draft.html = "";
     setHasContent(false); setText(""); setImgCount(0); setPreview(null);
@@ -295,8 +314,15 @@ export function EmptyComposer() {
         if (e.key === "Tab") { e.preventDefault(); pickMention(mItems[mIdx % n], false); return; }
       }
     }
-    // # 提示菜单:esc 关闭(无 skill 可选,不拦其他键)
-    if (skillTok && e.key === "Escape") { e.preventDefault(); setSkillTok(null); return; }
+    if (skillTok) {
+      if (e.key === "Escape") { e.preventDefault(); setSkillTok(null); return; }
+      if (sItems.length) {
+        const n = sItems.length;
+        if (e.key === "ArrowDown") { e.preventDefault(); setSIdx((i) => (i + 1) % n); return; }
+        if (e.key === "ArrowUp") { e.preventDefault(); setSIdx((i) => (i - 1 + n) % n); return; }
+        if ((e.key === "Enter" && !e.shiftKey) || e.key === "Tab") { e.preventDefault(); pickSkill(sItems[sIdx % n]); return; }
+      }
+    }
     // / 命令面板:首页只补全,不执行(会话控制命令要建会话后才有意义)
     if (paletteOpen && filtered.length) {
       if (e.key === "ArrowDown") { e.preventDefault(); setPalIdx((i) => (i + 1) % filtered.length); return; }
@@ -418,14 +444,25 @@ export function EmptyComposer() {
           <div className="palette-hint">{t("↑↓ 选择 · ⏎")} {mQuery ? t("插入(文件夹则进入)") : t("打开文件夹/选择文件")} {t(" · Tab 直接插入路径 · esc 关闭")}</div>
         </div>
       )}
-      {/* # skill:首页无会话拿不到列表,只提示 */}
       {skillTok && (
         <div className="palette">
-          <div className="palette-head"><Sparkles size={13} /> Skills</div>
-          <div className="palette-scroll">
-            <div className="palette-item muted">{t("建会话后可用(skill 列表由会话上报)")}</div>
+          <div className="palette-head">
+            <Sparkles size={13} /> Skills{sQuery ? <> · {t("过滤")} <b>{sQuery}</b></> : null} · {sItems.length} {t("项")}
           </div>
-          <div className="palette-hint">{t("esc 关闭")}</div>
+          <div className="palette-scroll">
+            {sItems.map((n, i) => (
+              <div key={n} ref={i === sIdx ? selItemRef : undefined}
+                className={`palette-item mention-item ${i === sIdx ? "sel" : ""}`}
+                onMouseEnter={() => setSIdx(i)}
+                onMouseDown={(ev) => { ev.preventDefault(); pickSkill(n); }}>
+                <span className="mention-ico"><Sparkles size={14} /></span>
+                <b>{n}</b>
+                {extNote(n, sDesc[n]) && <span className="muted skill-desc" title={extNote(n, sDesc[n])}>{extNote(n, sDesc[n])}</span>}
+              </div>
+            ))}
+            {!sItems.length && <div className="palette-item muted">{t("没有匹配的 skill")}</div>}
+          </div>
+          <div className="palette-hint">{t("↑↓ 选择 · ⏎/Tab 插入 · esc 关闭 · 发送时自动转成显式调用")}</div>
         </div>
       )}
 
