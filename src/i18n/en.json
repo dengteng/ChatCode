@@ -797,7 +797,7 @@
   "点本地分支标签切换、右键看操作 · 琥珀点=还没推到 {{repo}}": "Click a local branch tag to switch, right-click for actions · amber dot = not yet pushed to {{repo}}",
   "点本地分支标签切换、右键看操作 · 琥珀点=未推送": "Click a local branch tag to switch, right-click for actions · amber dot = unpushed",
   " · 点击切换到它,右键查看操作": " · click to switch to it, right-click for actions",
-  "暂无远程仓库": "No remotes configured",
+  "关联远程仓库": "Link remote repository",
   "{{r}} · 上游,裸 git push 去这里": "{{r}} · upstream — a bare git push goes here",
   "{{r}} · 同名远程分支,不是上游:裸 git push 不会推到这里": "{{r}} · same-named remote branch, not the upstream: a bare git push will not reach it",
   "{{r}} · remote.{{remote}}.push 配的映射,git push {{remote}} 去这里": "{{r}} · mapped by remote.{{remote}}.push — git push {{remote}} goes here",

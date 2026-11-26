@@ -2171,7 +2171,7 @@ svg.lucide { vertical-align: -0.15em; flex-shrink: 0; }
 /* 和标题同一行、钉在容器右边(容器是 stretch 的,所以就是抽屉最右) */
 .brz-remote-op { position: absolute; right: 0; top: -1px; display: inline-flex; align-items: center; padding: 2px; border-radius: 4px; color: var(--muted); }
 .brz-remote-op:hover { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
-.brz-remote-empty { margin: 2px 0 0; }
+.brz-remote-empty { margin: 4px 0 0; }
 /* 仓库 tab:扇出的落点。选中的那个填 accent —— 它同时是下面拓扑图的过滤器,得一眼看出在看谁。
    一排两段:tab 组从容器左边起排 + 右「新建」虚线框(宽 --side-w),
    宽度和 JS 里的 SIDE_W 是同一个数,改一处得改两处 —— 扇出的 x 是纯算的,算错就整排错位。

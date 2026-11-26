@@ -171,7 +171,7 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
     setConfirm(null); setPrompt(null);
     setMenu({ ref: name, remote: false, kind: "repo", x: e.clientX, y: e.clientY });
   };
-  const newRemote = () => { setConfirm(null); setMenu(null); setPrompt({ kind: "remoteadd", ref: "", val: "", val2: "" }); };
+  const newRemote = () => { setConfirm(null); setMenu(null); setPrompt({ kind: "remoteadd", ref: "", val: git?.remotes?.length ? "" : "origin", val2: "" }); };
 
   const submitPrompt = () => {
     if (!prompt) return;
@@ -329,7 +329,7 @@ export function BranchesTab({ session, onCommit, committing }: { session: Sessio
             <BranchSpine local={git.local} remote={git.remote} remoteSha={git.remoteSha} remotes={git.remotes} pushSpecs={git.pushSpecs}
               current={current} focus={focusName} repo={graphRepo} dirty={dirty} picking={compareFrom}
               onChip={onChip} onFocus={setFocus} onRepo={setRepo} onRun={run}
-              onRepoMenu={onRepoMenu}
+              onRepoMenu={onRepoMenu} onAddRemote={newRemote}
               pushing={pushing} pushFlow={pushFlow} pullFlow={pullFlow}
               onNew={(target) => { setConfirm(null); setMenu(null); setPrompt({ kind: "newbranch", target, ref: focusName || "HEAD", val: "" }); }}
               onPush={(cmd) => { if (pushing) return; setPushing(true); runTerminal(session.id, cmd); }}
@@ -437,12 +437,12 @@ const TAB_W = 118, TAB_GAP = 10;
 const SIDE_W = 46;
 const FORK_Y = 34, DROP_H = 40, FAN_H = FORK_Y + DROP_H; // 主干高 / 分叉后下落段高
 const TAIL = 26; // 传输光点的尾迹长度(px,svg 用户坐标)
-function BranchSpine({ local, remote, remoteSha, remotes, pushSpecs, current, focus, repo, dirty, picking, onChip, onFocus, onRepo, onRun, onRepoMenu, pushing, pushFlow, pullFlow, onPush, onNew, urlLine, onStem }:
+function BranchSpine({ local, remote, remoteSha, remotes, pushSpecs, current, focus, repo, dirty, picking, onChip, onFocus, onRepo, onRun, onRepoMenu, pushing, pushFlow, pullFlow, onPush, onNew, onAddRemote, urlLine, onStem }:
   { local: GitBranch[]; remote: string[]; remoteSha?: Record<string, string>; remotes: string[]; pushSpecs?: Record<string, string[]>; current: string; focus: string; repo: string | null; dirty: boolean;
     picking: string | null; onChip: (ref: string, remote: boolean, e: React.MouseEvent) => void; onFocus: (name: string) => void; onRepo: (name: string) => void;
     onRun: (cmd: string) => void; onRepoMenu: (name: string, e: React.MouseEvent) => void;
     pushing: boolean; pushFlow: boolean; pullFlow: boolean; onPush: (cmd: string) => void;
-    onNew: (target: "local" | "remote") => void; urlLine: React.ReactNode; onStem: (dx: number) => void }) {
+    onNew: (target: "local" | "remote") => void; onAddRemote: () => void; urlLine: React.ReactNode; onStem: (dx: number) => void }) {
   const { t } = useTranslation();
   // 这次 push 点的是哪几个远端。只喂光束用,不进全局 —— 推完 pushFlow 一落就没人读了。
   const [beamTo, setBeamTo] = useState<string[] | null>(null);
@@ -654,7 +654,11 @@ function BranchSpine({ local, remote, remoteSha, remotes, pushSpecs, current, fo
         {/* 全局 fetch 钉在抽屉最右、和标题同一行:它作用于所有远端,不属于居中那排 tab 里的任何一个。
             「新建远端」不在这里 —— 见本地分支右键菜单(那里一个远端都没有时也还在)。 */}
         <button className="ghost brz-remote-op" title={t("拉取全部远端信息（git fetch --all --prune）")} {...btnPress(() => onRun("git fetch --all --prune"))}><RotateCw size={11} /></button>
-        {!lanes.length ? <div className="muted brz-empty brz-remote-empty">{t("暂无远程仓库")}</div> : (
+        {!lanes.length ? (
+          <div className="brz-remote-empty">
+            <button className="brz-new inline" {...btnPress(onAddRemote)}><Plus size={12} /><span>{t("关联远程仓库")}</span></button>
+          </div>
+        ) : (
         <div className="brz-tabs" style={{ width: rowW, gap: TAB_GAP, "--side-w": `${SIDE_W}px` } as React.CSSProperties}>
           <div className="brz-tabrow" style={{ gap: TAB_GAP }}>
           {lanes.map((l) => (
