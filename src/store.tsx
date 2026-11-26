@@ -146,8 +146,8 @@ type Action =
   | { type: "terminal_start"; id: string; command: string; cwd: string } // ! 命令乐观回显
   | { type: "terminal_chunk"; id: string; command: string; text: string } // 跑着时的增量输出
   | { type: "resolve_terminal"; id: string; command: string; cwd: string; cwdChanged: boolean; output: string; exitCode: number } // 结果回填
-  | { type: "compact_start"; id: string; auto?: boolean }  // 开始压缩上下文
-  | { type: "compact_finish"; id: string; patch: Partial<Extract<TimelineItem, { kind: "compact" }>> } // 收尾并回填 token 数
+  | { type: "compact_start"; id: string; auto?: boolean; ts?: number }  // 开始压缩上下文;ts:回放时用日志时间
+  | { type: "compact_finish"; id: string; ts?: number; patch: Partial<Extract<TimelineItem, { kind: "compact" }>> } // 收尾并回填 token 数
   | { type: "compact_settle"; id: string }                 // 兜底:没等到结束信号就把进度条停下
   | { type: "enqueue_pending"; id: string; item: import("./types").PendingMsg } // 待发入队
   | { type: "remove_pending"; id: string; pid: string }    // 移除某条待发(取消 / 已发出)
@@ -280,13 +280,13 @@ function reducer(s: State, a: Action): State {
     case "compact_start":
       return upd(a.id, (x) => {
         if (runningCompactAt(x.timeline) >= 0) return x; // 已在压缩中(乐观回显与 SDK status 各来一次)
-        return { ...x, timeline: [...x.timeline, { kind: "compact", running: true, auto: a.auto, ts: Date.now() }] };
+        return { ...x, timeline: [...x.timeline, { kind: "compact", running: true, auto: a.auto, ts: a.ts ?? Date.now() }] };
       });
     // 收尾:压缩中的那条就地回填;若没有(比如自动压缩没经过 status),补一条已完成的
     case "compact_finish":
       return upd(a.id, (x) => {
         const i = runningCompactAt(x.timeline);
-        if (i < 0) return { ...x, timeline: [...x.timeline, { kind: "compact", running: false, ts: Date.now(), ...a.patch }] };
+        if (i < 0) return { ...x, timeline: [...x.timeline, { kind: "compact", running: false, ts: a.ts ?? Date.now(), ...a.patch }] };
         const tl = [...x.timeline];
         tl[i] = { ...tl[i], running: false, ...a.patch } as TimelineItem;
         // 真压成了(有 preTokens)→ 解除重发闩锁,下次再被并轮还能重发一次
@@ -574,13 +574,15 @@ function handleSdkMessage(dispatch: (a: Action) => void, id: string, msg: any, l
   // 注意 status(compact_result:"success") 早于 compact_boundary 到达 —— 不能在它上面收尾,
   // 否则 boundary 带来的 token 数就没有归属,会另起一条空的压缩记录。
   if (msg.type === "system" && msg.subtype === "status") {
-    if (msg.status === "compacting") dispatch({ type: "compact_start", id });
-    else if (msg.compact_result === "failed") dispatch({ type: "compact_finish", id, patch: { error: msg.compact_error || i18n.t("压缩失败") } });
+    // ts 用这条消息的时间(nextTs):Date.now() 在回放时是「现在」,压缩卡片夹在旧历史中间,
+    // 搜索跳转按 ts 找回合时遇到它就提前停,落点错到压缩点之前
+    if (msg.status === "compacting") dispatch({ type: "compact_start", id, ts });
+    else if (msg.compact_result === "failed") dispatch({ type: "compact_finish", id, ts, patch: { error: msg.compact_error || i18n.t("压缩失败") } });
     return;
   }
   if (msg.type === "system" && msg.subtype === "compact_boundary") {
     const md = msg.compact_metadata ?? {};
-    dispatch({ type: "compact_finish", id, patch: {
+    dispatch({ type: "compact_finish", id, ts, patch: {
       auto: md.trigger === "auto",
       preTokens: md.pre_tokens, postTokens: md.post_tokens, durationMs: md.duration_ms,
     } });
