@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { rawHtml, isImg, dataUrl } from "../lib/mdhtml";
+import { rehypeProsePaths } from "../lib/prosepath";
 import { invoke } from "@tauri-apps/api/core";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { openPath, openUrl, revealPath } from "../native";
@@ -96,6 +97,12 @@ function shouldLink(raw: string, isUrl: boolean): boolean {
   const ext = raw.split(".").pop()?.toLowerCase() || "";
   return FILE_EXT.has(ext) || WEB_TLD.test("." + ext); // 裸名:扩展名须是已知文件类型或域名后缀
 }
+
+// 回复正文(没包反引号)里的路径:绝对 / ~ 开头的照 shouldLink;相对路径必须带已知扩展名,
+// 否则 TCP/IP、输入/输出 这类斜杠词会被当成文件(切分规则见 lib/prosepath)。
+const proseOk = (raw: string) => /^~?\//.test(raw) ? shouldLink(raw, false) : FILE_EXT.has(raw.split(".").pop()!.toLowerCase());
+// 模块级常量:身份稳定,react-markdown 不会因为插件数组换了引用而整树重跑
+const mdRehype = [...rawHtml, rehypeProsePaths(proseOk)];
 
 // 把对话里出现的路径解析成绝对路径,喂给内置编辑器(read_file/write_file 只认绝对路径,不展开 ~/不拼 cwd)。
 // 绝对路径原样;~ / ~/x 展开 HOME;其余相对路径拼到会话 cwd 上。
@@ -1608,7 +1615,7 @@ const AgentTurnCard = memo(function AgentTurnCard({ items, running, showFull, si
       {hasBody && (
         <div className="agent-turn-full md agent-copy">
           {segments.map((s, i) => s.kind === "text"
-            ? <Markdown key={i} remarkPlugins={[remarkGfm]} rehypePlugins={rawHtml} components={md}>{s.text}</Markdown>
+            ? <Markdown key={i} remarkPlugins={[remarkGfm]} rehypePlugins={mdRehype} components={md}>{s.text}</Markdown>
             : <TurnChoice key={i} answer={s.answer} />)}
         </div>
       )}
@@ -1846,7 +1853,7 @@ function MemoryRefs({ memories, kind, cwd }: { memories: MemRef[]; kind: "ref" |
                     </div>
                   ))}
                   {m.body
-                    ? <div className="mem-ref-body md"><Markdown remarkPlugins={[remarkGfm]} rehypePlugins={rawHtml} components={md}>{m.body}</Markdown></div>
+                    ? <div className="mem-ref-body md"><Markdown remarkPlugins={[remarkGfm]} rehypePlugins={mdRehype} components={md}>{m.body}</Markdown></div>
                     : !m.edits.length && <div className="mem-ref-none">{t("这条本轮被改写过，正文到记忆中心看")}</div>}
                 </article>
               ))}
@@ -2141,7 +2148,7 @@ function Item({ item, cwd, onPermission, onAgentClick, agentLabel }: { item: Tim
           <div className="line-body md agent-copy">
             {item.phase === "progress" && <div className="agent-phase">{t("执行说明")}</div>}
             {item.phase !== "progress" && <div className="agent-phase">{agentLabel || t("回复")}</div>}
-            <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={rawHtml} components={md}>{item.text || (item.streaming ? "▍" : "")}</Markdown>
+            <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={mdRehype} components={md}>{item.text || (item.streaming ? "▍" : "")}</Markdown>
             {item.streaming && <span className="caret">▍</span>}
           </div>
           {item.tokensOut !== undefined && <span className="tok-tag" title={t("本条回复输出 token")}><ArrowDown size={11} />{fmtTok(item.tokensOut)}</span>}
@@ -2322,7 +2329,7 @@ function PlanCard({ item, cwd, onPermission }: {
   const [note, setNote] = useState("");
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => { if (!item.decision) ref.current?.focus(); }, [item.decision]);
-  const plan = <div className="plan-body md"><Markdown remarkPlugins={[remarkGfm]} rehypePlugins={rawHtml} components={md}>{item.input.plan}</Markdown></div>;
+  const plan = <div className="plan-body md"><Markdown remarkPlugins={[remarkGfm]} rehypePlugins={mdRehype} components={md}>{item.input.plan}</Markdown></div>;
   if (item.decision) {
     return (
       <div className="perm-card plan-card">
